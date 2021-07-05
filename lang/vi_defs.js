@@ -1072,6 +1072,13 @@ var g_defs = {
       }
     ]
   },
+  'tủ': {
+    'verb': [
+      {
+        'definition': 'wardrobe; cupboard; sideboard'
+      }
+    ]
+  },
   'soi mói': {
     'verb': [
       {
