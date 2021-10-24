@@ -11,9 +11,9 @@ REM Move files to temp directory to search & replace
 xcopy /iy src %temp%\vietboard\src
 REM Comment out debugging stuff; space required before "//" to work around this bug:
 REM https://github.com/lionello/fart-it/issues/9
-fart %temp%\vietboard\src\engine.js "DEBUG = true" "DEBUG = false"
-fart %temp%\vietboard\src\*.js "if (DEBUG" " //if (DEBUG"
-fart %temp%\vietboard\src\*.js "console.log" " //console.log"
+fart.exe %temp%\vietboard\src\engine.js "DEBUG = true" "DEBUG = false"
+fart.exe %temp%\vietboard\src\*.js "if (DEBUG" " //if (DEBUG"
+fart.exe %temp%\vietboard\src\*.js "console.log" " //console.log"
 REM Build (minify and concatenate)
 AjaxMin.exe -clobber css\style.css -out %target%\css\styles.min.css
 AjaxMin.exe -inline:no -clobber -term lang\vi_wordlist.js lang\vi_defs.js lang\vi_letters.js -out %target%\js\lang.min.js
@@ -24,17 +24,17 @@ xcopy /y lang\en_translate.js %target%\lang\
 xcopy /y lang\vi_translate.js %target%\lang\
 xcopy /iy pics %target%\pics
 xcopy /iy sounds %target%\sounds
-fart %target%\index.html style.css styles.min.css?v=%timestamp%
-fart %target%\index.html lang/vi_wordlist.js js/lang.min.js?v=%timestamp%
-fart %target%\index.html src/redipsdrag.js js/app.min.js?v=%timestamp%
-fart --c-style --remove %target%\index.html "<script src=\"lang/vi_defs.js\"></script>\n"
-fart --c-style --remove %target%\index.html "<script src=\"lang/vi_letters.js\"></script>\n"
-fart --c-style --remove %target%\index.html "<script src=\"lang/vi_translate.js\"></script>\n"
-fart --c-style --remove %target%\index.html "<script src=\"src/bonuses.js\"></script>\n"
-fart --c-style --remove %target%\index.html "<script src=\"src/ui.js\"></script>\n"
-fart --c-style --remove %target%\index.html "<script src=\"src/engine.js\"></script>\n"
-fart --c-style --remove %target%\index.html "<script src=\"src/events.js\"></script>\n"
-fart --c-style --remove %target%\index.html "<script src=\"src/changelog.js\"></script>\n"
+fart.exe %target%\index.html style.css styles.min.css?v=%timestamp%
+fart.exe %target%\index.html lang/vi_wordlist.js js/lang.min.js?v=%timestamp%
+fart.exe %target%\index.html src/redipsdrag.js js/app.min.js?v=%timestamp%
+fart.exe --c-style --remove %target%\index.html "<script src=\"lang/vi_defs.js\"></script>\n"
+fart.exe --c-style --remove %target%\index.html "<script src=\"lang/vi_letters.js\"></script>\n"
+fart.exe --c-style --remove %target%\index.html "<script src=\"lang/vi_translate.js\"></script>\n"
+fart.exe --c-style --remove %target%\index.html "<script src=\"src/bonuses.js\"></script>\n"
+fart.exe --c-style --remove %target%\index.html "<script src=\"src/ui.js\"></script>\n"
+fart.exe --c-style --remove %target%\index.html "<script src=\"src/engine.js\"></script>\n"
+fart.exe --c-style --remove %target%\index.html "<script src=\"src/events.js\"></script>\n"
+fart.exe --c-style --remove %target%\index.html "<script src=\"src/changelog.js\"></script>\n"
 REM Clean up
 rmdir /s /q %temp%\vietboard
 REM End local scope

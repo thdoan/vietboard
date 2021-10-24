@@ -1,0 +1,15 @@
+{
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {
+    "search.exclude": {
+      "**/*.bat": true,
+      "**/pics": true,
+      "**/redipsdrag.js": true,
+      "**/sounds": true
+    }
+  }
+}
