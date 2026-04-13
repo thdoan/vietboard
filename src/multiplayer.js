@@ -49,8 +49,6 @@ if (!g_myName) {
 
   generateNickname();
 }
-    .catch(e => { g_myName = 'Player_' + Math.floor(Math.random() * 10000); });
-}
 let g_channel = null; // Either lobby or game channel
 
 // Timer state
