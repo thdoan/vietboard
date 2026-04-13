@@ -13,7 +13,18 @@ let g_gameId = null;
 let g_isMyTurn = false;
 let g_opponentId = null;
 let g_opponentName = null;
-let g_myName = localStorage.getItem('vietboard_player_name') || 'Player_' + Math.floor(Math.random() * 10000);
+let g_myName = localStorage.getItem('vietboard_player_name');
+if (!g_myName) {
+  fetch('https://randomuser.me/api/?inc=login')
+    .then(r => r.json())
+    .then(d => {
+        g_myName = d.results[0].login.username;
+        localStorage.setItem('vietboard_player_name', g_myName);
+        var nameInput = document.getElementById('playerNameInput');
+        if (nameInput) nameInput.value = g_myName;
+    })
+    .catch(e => { g_myName = 'Player_' + Math.floor(Math.random() * 10000); });
+}
 let g_channel = null; // Either lobby or game channel
 
 // Timer state
