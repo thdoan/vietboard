@@ -422,13 +422,13 @@ function RedipsUI() {
     self.bx = bx;
     self.by = by;
 
-    g_cache['html'].h1 = '<h1><img src="pics/logo.svg" alt="Vietboard" onload="spinColors(this)"></h1><div style="text-align:center;margin-top:10px;"><button class="button" onclick="window.showLobby()">' + t('LOBBY') + '</button></div>' + g_cache['html'].miscBtns;
+    g_cache['html'].h1 = '<h1><img src="pics/logo.svg" alt="Vietboard" onload="spinColors(this)"></h1><div style="text-align:center; margin-bottom:10px;"><button class="button" onclick="window.showLobby()">&nbsp;' + t('LOBBY') + '&nbsp;</button></div>' + g_cache['html'].miscBtns;
 
     // Scoreboard
     html = '<table id="scoreboard"><tr>' +
       '<td id="score-player">0</td>' +
       '<td class="spacer"></td>' +
-      '<td class="logo"><img src="pics/logo.svg" alt="Vietboard" onload="spinColors(this)"><br><small id="status" onclick="startMarquee(this)">' + t('Tap on score for game info') + '</small></td>' +
+      '<td class="logo"><img src="pics/logo.svg" alt="Vietboard" onload="spinColors(this)"><br><div style="margin: 5px 0;"><button class="button" onclick="window.showLobby()">&nbsp;' + t('LOBBY') + '&nbsp;</button></div><small id="status" onclick="startMarquee(this)">' + t('Tap on score for game info') + '</small></td>' +
       '<td class="spacer"></td>' +
       '<td id="score-opponent">0</td></tr></table>';
     html += '<div id="drag">';
