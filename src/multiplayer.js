@@ -15,14 +15,40 @@ let g_opponentId = null;
 let g_opponentName = null;
 let g_myName = localStorage.getItem('vietboard_player_name');
 if (!g_myName) {
-  fetch('https://randomuser.me/api/?inc=login')
-    .then(r => r.json())
-    .then(d => {
-        g_myName = d.results[0].login.username;
-        localStorage.setItem('vietboard_player_name', g_myName);
-        var nameInput = document.getElementById('playerNameInput');
-        if (nameInput) nameInput.value = g_myName;
-    })
+  g_myName = 'Generating...'; // Set temporary state
+
+  // Custom Google Apps Script Random Username Generator
+  async function generateNickname() {
+    // Basic randInt implementation since we might not have access to the UI one directly if it's not global yet, but engine.js has randInt? Wait, randInt is in ui.js which is loaded later.
+    // We will just use Math.random here.
+    const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+    const sRandInt = (+new Date() + '').slice(-randInt(2, 4));
+    let response = Object.create(null);
+    let sNickname;
+
+    try {
+      response = await fetch('https://script.google.com/macros/s/AKfycbzc_I5SM9gf6CRONek7lxF7-B4XFD8o1Y7P_50TdIKMSZMIq0gToAt0L_dQ44ufbshk1A/exec');
+    } catch (err) {
+      // Suppress error
+    }
+
+    if (response.ok) {
+      sNickname = await response.text() + sRandInt;
+    } else { // Fallback
+      console.warn('Failed to generate nickname.', response.status || '', '\nUsing fallback method...');
+      sNickname = 'Player_' + sRandInt;
+    }
+
+    g_myName = sNickname;
+    localStorage.setItem('vietboard_player_name', g_myName);
+
+    // Update input field if it's already rendered
+    var nameInput = document.getElementById('playerNameInput');
+    if (nameInput) nameInput.value = g_myName;
+  }
+
+  generateNickname();
+}
     .catch(e => { g_myName = 'Player_' + Math.floor(Math.random() * 10000); });
 }
 let g_channel = null; // Either lobby or game channel
