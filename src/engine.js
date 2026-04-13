@@ -97,6 +97,7 @@ var gErrPrefix = function() {
 
 //------------------------------------------------------------------------------
 function init(iddiv) {
+  if(typeof g_isMultiplayer !== 'undefined' && !window.location.hash.includes('game_')) g_isMultiplayer = false;
   // Reset
   g_board = [];
   g_boardpoints = [];
@@ -1083,6 +1084,11 @@ function onPlayerClear() {
 
 //------------------------------------------------------------------------------
 function onPlayerMove() {
+  if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
+    onMultiplayerMove();
+    return;
+  }
+
   //console.log('onPlayerMove');
   var passed = self.passed;
   if (passed) {
@@ -1337,6 +1343,32 @@ function onPlayerSwap() {
 
 //------------------------------------------------------------------------------
 function onPlayerSwapped(keep, swap) {
+  if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
+    if (swap.length === 0) {
+      g_bui.setPlayerRack(keep);
+      g_bui.makeTilesFixed();
+      return;
+    }
+    for (var i = 0; i < swap.length; ++i) g_letpool.push(swap.charAt(i));
+    shufflePool();
+    g_bui.setPlayerRack(takeLetters(keep));
+
+    var moveData = {
+      type: 'move',
+      passed: true,
+      swapped: true,
+      rackAfter: g_bui.getPlayerRack(),
+      letpool: g_letpool,
+      score: 0
+    };
+
+    g_isMyTurn = false;
+    updateTurnIndicator();
+    broadcastGameState(moveData);
+    saveMultiplayerSession();
+    return;
+  }
+
   //console.log('onPlayerSwapped', keep, swap);
   if (swap.length === 0) {
     g_bui.setPlayerRack(keep);
