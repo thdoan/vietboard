@@ -351,7 +351,7 @@ function RedipsUI() {
     var hr = '<tr class="ruler"><td colspan="2"></td></tr>';
 
     g_cache['html'].miscBtns =
-      '<button id="lobbyBtn" class="button secondary" title="' + t('Lobby') + '" onclick="showLobby()"><img src="pics/lobby.svg" alt="' + t('Lobby') + '" onerror="this.src=\'pics/highscores.svg\'"></button>' +
+
       '<button id="highscores" class="button secondary" title="' + t('High Scores') + '" onclick="g_bui.showHighScores()"><img src="pics/highscores.svg" alt="' + t('High Scores') + '"></button>' +
       '<button id="restart" class="button secondary" title="' + t('Restart') + '" onclick="g_bui.restart();if(g_isMobile)hideGameInfo()"><img src="pics/restart.svg" alt="' + t('Restart') + '"></button>';
 
@@ -422,7 +422,7 @@ function RedipsUI() {
     self.bx = bx;
     self.by = by;
 
-    g_cache['html'].h1 = '<h1><img src="pics/logo.svg" alt="Vietboard" onload="spinColors(this)"></h1>' + g_cache['html'].miscBtns;
+    g_cache['html'].h1 = '<h1><img src="pics/logo.svg" alt="Vietboard" onload="spinColors(this)"></h1><div style="text-align:center;margin-top:10px;"><button class="button" onclick="window.showLobby()">' + t('LOBBY') + '</button></div>' + g_cache['html'].miscBtns;
 
     // Scoreboard
     html = '<table id="scoreboard"><tr>' +

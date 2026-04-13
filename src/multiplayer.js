@@ -5,7 +5,7 @@ const SUPABASE_URL = 'https://awolvbshyvcrsqwrbjxe.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_Oju2rh1kaNFcvlPfnssF7A_4YpvQKCH'; // Note: publishable key, safe for client-side
 
 // We will load the Supabase client via unpkg in index.html
-let supabase;
+window.supabaseClient = null;
 
 // Multiplayer state variables
 let g_isMultiplayer = false;
@@ -22,7 +22,7 @@ let g_idleSeconds = 0;
 
 function initSupabase() {
     if (window.supabase) {
-        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     } else {
         console.error('Supabase library not loaded.');
     }
@@ -39,7 +39,7 @@ window.addEventListener('load', function() {
 // LOBBY & MATCHMAKING
 // -----------------------------------------------------------------------------
 
-function showLobby() {
+window.showLobby = function() {
   // Save name
   localStorage.setItem('vietboard_player_name', g_myName);
 
@@ -58,7 +58,7 @@ function showLobby() {
   joinLobbyChannel();
 }
 
-function updatePlayerName(newName) {
+window.updatePlayerName = function(newName) {
   g_myName = newName || 'Player_' + Math.floor(Math.random() * 10000);
   localStorage.setItem('vietboard_player_name', g_myName);
   // Rejoin to update presence name
@@ -72,7 +72,7 @@ function joinLobbyChannel() {
 
   const myUserId = 'user_' + Math.random().toString(36).substr(2, 9);
 
-  g_channel = supabase.channel('lobby', {
+  g_channel = window.supabaseClient.channel('lobby', {
     config: {
       presence: {
         key: myUserId,
@@ -123,14 +123,14 @@ function renderLobbyPlayers(state) {
   container.innerHTML = html;
 }
 
-function leaveLobby() {
+window.leaveLobby = function() {
   if (g_channel) {
     g_channel.unsubscribe();
     g_channel = null;
   }
 }
 
-function invitePlayer(opponentId, opponentName) {
+window.invitePlayer = function(opponentId, opponentName) {
   // To keep it simple, we just start a game instantly using a deterministic game ID based on the two IDs.
   // Actually, random UUID is safer. We will broadcast a "start_game" message to the lobby.
   const newGameId = 'game_' + Math.random().toString(36).substr(2, 9);
@@ -173,7 +173,7 @@ function startMultiplayerGame(gameId, opponentName, isHost) {
 }
 
 function joinGameChannel(gameId, isHost) {
-  g_channel = supabase.channel('game:' + gameId, {
+  g_channel = window.supabaseClient.channel('game:' + gameId, {
     config: {
       presence: {
         key: g_myName,

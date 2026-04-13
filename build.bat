@@ -17,7 +17,7 @@ fart.exe %temp%\vietboard\src\*.js "console.log" " //console.log"
 REM Build (minify and concatenate)
 AjaxMin.exe -clobber css\style.css -out %target%\css\styles.min.css
 AjaxMin.exe -inline:no -clobber -term lang\vi_wordlist.js lang\vi_defs.js lang\vi_letters.js -out %target%\js\lang.min.js
-AjaxMin.exe -inline:no -clobber -ignore:JS1300 -term %temp%\vietboard\src\redipsdrag.js %temp%\vietboard\src\bonuses.js %temp%\vietboard\src\ui.js %temp%\vietboard\src\engine.js %temp%\vietboard\src\events.js %temp%\vietboard\src\changelog.js -out %target%\js\app.min.js
+AjaxMin.exe -inline:no -clobber -ignore:JS1300 -term %temp%\vietboard\src\multiplayer.js %temp%\vietboard\src\redipsdrag.js %temp%\vietboard\src\bonuses.js %temp%\vietboard\src\ui.js %temp%\vietboard\src\engine.js %temp%\vietboard\src\events.js %temp%\vietboard\src\changelog.js -out %target%\js\app.min.js
 REM Deploy
 copy /y index.html %target%
 xcopy /y lang\en_translate.js %target%\lang\
@@ -27,6 +27,7 @@ xcopy /iy sounds %target%\sounds
 fart.exe %target%\index.html style.css styles.min.css?v=%timestamp%
 fart.exe %target%\index.html lang/vi_wordlist.js js/lang.min.js?v=%timestamp%
 fart.exe %target%\index.html src/redipsdrag.js js/app.min.js?v=%timestamp%
+fart.exe --c-style --remove %target%\index.html "<script src=\"src/multiplayer.js\"></script>\n"
 fart.exe --c-style --remove %target%\index.html "<script src=\"lang/vi_defs.js\"></script>\n"
 fart.exe --c-style --remove %target%\index.html "<script src=\"lang/vi_letters.js\"></script>\n"
 fart.exe --c-style --remove %target%\index.html "<script src=\"lang/vi_translate.js\"></script>\n"
