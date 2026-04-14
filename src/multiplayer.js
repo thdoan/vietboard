@@ -79,12 +79,12 @@ window.showLobby = function() {
   localStorage.setItem('vietboard_player_name', g_myName);
 
   var html = '<div id="lobby" style="text-align:center;">';
-  html += '<h2>Multiplayer Lobby</h2>';
+  html += '<h2>' + t('Multiplayer Lobby') + '</h2>';
   html += '<div style="margin-bottom: 10px;">';
-  html += '<label>Your Name: </label>';
+  html += '<label>' + t('Your Name: ') + '</label>';
   html += '<input type="text" id="playerNameInput" value="' + g_myName + '" onchange="updatePlayerName(this.value)" />';
   html += '</div>';
-  html += '<p>Click a player to start a game:</p>';
+  html += '<p>' + t('Click a player to start a game:') + '</p>';
   html += '<div id="lobbyPlayers" style="min-height: 100px; border: 1px solid #ccc; padding: 10px; background: #fff;"><i>Loading...</i></div>';
   html += '</div>';
 
@@ -258,6 +258,7 @@ function initializeHostGame() {
       hostGoesFirst: hostGoesFirst
     });
     updateTurnIndicator();
+     updateGameInfoLabels();
   }, 100);
 }
 
@@ -280,6 +281,7 @@ function handleGameStateBroadcast(payload) {
     g_bui.setTilesLeft(g_letpool.length);
     g_isMyTurn = !payload.hostGoesFirst;
     updateTurnIndicator();
+     updateGameInfoLabels();
   }
 }
 
@@ -294,6 +296,17 @@ function updateTurnIndicator() {
   } else {
     playerDiv.style.border = 'none';
     oppDiv.style.border = '2px solid red';
+  }
+
+  const lobbyBtn = document.getElementById('lobbyBtn');
+  if (lobbyBtn) {
+    if (g_isMultiplayer && !g_board_empty) {
+      lobbyBtn.disabled = true;
+      lobbyBtn.title = t('Finish the current game before joining the lobby');
+    } else {
+      lobbyBtn.disabled = false;
+      lobbyBtn.title = t('Lobby');
+    }
   }
 
   // Show opponent name if multiplayer
@@ -379,6 +392,7 @@ function onMultiplayerMove() {
     board: newBoard,
     boardp: newBoardP,
     boardt: newBoardT,
+    rackBefore: g_bui.getPlayerRack(),
     rackAfter: g_bui.getPlayerRack(),
     letpool: g_letpool,
     boardEmpty: g_board_empty
@@ -386,6 +400,7 @@ function onMultiplayerMove() {
 
   g_isMyTurn = false;
   updateTurnIndicator();
+     updateGameInfoLabels();
   broadcastGameState(moveData);
 
   saveMultiplayerSession();
@@ -402,18 +417,65 @@ function handleMoveBroadcast(payload) {
        g_board_empty = payload.boardEmpty;
 
        // Force redraw of board
+
+       var diffWord = [];
        for (var y = 0; y < g_boardheight; ++y) {
          for (var x = 0; x < g_boardwidth; ++x) {
-            var cell = el('b' + y + '_' + x);
-            var char = g_board[y][x];
-            if (char !== ' ' && cell.innerHTML === '') {
-                var ltr = char === char.toLowerCase() ? '*' : char;
-                var html = '<div class="drag t2">' + ltr + '<sub>' + g_letscore[ltr] + '</sub></div>';
-                cell.innerHTML = html;
+            var charBefore = g_board[y][x];
+            var charAfter = payload.board[y][x];
+            if (charAfter !== ' ' && charBefore === ' ') {
+                var ltr = charAfter === charAfter.toLowerCase() ? '*' : charAfter;
+                diffWord.push([y, x, charAfter, g_letscore[ltr]]);
             }
          }
        }
-       g_bui.makeTilesFixed();
+
+       g_board = payload.board;
+       g_boardpoints = payload.boardp;
+       g_boardtypes = payload.boardt;
+       g_board_empty = payload.boardEmpty;
+
+       if (diffWord.length > 0) {
+           // We need to restore the opponent rack temporarily so placeOnBoard can steal tiles from it
+           g_bui.setOpponentRack(payload.rackBefore || '');
+
+           placeOnBoard(diffWord, function() {
+               g_bui.setOpponentRack(payload.rackAfter);
+               g_oscore += payload.score;
+               g_bui.setOpponentScore(payload.score, g_oscore);
+               g_letpool = payload.letpool;
+               g_bui.setTilesLeft(g_letpool.length);
+
+               var elStatus = el('status');
+               elStatus.innerHTML = t('Opponent') + ' ' + t('scored ') + payload.score;
+
+               g_isMyTurn = true;
+               updateTurnIndicator();
+
+               if (payload.rackAfter === '' && g_letpool.length === 0) {
+                 announceWinner();
+               }
+               saveMultiplayerSession();
+           });
+
+           // Skip the rest of the synchronous updates because they are handled in the callback
+           return;
+       } else {
+           for (var y = 0; y < g_boardheight; ++y) {
+             for (var x = 0; x < g_boardwidth; ++x) {
+                var cell = el('b' + y + '_' + x);
+                var char = g_board[y][x];
+                if (char !== ' ' && cell && cell.innerHTML === '') {
+                    var ltr = char === char.toLowerCase() ? '*' : char;
+                    var tClass = g_boardtypes[y][x] === 1 ? 't2' : 't1';
+                    var html = '<div class="drag ' + tClass + '">' + ltr + '<sub>' + g_letscore[ltr] + '</sub></div>';
+                    cell.innerHTML = html;
+                }
+             }
+           }
+           g_bui.makeTilesFixed();
+       }
+
     }
 
     g_oscore += payload.score;
@@ -429,6 +491,7 @@ function handleMoveBroadcast(payload) {
 
     g_isMyTurn = true;
     updateTurnIndicator();
+     updateGameInfoLabels();
 
     // Check if game over
     if (payload.rackAfter === '' && g_letpool.length === 0) {
@@ -459,82 +522,9 @@ function saveMultiplayerSession() {
   }
 }
 
-// Broadcast cursor / tile drag
-function hookRedipsDrag() {
-  if (!g_bui || !g_bui.rd) return;
+;
 
-  const originalMoved = g_bui.rd.myhandler_moved;
-  const originalDropped = g_bui.rd.myhandler_dropped;
 
-  g_bui.rd.myhandler_moved = function(obj) {
-    if (originalMoved) originalMoved(obj);
-
-    if (g_isMultiplayer && g_isMyTurn) {
-       // We don't send the real letter, just a face-down tile indicator.
-       broadcastGameState({
-         type: 'drag_start',
-         id: obj.id || 'tile'
-       });
-    }
-  };
-
-  g_bui.rd.myhandler_dropped = function(targetCell) {
-    if (originalDropped) originalDropped(targetCell);
-
-    if (g_isMultiplayer && g_isMyTurn) {
-       // Actually dropped isn't enough, we might want to sync the opponent's "face down" tile position
-       // so they see the tile move into a square.
-       var id = g_bui.rd.obj.id;
-       var r = targetCell.parentNode.rowIndex;
-       var c = targetCell.cellIndex;
-       var isBoard = targetCell.id.startsWith('b');
-
-       broadcastGameState({
-         type: 'drag_drop',
-         id: id,
-         isBoard: isBoard,
-         r: r,
-         c: c
-       });
-    }
-  };
-}
-
-// Add to handleGameStateBroadcast
-const originalHandleMoveBroadcast = handleGameStateBroadcast;
-handleGameStateBroadcast = function(payload) {
-  originalHandleMoveBroadcast(payload);
-
-  if (payload.type === 'drag_start') {
-    // Show a face down tile moving or flashing
-    var oppRack = document.getElementById('drag').querySelector('.opponent');
-    if (oppRack) oppRack.style.opacity = '0.5';
-  } else if (payload.type === 'drag_drop') {
-    var oppRack = document.getElementById('drag').querySelector('.opponent');
-    if (oppRack) oppRack.style.opacity = '1.0';
-
-    if (payload.isBoard) {
-       var cellId = 'b' + payload.r + '_' + payload.c;
-       var cell = document.getElementById(cellId);
-       if (cell && cell.innerHTML === '') {
-           // Show a temporary face down tile on the board
-           cell.innerHTML = '<div class="drag opponent-face-down" style="background:#555; width:100%; height:100%; border-radius:5px;"></div>';
-       }
-    }
-  } else if (payload.type === 'move') {
-    // Remove all face down temporary tiles before applying real move
-    var boardDiv = document.getElementById('board');
-    if (boardDiv) {
-       var tempTiles = boardDiv.querySelectorAll('.opponent-face-down');
-       tempTiles.forEach(t => t.remove());
-    }
-    handleMoveBroadcast(payload);
-  }
-};
-
-window.addEventListener('appReady', function() {
-   setTimeout(hookRedipsDrag, 500);
-});
 
 window.addEventListener('appReady', function() {
    // Check if we have a multiplayer session to resume
@@ -578,6 +568,7 @@ window.addEventListener('appReady', function() {
              }
              g_bui.makeTilesFixed();
              updateTurnIndicator();
+     updateGameInfoLabels();
 
              // Rejoin channel
              joinGameChannel(g_gameId, false);
@@ -646,6 +637,7 @@ handleGameStateBroadcast = function(payload) {
      }
      g_bui.makeTilesFixed();
      updateTurnIndicator();
+     updateGameInfoLabels();
      saveMultiplayerSession();
   }
 };
@@ -765,3 +757,17 @@ joinGameChannel = function(gameId, isHost) {
      g_opponentPresenceState = opponentFound;
   });
 };
+
+
+
+function updateGameInfoLabels() {
+  const lblLast = document.getElementById('label-loscore');
+  const lblTotal = document.getElementById('label-oscore');
+  if (g_isMultiplayer && g_opponentName) {
+    if (lblLast) lblLast.innerHTML = t('Opponent&rsquo;s last score:');
+    if (lblTotal) lblTotal.innerHTML = t('Opponent&rsquo;s total score:');
+  } else {
+    if (lblLast) lblLast.innerHTML = t('Computer&rsquo;s last score:');
+    if (lblTotal) lblTotal.innerHTML = t('Computer&rsquo;s total score:');
+  }
+}

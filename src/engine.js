@@ -161,9 +161,9 @@ function announceWinner() {
     html += '<td class="tile"><div class="drag t' + randInt(1, 2) + '">' + text[i] + '</div></td>';
   }
   html += '</tr></table><ul><li>';
-  html += t('You') + ': <strong>' + g_pscore + '</strong></li><li>' + t('Computer') + ': <strong>' + g_oscore + '</strong></li></ul>';
+  html += t('You') + ': <strong>' + g_pscore + '</strong></li><li>' + (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer ? t('Opponent') : t('Computer')) + ': <strong>' + g_oscore + '</strong></li></ul>';
   var msg = '<h3>' + t('It&rsquo;s a tie!');
-  if (g_oscore > g_pscore) msg = '<h3 class="opponent">' + t('Computer wins.');
+  if (g_oscore > g_pscore) msg = '<h3 class="opponent">' + (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer ? t('Opponent wins.') : t('Computer wins.'));
   else if (g_oscore < g_pscore) msg = '<h3 class="player">' + t('You win!');
   html += msg + '</h3>';
   g_bui.prompt(html, '<button class="button" onclick="hideModal();g_bui.restart()">' + t('Play Again') + '</button>', 'gameover wide');

@@ -399,8 +399,8 @@ function RedipsUI() {
       '<tr><td>' + t('Your last score:') + '</td><td id="lpscore">0</td></tr>' +
       '<tr class="highlight"><td>' + t('Your total score:') + '</td><td id="pscore">0</td></tr>' +
       hr +
-      '<tr><td>' + t('Computer&rsquo;s last score:') + '</td><td id="loscore">0</td></tr>' +
-      '<tr class="highlight"><td>' + t('Computer&rsquo;s total score:') + '</td><td id="oscore">0</td></tr>' +
+      '<tr><td><span id="label-loscore">' + t('Computer&rsquo;s last score:') + '</span></td><td id="loscore">0</td></tr>' +
+      '<tr class="highlight"><td><span id="label-oscore">' + t('Computer&rsquo;s total score:') + '</span></td><td id="oscore">0</td></tr>' +
       hr;
     if (DEBUG) html += '<tr><td>' + t('Tiles left:') + '</td><td id="tleft"></td></tr>' + hr;
     html +=
@@ -1161,16 +1161,14 @@ function RedipsUI() {
       self.prompt(html);
     } else {
       // If it doesn't exist, look it up online
-      getJsonp('https://m.vdict.com/mobile/dictjson?fromapp=1&word=' + encodeURIComponent(word) + '&dict=2', function() {
-        g_def = g_def.replace('href="#"', 'title="' + t('Listen to pronunciation') + '" onclick="el(\'audio\').play()"');
-        g_def = g_def.replace(' Suggestions:', '');
-        g_def = g_def.replace(/">(.+?) not found/, '"><strong>$1</strong> ' + t('has no definition or may be part of a compound word'));
-        self.prompt(g_def);
-        // GA
-        gtag('event', word, {
-          'event_category': 'Definition',
-          'event_label': g_def.indexOf('</strong> ' + t('not found')) < 0 ? 'Found' : 'Not Found'
-        });
+      // Use Laban dict in an iframe
+  var iframeHtml = '<iframe src="https://dict.laban.vn/find?type=1&query=' + encodeURIComponent(word) + '" width="100%" height="400" frameborder="0" style="border:none; background:#fff;"></iframe>';
+  self.prompt(iframeHtml, null, 'wide');
+
+  gtag('event', word, {
+    'event_category': 'Definition',
+    'event_label': 'Laban Dict iframe'
+  });
       });
     }
   };
