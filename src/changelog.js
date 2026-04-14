@@ -1,12 +1,12 @@
-const VER = '2.00';
+const VER = '3.00';
 
 function showWhatsNew() {
   g_bui.prompt(
     '<h3>What\'s New</h3>' +
     '<ul>' +
-    '<li>Added high scores table</li>' +
-    '<li>Fixed ability to drag opponent\'s tile</li>' +
-    '<li>Non-draggable tiles no longer have "move" cursor</li>' +
+    '<li>Added multiplayer!</li>' +
+    '<li>Updated button icons</li>' +
+    '<li>Fixed broken word lookup</li>' +
     '</ul>'
   );
 }
