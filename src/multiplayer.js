@@ -56,19 +56,16 @@ let g_idleTimer = null;
 let g_idleSeconds = 0;
 
 function initSupabase() {
-    if (window.supabase) {
-        window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    } else {
-        console.error('Supabase library not loaded.');
-    }
+  if (window.supabase) {
+    window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  } else {
+    console.error('Supabase library not loaded.');
+  }
 }
 
 // Call init once the script loads, assuming supabase-js is loaded first.
 // We will move this call or ensure script order in index.html.
-
-window.addEventListener('load', function() {
-  initSupabase();
-});
+window.addEventListener('load', initSupabase);
 
 // -----------------------------------------------------------------------------
 // LOBBY & MATCHMAKING
@@ -126,8 +123,8 @@ function joinLobbyChannel() {
     })
     .on('broadcast', { event: 'invite' }, (payload) => {
       if (payload.payload.to === myUserId) {
-         console.log('Received invite!', payload);
-         startMultiplayerGame(payload.payload.gameId, payload.payload.fromName, false);
+        console.log('Received invite!', payload);
+        startMultiplayerGame(payload.payload.gameId, payload.payload.fromName, false);
       }
     })
     .subscribe(async (status) => {
@@ -262,7 +259,7 @@ function initializeHostGame() {
       hostGoesFirst: hostGoesFirst
     });
     updateTurnIndicator();
-     updateGameInfoLabels();
+    updateGameInfoLabels();
   }, 100);
 }
 
@@ -285,24 +282,18 @@ function handleGameStateBroadcast(payload) {
     g_bui.setTilesLeft(g_letpool.length);
     g_isMyTurn = !payload.hostGoesFirst;
     updateTurnIndicator();
-     updateGameInfoLabels();
+    updateGameInfoLabels();
   }
 }
 
 function updateTurnIndicator() {
-  // Add a visual indicator in the UI
-  var playerDiv = document.getElementById('pscore').parentNode;
-  var oppDiv = document.getElementById('oscore').parentNode;
+  // Disable game buttons (Play, Clear, Swap, Pass) when opponent's turn
+  document.querySelectorAll('#drag .button').forEach((button) => {
+    button.disabled = !g_isMyTurn;
+  });
 
-  if (g_isMyTurn) {
-    playerDiv.style.border = '2px solid green';
-    oppDiv.style.border = 'none';
-  } else {
-    playerDiv.style.border = 'none';
-    oppDiv.style.border = '2px solid red';
-  }
-
-  const lobbyBtn = document.getElementById('lobbyBtn');
+  // Disable lobby when in multiplayer game, enable when not
+  const lobbyBtn = document.getElementById('lobby');
   if (lobbyBtn) {
     if (g_isMultiplayer && !g_board_empty) {
       lobbyBtn.disabled = true;
@@ -312,14 +303,7 @@ function updateTurnIndicator() {
       lobbyBtn.title = t('Lobby');
     }
   }
-
-  // Show opponent name if multiplayer
-  if (g_isMultiplayer && g_opponentName) {
-     var scoreOpponentName = document.querySelector('.score .score-opponent') || document.querySelector('.score-label-opponent');
-     if (scoreOpponentName) scoreOpponentName.textContent = g_opponentName;
-  }
 }
-
 
 // -----------------------------------------------------------------------------
 // GAMEPLAY SYNC
@@ -404,7 +388,7 @@ function onMultiplayerMove() {
 
   g_isMyTurn = false;
   updateTurnIndicator();
-     updateGameInfoLabels();
+  updateGameInfoLabels();
   broadcastGameState(moveData);
 
   saveMultiplayerSession();
@@ -414,71 +398,71 @@ function handleMoveBroadcast(payload) {
   if (payload.type === 'move') {
     // Apply opponent's move
     if (!payload.passed) {
-       // Render the board
-       g_board = payload.board;
-       g_boardpoints = payload.boardp;
-       g_boardtypes = payload.boardt;
-       g_board_empty = payload.boardEmpty;
+      // Render the board
+      g_board = payload.board;
+      g_boardpoints = payload.boardp;
+      g_boardtypes = payload.boardt;
+      g_board_empty = payload.boardEmpty;
 
-       // Force redraw of board
+      // Force redraw of board
 
-       var diffWord = [];
-       for (var y = 0; y < g_boardheight; ++y) {
-         for (var x = 0; x < g_boardwidth; ++x) {
-            var charBefore = g_board[y][x];
-            var charAfter = payload.board[y][x];
-            if (charAfter !== ' ' && charBefore === ' ') {
-                var ltr = charAfter === charAfter.toLowerCase() ? '*' : charAfter;
-                diffWord.push([y, x, charAfter, g_letscore[ltr]]);
+      var diffWord = [];
+      for (var y = 0; y < g_boardheight; ++y) {
+        for (var x = 0; x < g_boardwidth; ++x) {
+          var charBefore = g_board[y][x];
+          var charAfter = payload.board[y][x];
+          if (charAfter !== ' ' && charBefore === ' ') {
+            var ltr = charAfter === charAfter.toLowerCase() ? '*' : charAfter;
+            diffWord.push([y, x, charAfter, g_letscore[ltr]]);
+          }
+        }
+      }
+
+      g_board = payload.board;
+      g_boardpoints = payload.boardp;
+      g_boardtypes = payload.boardt;
+      g_board_empty = payload.boardEmpty;
+
+      if (diffWord.length > 0) {
+        // We need to restore the opponent rack temporarily so placeOnBoard can steal tiles from it
+        g_bui.setOpponentRack(payload.rackBefore || '');
+
+        placeOnBoard(diffWord, function() {
+          g_bui.setOpponentRack(payload.rackAfter);
+          g_oscore += payload.score;
+          g_bui.setOpponentScore(payload.score, g_oscore);
+          g_letpool = payload.letpool;
+          g_bui.setTilesLeft(g_letpool.length);
+
+          var elStatus = el('status');
+          elStatus.innerHTML = t('Opponent') + ' ' + t('scored ') + payload.score;
+
+          g_isMyTurn = true;
+          updateTurnIndicator();
+
+          if (payload.rackAfter === '' && g_letpool.length === 0) {
+            announceWinner();
+          }
+          saveMultiplayerSession();
+        });
+
+        // Skip the rest of the synchronous updates because they are handled in the callback
+        return;
+      } else {
+        for (var y = 0; y < g_boardheight; ++y) {
+          for (var x = 0; x < g_boardwidth; ++x) {
+            var cell = el('b' + y + '_' + x);
+            var char = g_board[y][x];
+            if (char !== ' ' && cell && cell.innerHTML === '') {
+              var ltr = char === char.toLowerCase() ? '*' : char;
+              var tClass = g_boardtypes[y][x] === 1 ? 't2' : 't1';
+              var html = '<div class="drag ' + tClass + '">' + ltr + '<sub>' + g_letscore[ltr] + '</sub></div>';
+              cell.innerHTML = html;
             }
-         }
-       }
-
-       g_board = payload.board;
-       g_boardpoints = payload.boardp;
-       g_boardtypes = payload.boardt;
-       g_board_empty = payload.boardEmpty;
-
-       if (diffWord.length > 0) {
-           // We need to restore the opponent rack temporarily so placeOnBoard can steal tiles from it
-           g_bui.setOpponentRack(payload.rackBefore || '');
-
-           placeOnBoard(diffWord, function() {
-               g_bui.setOpponentRack(payload.rackAfter);
-               g_oscore += payload.score;
-               g_bui.setOpponentScore(payload.score, g_oscore);
-               g_letpool = payload.letpool;
-               g_bui.setTilesLeft(g_letpool.length);
-
-               var elStatus = el('status');
-               elStatus.innerHTML = t('Opponent') + ' ' + t('scored ') + payload.score;
-
-               g_isMyTurn = true;
-               updateTurnIndicator();
-
-               if (payload.rackAfter === '' && g_letpool.length === 0) {
-                 announceWinner();
-               }
-               saveMultiplayerSession();
-           });
-
-           // Skip the rest of the synchronous updates because they are handled in the callback
-           return;
-       } else {
-           for (var y = 0; y < g_boardheight; ++y) {
-             for (var x = 0; x < g_boardwidth; ++x) {
-                var cell = el('b' + y + '_' + x);
-                var char = g_board[y][x];
-                if (char !== ' ' && cell && cell.innerHTML === '') {
-                    var ltr = char === char.toLowerCase() ? '*' : char;
-                    var tClass = g_boardtypes[y][x] === 1 ? 't2' : 't1';
-                    var html = '<div class="drag ' + tClass + '">' + ltr + '<sub>' + g_letscore[ltr] + '</sub></div>';
-                    cell.innerHTML = html;
-                }
-             }
-           }
-           g_bui.makeTilesFixed();
-       }
+          }
+        }
+        g_bui.makeTilesFixed();
+      }
 
     }
 
@@ -489,13 +473,13 @@ function handleMoveBroadcast(payload) {
     g_bui.setTilesLeft(g_letpool.length);
 
     if (!payload.passed) {
-       var elStatus = el('status');
-       elStatus.innerHTML = t('Opponent') + ' ' + t('scored ') + payload.score;
+      var elStatus = el('status');
+      elStatus.innerHTML = t('Opponent') + ' ' + t('scored ') + payload.score;
     }
 
     g_isMyTurn = true;
     updateTurnIndicator();
-     updateGameInfoLabels();
+    updateGameInfoLabels();
 
     // Check if game over
     if (payload.rackAfter === '' && g_letpool.length === 0) {
@@ -506,87 +490,82 @@ function handleMoveBroadcast(payload) {
   }
 }
 
-
 function saveMultiplayerSession() {
   if (g_isMultiplayer) {
     localStorage['session_mp'] = JSON.stringify({
-       gameId: g_gameId,
-       opponentName: g_opponentName,
-       isMyTurn: g_isMyTurn,
-       letpool: g_letpool,
-       pscore: g_pscore,
-       oscore: g_oscore,
-       myRack: g_bui.getPlayerRack(),
-       oppRack: g_bui.getOpponentRack(),
-       board: g_board,
-       boardp: g_boardpoints,
-       boardt: g_boardtypes,
-       boardEmpty: g_board_empty
+      gameId: g_gameId,
+      opponentName: g_opponentName,
+      isMyTurn: g_isMyTurn,
+      letpool: g_letpool,
+      pscore: g_pscore,
+      oscore: g_oscore,
+      myRack: g_bui.getPlayerRack(),
+      oppRack: g_bui.getOpponentRack(),
+      board: g_board,
+      boardp: g_boardpoints,
+      boardt: g_boardtypes,
+      boardEmpty: g_board_empty
     });
   }
 }
 
-;
-
-
-
 window.addEventListener('appReady', function() {
-   // Check if we have a multiplayer session to resume
-   if (localStorage['session_mp']) {
-      try {
-        var mpData = JSON.parse(localStorage['session_mp']);
-        if (mpData && mpData.gameId) {
-           console.log('Resuming multiplayer session...');
+  // Check if we have a multiplayer session to resume
+  if (localStorage['session_mp']) {
+    try {
+      var mpData = JSON.parse(localStorage['session_mp']);
+      if (mpData && mpData.gameId) {
+        console.log('Resuming multiplayer session...');
 
-           g_gameId = mpData.gameId;
-           g_opponentName = mpData.opponentName;
-           g_isMultiplayer = true;
-           g_isMyTurn = mpData.isMyTurn;
-           g_letpool = mpData.letpool;
-           g_pscore = mpData.pscore;
-           g_oscore = mpData.oscore;
-           g_board = mpData.board;
-           g_boardpoints = mpData.boardp;
-           g_boardtypes = mpData.boardt;
-           g_board_empty = mpData.boardEmpty;
+        g_gameId = mpData.gameId;
+        g_opponentName = mpData.opponentName;
+        g_isMultiplayer = true;
+        g_isMyTurn = mpData.isMyTurn;
+        g_letpool = mpData.letpool;
+        g_pscore = mpData.pscore;
+        g_oscore = mpData.oscore;
+        g_board = mpData.board;
+        g_boardpoints = mpData.boardp;
+        g_boardtypes = mpData.boardt;
+        g_board_empty = mpData.boardEmpty;
 
-           // Apply board
-           setTimeout(() => {
-             g_bui.setPlayerRack(mpData.myRack);
-             g_bui.setOpponentRack(mpData.oppRack);
-             g_bui.setPlayerScore(0, g_pscore);
-             g_bui.setOpponentScore(0, g_oscore);
-             g_bui.setTilesLeft(g_letpool.length);
+        // Apply board
+        setTimeout(() => {
+          g_bui.setPlayerRack(mpData.myRack);
+          g_bui.setOpponentRack(mpData.oppRack);
+          g_bui.setPlayerScore(0, g_pscore);
+          g_bui.setOpponentScore(0, g_oscore);
+          g_bui.setTilesLeft(g_letpool.length);
 
-             for (var y = 0; y < g_boardheight; ++y) {
-               for (var x = 0; x < g_boardwidth; ++x) {
-                  var cell = el('b' + y + '_' + x);
-                  var char = g_board[y][x];
-                  if (char !== ' ' && cell && cell.innerHTML === '') {
-                      var ltr = char === char.toLowerCase() ? '*' : char;
-                      var tClass = g_boardtypes[y][x] === 1 ? 't1' : 't2';
-                      var html = '<div class="drag ' + tClass + '">' + ltr + '<sub>' + g_letscore[ltr] + '</sub></div>';
-                      cell.innerHTML = html;
-                  }
-               }
-             }
-             g_bui.makeTilesFixed();
-             updateTurnIndicator();
-     updateGameInfoLabels();
+          for (var y = 0; y < g_boardheight; ++y) {
+            for (var x = 0; x < g_boardwidth; ++x) {
+              var cell = el('b' + y + '_' + x);
+              var char = g_board[y][x];
+              if (char !== ' ' && cell && cell.innerHTML === '') {
+                var ltr = char === char.toLowerCase() ? '*' : char;
+                var tClass = g_boardtypes[y][x] === 1 ? 't1' : 't2';
+                var html = '<div class="drag ' + tClass + '">' + ltr + '<sub>' + g_letscore[ltr] + '</sub></div>';
+                cell.innerHTML = html;
+              }
+            }
+          }
+          g_bui.makeTilesFixed();
+          updateTurnIndicator();
+          updateGameInfoLabels();
 
-             // Rejoin channel
-             joinGameChannel(g_gameId, false);
+          // Rejoin channel
+          joinGameChannel(g_gameId, false);
 
-             // Request latest state just in case we missed a move while refreshing
-             setTimeout(() => {
-                broadcastGameState({ type: 'request_state' });
-             }, 1000);
-           }, 500);
-        }
-      } catch (e) {
-        console.error(e);
+          // Request latest state just in case we missed a move while refreshing
+          setTimeout(() => {
+            broadcastGameState({ type: 'request_state' });
+          }, 1000);
+        }, 500);
       }
-   }
+    } catch (e) {
+      console.error(e);
+    }
+  }
 });
 
 // Add to handleGameStateBroadcast to handle request_state
@@ -595,54 +574,54 @@ handleGameStateBroadcast = function(payload) {
   originalHandleMoveBroadcast2(payload);
 
   if (payload.type === 'request_state') {
-     // The other player just refreshed and is asking for the authoritative state
-     // Send them our current state view so they can catch up if they missed anything
-     broadcastGameState({
-         type: 'state_sync',
-         board: g_board,
-         boardp: g_boardpoints,
-         boardt: g_boardtypes,
-         boardEmpty: g_board_empty,
-         pscore: g_oscore, // Our oscore is their pscore
-         oscore: g_pscore, // Our pscore is their oscore
-         myRack: g_bui.getOpponentRack(),
-         oppRack: g_bui.getPlayerRack(),
-         letpool: g_letpool,
-         isMyTurn: !g_isMyTurn
-     });
+    // The other player just refreshed and is asking for the authoritative state
+    // Send them our current state view so they can catch up if they missed anything
+    broadcastGameState({
+      type: 'state_sync',
+      board: g_board,
+      boardp: g_boardpoints,
+      boardt: g_boardtypes,
+      boardEmpty: g_board_empty,
+      pscore: g_oscore, // Our oscore is their pscore
+      oscore: g_pscore, // Our pscore is their oscore
+      myRack: g_bui.getOpponentRack(),
+      oppRack: g_bui.getPlayerRack(),
+      letpool: g_letpool,
+      isMyTurn: !g_isMyTurn
+    });
   } else if (payload.type === 'state_sync') {
-     // We received a sync from the other player
-     g_board = payload.board;
-     g_boardpoints = payload.boardp;
-     g_boardtypes = payload.boardt;
-     g_board_empty = payload.boardEmpty;
-     g_pscore = payload.pscore;
-     g_oscore = payload.oscore;
-     g_letpool = payload.letpool;
-     g_isMyTurn = payload.isMyTurn;
+    // We received a sync from the other player
+    g_board = payload.board;
+    g_boardpoints = payload.boardp;
+    g_boardtypes = payload.boardt;
+    g_board_empty = payload.boardEmpty;
+    g_pscore = payload.pscore;
+    g_oscore = payload.oscore;
+    g_letpool = payload.letpool;
+    g_isMyTurn = payload.isMyTurn;
 
-     g_bui.setPlayerRack(payload.myRack);
-     g_bui.setOpponentRack(payload.oppRack);
-     g_bui.setPlayerScore(0, g_pscore);
-     g_bui.setOpponentScore(0, g_oscore);
-     g_bui.setTilesLeft(g_letpool.length);
+    g_bui.setPlayerRack(payload.myRack);
+    g_bui.setOpponentRack(payload.oppRack);
+    g_bui.setPlayerScore(0, g_pscore);
+    g_bui.setOpponentScore(0, g_oscore);
+    g_bui.setTilesLeft(g_letpool.length);
 
-     for (var y = 0; y < g_boardheight; ++y) {
-       for (var x = 0; x < g_boardwidth; ++x) {
-          var cell = el('b' + y + '_' + x);
-          var char = g_board[y][x];
-          if (char !== ' ' && cell && cell.innerHTML === '') {
-              var ltr = char === char.toLowerCase() ? '*' : char;
-              var tClass = g_boardtypes[y][x] === 1 ? 't2' : 't1';
-              var html = '<div class="drag ' + tClass + '">' + ltr + '<sub>' + g_letscore[ltr] + '</sub></div>';
-              cell.innerHTML = html;
-          }
-       }
-     }
-     g_bui.makeTilesFixed();
-     updateTurnIndicator();
-     updateGameInfoLabels();
-     saveMultiplayerSession();
+    for (var y = 0; y < g_boardheight; ++y) {
+      for (var x = 0; x < g_boardwidth; ++x) {
+        var cell = el('b' + y + '_' + x);
+        var char = g_board[y][x];
+        if (char !== ' ' && cell && cell.innerHTML === '') {
+          var ltr = char === char.toLowerCase() ? '*' : char;
+          var tClass = g_boardtypes[y][x] === 1 ? 't2' : 't1';
+          var html = '<div class="drag ' + tClass + '">' + ltr + '<sub>' + g_letscore[ltr] + '</sub></div>';
+          cell.innerHTML = html;
+        }
+      }
+    }
+    g_bui.makeTilesFixed();
+    updateTurnIndicator();
+    updateGameInfoLabels();
+    saveMultiplayerSession();
   }
 };
 
@@ -732,13 +711,12 @@ joinGameChannel = function(gameId, isHost) {
 
   // Setup presence to detect if opponent leaves
   g_channel.on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
-     // If the opponent leaves, we start a stricter timer or rely on the idle timer
-     console.log('Opponent left presence', leftPresences);
+    // If the opponent leaves, we start a stricter timer or rely on the idle timer
+    console.log('Opponent left presence', leftPresences);
   });
 
   startIdleTimer();
 };
-
 
 // Add logic to track opponent presence
 let g_opponentPresenceState = false;
@@ -749,20 +727,18 @@ joinGameChannel = function(gameId, isHost) {
   originalJoinGameChannel2(gameId, isHost);
 
   g_channel.on('presence', { event: 'sync' }, () => {
-     const state = g_channel.presenceState();
+    const state = g_channel.presenceState();
 
-     let opponentFound = false;
-     for (const id in state) {
-       for (const p of state[id]) {
-         if (p.name !== g_myName) opponentFound = true;
-       }
-     }
+    let opponentFound = false;
+    for (const id in state) {
+      for (const p of state[id]) {
+        if (p.name !== g_myName) opponentFound = true;
+      }
+    }
 
-     g_opponentPresenceState = opponentFound;
+    g_opponentPresenceState = opponentFound;
   });
 };
-
-
 
 function updateGameInfoLabels() {
   const lblLast = document.getElementById('label-loscore');

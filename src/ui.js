@@ -346,7 +346,7 @@ function RedipsUI() {
     var hr = '<tr class="ruler"><td colspan="2"></td></tr>';
 
     g_cache['html'].miscBtns =
-      '<button id="highscores" class="button secondary" title="' + t('Lobby') + '" onclick="window.showLobby()">🌐</button>' +
+      '<button id="lobby" class="button secondary" title="' + t('Lobby') + '" onclick="window.showLobby()">🌐</button>' +
       '<button id="highscores" class="button secondary" title="' + t('High Scores') + '" onclick="g_bui.showHighScores()">🎖</button>' +
       '<button id="restart" class="button secondary" title="' + t('Restart') + '" onclick="g_bui.restart();if(g_isMobile)hideGameInfo()">⟳</button>';
 
