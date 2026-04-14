@@ -97,7 +97,6 @@ var gErrPrefix = function() {
 
 //------------------------------------------------------------------------------
 function init(iddiv) {
-  if(typeof g_isMultiplayer !== 'undefined' && !window.location.hash.includes('game_')) g_isMultiplayer = false;
   // Reset
   g_board = [];
   g_boardpoints = [];
@@ -182,14 +181,15 @@ function announceWinner() {
   // Update high scores table if applicable
   var sHighScoresKey = g_layout + ' ' + g_bui.level;
   var sHighScoresSession = getSession();
+  var names = getHighScoreNames();
   if (!g_highscores[sHighScoresKey]) g_highscores[sHighScoresKey] = [];
   g_highscores[sHighScoresKey].push({
-    'player': 'Computer',
+    'player': names.opponent,
     'score': g_oscore,
     'session': sHighScoresSession
   });
   g_highscores[sHighScoresKey].push({
-    'player': 'You',
+    'player': names.player,
     'score': g_pscore,
     'session': sHighScoresSession
   });
@@ -207,6 +207,56 @@ function announceWinner() {
     'value': g_letpool.length
   });
 
+  if (typeof syncHighScoresMultiplayer === 'function') {
+    syncHighScoresMultiplayer();
+  }
+
+}
+
+//------------------------------------------------------------------------------
+function getHighScoreNames() {
+  var isMP = (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer);
+  if (!isMP) {
+    return {
+      'player': 'You',
+      'opponent': 'Computer'
+    };
+  }
+
+  var myName = (typeof g_myName !== 'undefined' && g_myName) ? String(g_myName).trim() : '';
+  var oppName = (typeof g_opponentName !== 'undefined' && g_opponentName) ? String(g_opponentName).trim() : 'Opponent';
+
+  return {
+    'player': (myName && myName !== 'You') ? 'You (' + myName + ')' : 'You',
+    'opponent': oppName || 'Opponent'
+  };
+}
+
+//------------------------------------------------------------------------------
+function tabulateCurrentScores() {
+  if (g_board_empty) return;
+
+  var sHighScoresKey = g_layout + ' ' + g_bui.level;
+  var sHighScoresSession = getSession();
+  var names = getHighScoreNames();
+
+  if (!g_highscores[sHighScoresKey]) g_highscores[sHighScoresKey] = [];
+  g_highscores[sHighScoresKey].push({
+    'player': names.opponent,
+    'score': g_oscore,
+    'session': sHighScoresSession
+  });
+  g_highscores[sHighScoresKey].push({
+    'player': names.player,
+    'score': g_pscore,
+    'session': sHighScoresSession
+  });
+  g_highscores[sHighScoresKey].sort(gCompareScores);
+  localStorage['highscores'] = JSON.stringify(g_highscores);
+
+  if (typeof syncHighScoresMultiplayer === 'function') {
+    syncHighScoresMultiplayer();
+  }
 }
 
 //------------------------------------------------------------------------------
@@ -1206,6 +1256,7 @@ function onPlayerMove() {
     el('pass').disabled = false;
     // Save session
     localStorage['session'] = getSession();
+    localStorage['session_mode'] = 'sp';
   };
 
   if (play_word !== null) {
@@ -1264,6 +1315,7 @@ function onPlayerMove() {
       el('pass').disabled = false;
       // Save session
       localStorage['session'] = getSession();
+      localStorage['session_mode'] = 'sp';
     }
 
     return;
@@ -1304,6 +1356,12 @@ function onPlayerShuffle() {
     if (++totalanims === g_racksize / 2) {
       elClear.disabled = false;
       document.documentElement.classList.remove('shuffling');
+      if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
+        broadcastGameState({
+          type: 'shuffle',
+          rack: g_bui.getPlayerRack()
+        });
+      }
     }
   };
   for (var i = 0; i < g_racksize; ++i) {

@@ -69,6 +69,14 @@ function randInt(nMin, nMax) {
 
 // Set language
 function setLang(sLang) {
+  if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof saveMultiplayerSession === 'function') {
+    saveMultiplayerSession();
+    localStorage['session_mode'] = 'mp';
+  } else if (typeof getSession === 'function') {
+    localStorage['session'] = getSession();
+    localStorage['session_mode'] = 'sp';
+  }
+
   localStorage['lang'] = sLang;
   // GA
   gtag('event', sLang, {
@@ -79,6 +87,14 @@ function setLang(sLang) {
 
 // Set bonuses layout
 function setLayout(elSelect) {
+  if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof saveMultiplayerSession === 'function') {
+    saveMultiplayerSession();
+    localStorage['session_mode'] = 'mp';
+  } else if (typeof getSession === 'function') {
+    localStorage['session'] = getSession();
+    localStorage['session_mode'] = 'sp';
+  }
+
   localStorage['layout'] = elSelect.value;
   // GA
   gtag('event', elSelect.value, {
@@ -89,6 +105,14 @@ function setLayout(elSelect) {
 
 // Set tileset
 function setTileset(elSelect) {
+  if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof saveMultiplayerSession === 'function') {
+    saveMultiplayerSession();
+    localStorage['session_mode'] = 'mp';
+  } else if (typeof getSession === 'function') {
+    localStorage['session'] = getSession();
+    localStorage['session_mode'] = 'sp';
+  }
+
   localStorage['tileset'] = elSelect.value;
   // GA
   gtag('event', elSelect.value, {
@@ -628,6 +652,7 @@ function RedipsUI() {
       var holds = self.hcopy(self.rd.obj.holds);
       self.rd.td.target.holds = holds;
       var id = self.rd.td.target.id;
+      var sourceId = self.rd.td.source.id;
       var sc = self.rd.td.source.id.charAt(0);
       if (id.charAt(0) === self.boardId) {
         // Tile dropped on playing board
@@ -656,12 +681,27 @@ function RedipsUI() {
           el('clear').onclick = onPlayerShuffle;
         }
       }
+
+      if (typeof sendDragPreview === 'function') {
+        sendDragPreview(sourceId, id, holds);
+      }
+
+      if (typeof sendDragEnd === 'function') sendDragEnd();
     };
     self.rd.event.moved = function() {
-      self.rd.td.source.holds = '';
       var id = self.rd.td.source.id;
+      if (typeof sendDragSourceClear === 'function' && id.charAt(0) === self.boardId) {
+        sendDragSourceClear(id);
+      }
+
+      self.rd.td.source.holds = '';
       // Tile lifted from playing board
       if (id.charAt(0) === self.boardId) delete self.newplays[id];
+
+      if (typeof sendDragPosition === 'function' && self.rd.obj) {
+        var rect = self.rd.obj.getBoundingClientRect();
+        sendDragPosition(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      }
     };
   };
 
@@ -950,10 +990,19 @@ function RedipsUI() {
 
   self.renderHighScoreRows = function(sKey) {
     var html = '';
+    // In high scores view, always show player name even if not currently in a game
+    var myName = (typeof g_myName !== 'undefined' && g_myName) ? String(g_myName).trim() : '';
+    var playerDisplayName = (myName && myName !== 'You') ? 'You (' + myName + ')' : 'You';
+
     if (g_highscores[sKey]) {
       for (var i = 0; i < g_highscores[sKey].length; ++i) {
         if (!g_highscores[sKey][i]) break;
-        html += '<tr><td>' + g_highscores[sKey][i]['player'] +
+        var playerName = g_highscores[sKey][i]['player'];
+        // Replace "You" labels with current player name including their username
+        if (playerName === 'You' || playerName.startsWith('You (')) {
+          playerName = playerDisplayName;
+        }
+        html += '<tr><td>' + playerName +
           '</td><td><a class="link" title="' + t('View this match') + '" onclick="loadHighScore(\'' + sKey + '\',' + i + ')" tabindex="1">' +
           g_highscores[sKey][i]['score'] + '</a></td></tr>';
       }
@@ -969,6 +1018,7 @@ function RedipsUI() {
   };
 
   self.restart = function() {
+    if (typeof tabulateCurrentScores === 'function') tabulateCurrentScores();
     localStorage.removeItem('session');
     g_bui = new RedipsUI();
     init('board');
@@ -993,14 +1043,19 @@ function RedipsUI() {
       if (ltr !== '') {
         cells.push(rcell);
         var html = '<div class="drag t' + player + '">';
+        var hideOpponentLetter = (player === 2 && typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer);
         var holds = {
           'letter': ltr,
           'points': self.scores[ltr]
         };
         rcell.holds = holds;
         if (ltr !== '*') {
-          var char = upper.charAt(i);
-          html += (char !== ' ' ? char : '&nbsp;&nbsp;') + '<sup><small>' + self.scores[ltr] + '</small></sup>';
+          if (hideOpponentLetter) {
+            html += '&nbsp;&nbsp;';
+          } else {
+            var char = upper.charAt(i);
+            html += (char !== ' ' ? char : '&nbsp;&nbsp;') + '<sup><small>' + self.scores[ltr] + '</small></sup>';
+          }
         } else {
           html += '&nbsp;&nbsp;';
         }
@@ -1057,11 +1112,11 @@ function RedipsUI() {
       sLevels += '<option' + (i == g_bui.level ? ' selected' : '') + '>' + i + '</option>';
     }
     var elBonusesLayout = el('#bonuseslayout').cloneNode(true);
-    var html = '<table id="highscores"><tr class="header">' +
+    var html = '<div class="table-container"><table><tr class="header">' +
       '<td><select id="highscores-level" title="' + t('Select level') + '" onchange="el(\'highscores-data\').innerHTML=g_bui.renderHighScoreRows(el(\'highscores-layout\').value+\' \'+value);setModalHeight()">' + sLevels + '</select></td>' +
       '<td><select id="highscores-layout" title="' + t('Select bonuses layout') + '" onchange="el(\'highscores-data\').innerHTML=g_bui.renderHighScoreRows(value+\' \'+el(\'highscores-level\').value);setModalHeight()">' + elBonusesLayout.innerHTML + '</select></td></tr>' +
       '<tr class="highlight"><th>Player</th><th>Score</th></tr><tbody id="highscores-data">' +
-      self.renderHighScoreRows(g_layout + ' ' + g_bui.level) + '</tbody></table>';
+      self.renderHighScoreRows(g_layout + ' ' + g_bui.level) + '</tbody></table></div>';
     self.prompt(html, '', 'highscores wide');
   };
 

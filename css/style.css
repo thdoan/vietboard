@@ -126,6 +126,12 @@ tr.highlight {
   line-height: 1.2;
 }
 
+.table-container {
+  max-height: calc(100% - 2.5rem);
+  border: 1px solid #adadad;
+  overflow: auto;
+}
+
 #app {
   position: relative;
   display: table;
@@ -388,16 +394,12 @@ table.board td:after,
 }
 #drag .opponent .button {
   width: 13.5%;
-  font-size: 16px;
+  height: 32px;
+  font-size: 18px;
 }
 
-#highscores img {
-  width: 100%;
-  max-height: 15px;
-}
-#restart img {
-  width: 50%;
-  max-height: 18px;
+#restart {
+  margin-right: 6px;
 }
 
 #drag .button {
@@ -515,6 +517,18 @@ table.board td .drag,
   height: 100%;
 }
 
+.mp-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 36px;
+  height: 36px;
+  opacity: 0.6;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  z-index: 9999;
+}
+
 /*** Word Info ***/
 
 #wordresult {
@@ -607,8 +621,8 @@ table.board td .drag,
 #score header .button {
   width: 15%;
   height: 32px;
+  font-size: 18px;
   margin: 8px;
-  font-size: 16px;
 }
 #score h2 {
   height: 26px;
@@ -737,7 +751,7 @@ footer .social {
   left: 50%;
   min-width: 240px;
   max-width: 480px;
-  max-height: 95%;
+  max-height: 50%;
   text-align: center;
   -ms-transform: translate(-50%, -50%);
   -webkit-transform: translate(-50%, -50%);
@@ -774,7 +788,7 @@ footer .social {
   -webkit-box-sizing: border-box;
   box-sizing: border-box;
   display: inline-block;
-  overflow: auto;
+  overflow: hidden;
   padding: 1rem;
   text-align: left;
 }
@@ -837,25 +851,27 @@ footer .social {
 }
 
 /* Modal tables */
-#highscores,
-.lobby-modal table {
+:is(.highscores, .lobby-modal) table {
   width: 100%;
   border-collapse: collapse;
   opacity: 0.9;
 }
-#highscores select {
+.highscores select {
   width: 100%;
 }
-:is(#highscores, .lobby-modal table) td,
-:is(#highscores, .lobby-modal table) th {
+:is(.highscores, .lobby-modal) table :is(td, th) {
   border: 1px solid #adadad;
   padding: 4px;
 }
-#highscores td:last-child,
-#highscores th:last-child {
+.highscores th {
+  position: sticky;
+  top: 0;
+  background: inherit;
+}
+.highscores :is(td, th):last-child {
   text-align: right;
 }
-:is(#highscores, .lobby-modal table) td.input {
+:is(.highscores, .lobby-modal) table td.input {
   background: #fff;
 }
 
@@ -870,6 +886,7 @@ footer .social {
 }
 .lobby-modal label {
   color: #fff;
+  line-height: 1.2;
   padding: 0 4px;
 }
 #lobby-players {
@@ -881,13 +898,17 @@ footer .social {
   overflow: auto;
   padding: 4px 8px;
 }
+#lobby-players em {
+  display: inline-block;
+  padding: 5px;
+}
 .lobby-player {
   background: rgba(58, 58, 58, 0.8);
   border-radius: 4px;
   color: #fff;
   cursor: pointer;
   margin: 4px 0;
-  padding:5px;
+  padding: 5px 10px;
 }
 .lobby-player:hover {
   background: #5cb811;
@@ -996,6 +1017,7 @@ html.mobile #score header {
 }
 html.mobile #modal-container.wide {
   width: 95%;
+  max-height: 95%;
 }
 html.mobile #modal-content {
   padding: 4%;

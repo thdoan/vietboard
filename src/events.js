@@ -99,9 +99,18 @@ window.onload = function() {
   };
   // Check browser support
   if (g_isSupported) {
-    // If there is a saved session, load it; otherwise initialize a new board
-    if (localStorage['session']) load(localStorage['session']);
-    else init('board');
+    // Restore exact previous mode/session from localStorage
+    var sessionMode = localStorage['session_mode'];
+    var hasMultiplayerSession = !!localStorage['session_mp'];
+    var hasSinglePlayerSession = !!localStorage['session'];
+
+    if ((sessionMode === 'mp' && hasMultiplayerSession) || (hasMultiplayerSession && !hasSinglePlayerSession)) {
+      init('board');
+    } else if (hasSinglePlayerSession) {
+      load(localStorage['session']);
+    } else {
+      init('board');
+    }
     // Close modal by clicking on its shadow
     g_cache['modalMask'].addEventListener('click', closeModal);
     g_cache['modalInner'].addEventListener('click', handleHideModal);
