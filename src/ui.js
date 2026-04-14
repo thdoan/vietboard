@@ -1169,7 +1169,6 @@ function RedipsUI() {
     'event_category': 'Definition',
     'event_label': 'Laban Dict iframe'
   });
-      });
     }
   };
 
