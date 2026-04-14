@@ -13,7 +13,7 @@ let g_gameId = null;
 let g_isMyTurn = false;
 let g_opponentId = null;
 let g_opponentName = null;
-let g_myName = localStorage.getItem('vietboard_player_name');
+let g_myName = localStorage.getItem('player_name');
 if (!g_myName) {
   g_myName = 'Generating...'; // Set temporary state
 
@@ -40,10 +40,10 @@ if (!g_myName) {
     }
 
     g_myName = sNickname;
-    localStorage.setItem('vietboard_player_name', g_myName);
+    localStorage.setItem('player_name', g_myName);
 
     // Update input field if it's already rendered
-    var nameInput = document.getElementById('playerNameInput');
+    var nameInput = document.getElementById('lobby-name');
     if (nameInput) nameInput.value = g_myName;
   }
 
@@ -76,26 +76,30 @@ window.addEventListener('load', function() {
 
 window.showLobby = function() {
   // Save name
-  localStorage.setItem('vietboard_player_name', g_myName);
+  localStorage.setItem('player_name', g_myName);
 
-  var html = '<div id="lobby" style="text-align:center;">';
-  html += '<h2>' + t('Multiplayer Lobby') + '</h2>';
-  html += '<div style="margin-bottom: 10px;">';
-  html += '<label>' + t('Your Name: ') + '</label>';
-  html += '<input type="text" id="playerNameInput" value="' + g_myName + '" onchange="updatePlayerName(this.value)" />';
-  html += '</div>';
-  html += '<p>' + t('Click a player to start a game:') + '</p>';
-  html += '<div id="lobbyPlayers" style="min-height: 100px; border: 1px solid #ccc; padding: 10px; background: #fff;"><i>Loading...</i></div>';
-  html += '</div>';
+  const html = `
+<h2>${t('Multiplayer Lobby')}</h2>
+<table>
+  <tr class="header">
+    <td><label for="lobby-name">${t('Your name')}</label></td>
+    <td class="input"><input id="lobby-name" value="${g_myName}" onchange="updatePlayerName(this.value)"></td>
+  </tr>
+</table>
+<p><strong>${t('Click a player to start a game:')}</strong></p>
+<div id="lobby-players">
+  <i>${t('Loading...')}</i>
+</div>
+`;
 
-  g_bui.prompt(html, '<button class="button secondary" onclick="leaveLobby(); hideModal()">' + t('Close') + '</button>', 'lobby-modal wide');
+  g_bui.prompt(html, `<button class="button" onclick="leaveLobby();hideModal()">${t('Close')}</button>`, 'lobby-modal wide');
 
   joinLobbyChannel();
 }
 
 window.updatePlayerName = function(newName) {
   g_myName = newName || 'Player_' + Math.floor(Math.random() * 10000);
-  localStorage.setItem('vietboard_player_name', g_myName);
+  localStorage.setItem('player_name', g_myName);
   // Rejoin to update presence name
   if (g_channel) {
     g_channel.track({ name: g_myName, lookingForGame: true });
@@ -134,7 +138,7 @@ function joinLobbyChannel() {
 }
 
 function renderLobbyPlayers(state) {
-  const container = document.getElementById('lobbyPlayers');
+  const container = document.getElementById('lobby-players');
   if (!container) return; // Modal closed
 
   let html = '';
@@ -145,16 +149,16 @@ function renderLobbyPlayers(state) {
     if (user.name === g_myName) continue;
     if (!user.lookingForGame) continue;
 
-    html += '<div style="padding:5px; margin: 5px 0; background: #eee; cursor: pointer; border-radius: 4px;" ';
-    html += 'onclick="invitePlayer(\'' + id + '\', \'' + user.name.replace(/'/g, "\\'") + '\')">';
-    html += '<strong>' + user.name + '</strong>';
-    html += '</div>';
+    const safeName = user.name.replace(/'/g, "\\'");
+    html += `
+<div class="lobby-player" onclick="invitePlayer('${id}','${safeName}')">
+  <strong>${user.name}</strong>
+</div>
+`;
     count++;
   }
 
-  if (count === 0) {
-    html = '<p><i>No other players waiting.</i></p>';
-  }
+  if (count === 0) html = '<i>No other players waiting.</i>';
   container.innerHTML = html;
 }
 
@@ -664,7 +668,7 @@ function startIdleTimer() {
 
     // If opponent is missing for 5 minutes, forfeit game
     if (opponentDisconnectSeconds === 240) {
-      g_bui.prompt(t('Warning: Opponent disconnected. Game will forfeit in 1 minute.'));
+      g_bui.prompt(t('WARNING: Opponent disconnected. Game will forfeit in 1 minute.'));
     }
 
     if (opponentDisconnectSeconds >= 290 && opponentDisconnectSeconds <= 300) {
@@ -684,7 +688,7 @@ function startIdleTimer() {
     g_idleSeconds++;
 
     if (g_idleSeconds === 240) {
-      g_bui.prompt(t('Warning: Game will end in 1 minute due to inactivity.'));
+      g_bui.prompt(t('WARNING: Game will end in 1 minute due to inactivity.'));
     }
 
     if (g_idleSeconds >= 290 && g_idleSeconds <= 300) {

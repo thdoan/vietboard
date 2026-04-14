@@ -2,11 +2,6 @@
 // 1. redipsdrag.js has already been included
 // 2. g_boardm exists and its init method returns the bonus layout (defined in bonuses.js)
 
-// VDict callback function
-function cb(data) {
-  g_def = data.result;
-}
-
 // Debounce window resizing
 function debounce(fn) {
   var nTimer;
@@ -351,9 +346,9 @@ function RedipsUI() {
     var hr = '<tr class="ruler"><td colspan="2"></td></tr>';
 
     g_cache['html'].miscBtns =
-
-      '<button id="highscores" class="button secondary" title="' + t('High Scores') + '" onclick="g_bui.showHighScores()"><img src="pics/highscores.svg" alt="' + t('High Scores') + '"></button>' +
-      '<button id="restart" class="button secondary" title="' + t('Restart') + '" onclick="g_bui.restart();if(g_isMobile)hideGameInfo()"><img src="pics/restart.svg" alt="' + t('Restart') + '"></button>';
+      '<button id="highscores" class="button secondary" title="' + t('Lobby') + '" onclick="window.showLobby()">🌐</button>' +
+      '<button id="highscores" class="button secondary" title="' + t('High Scores') + '" onclick="g_bui.showHighScores()">🎖</button>' +
+      '<button id="restart" class="button secondary" title="' + t('Restart') + '" onclick="g_bui.restart();if(g_isMobile)hideGameInfo()">⟳</button>';
 
     // Gameboard
     var isDisabled = !g_board_empty || isHighScore;
@@ -422,13 +417,13 @@ function RedipsUI() {
     self.bx = bx;
     self.by = by;
 
-    g_cache['html'].h1 = '<h1><img src="pics/logo.svg" alt="Vietboard" onload="spinColors(this)"></h1><div style="text-align:center; margin-bottom:10px;"><button class="button" onclick="window.showLobby()">&nbsp;' + t('LOBBY') + '&nbsp;</button></div>' + g_cache['html'].miscBtns;
+    g_cache['html'].h1 = '<h1><img src="pics/logo.svg" alt="Vietboard" onload="spinColors(this)"></h1>' + g_cache['html'].miscBtns;
 
     // Scoreboard
     html = '<table id="scoreboard"><tr>' +
       '<td id="score-player">0</td>' +
       '<td class="spacer"></td>' +
-      '<td class="logo"><img src="pics/logo.svg" alt="Vietboard" onload="spinColors(this)"><br><div style="margin: 5px 0;"><button class="button" onclick="window.showLobby()">&nbsp;' + t('LOBBY') + '&nbsp;</button></div><small id="status" onclick="startMarquee(this)">' + t('Tap on score for game info') + '</small></td>' +
+      '<td class="logo"><img src="pics/logo.svg" alt="Vietboard" onload="spinColors(this)"><br><small id="status" onclick="startMarquee(this)">' + t('Tap on score for game info') + '</small></td>' +
       '<td class="spacer"></td>' +
       '<td id="score-opponent">0</td></tr></table>';
     html += '<div id="drag">';
@@ -914,7 +909,7 @@ function RedipsUI() {
     showModal(
       msg +
       '<div class="buttons">' +
-      (button || '<button class="button" onclick="hideModal()">' + t('OK') + '</button>') +
+      (button || '<button class="button" onclick="hideModal()">' + t('Close') + '</button>') +
       '</div>',
       sClass
     );
@@ -1135,7 +1130,7 @@ function RedipsUI() {
       alert(t('Word definitions not enabled.'));
       return;
     }
-    if (word in g_defs) {
+    if (word) {
       // Try to get definition locally first
       var html = '<div id="wordresult"><div style="text-align:center"><h1>' + word + '</h1></div>';
       if (typeof g_defs[word] === 'string') {

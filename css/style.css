@@ -387,7 +387,8 @@ table.board td:after,
   display: block;
 }
 #drag .opponent .button {
-  width: 21%;
+  width: 13.5%;
+  font-size: 16px;
 }
 
 #highscores img {
@@ -514,6 +515,42 @@ table.board td .drag,
   height: 100%;
 }
 
+/*** Word Info ***/
+
+#wordresult {
+  font-size: 95%;
+  -ms-user-select: text;
+  -moz-user-select: text;
+  -webkit-user-select: text;
+  user-select: text;
+}
+#wordresult h1 {
+  display: inline-block;
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+#wordresult ul {
+  padding-left: 1rem;
+}
+#wordresult ul.list2 {
+  color: #666;
+  margin-top: 4px;
+}
+#wordresult li > b {
+  font-weight: normal;
+}
+#wordresult .example-original {
+  font-style: italic;
+}
+#wordresult .phanloai {
+  background: #e6e6e6;
+  border-radius: 4px;
+  display: block;
+  font-weight: bold;
+  margin: 6px 0;
+  padding: 6px;
+}
+
 /*** Game Info ***/
 
 #back {
@@ -568,11 +605,10 @@ table.board td .drag,
   right: 8px;
 }
 #score header .button {
-  width: 20%;
+  width: 15%;
   height: 32px;
   margin: 8px;
-  padding-left: 5%;
-  padding-right: 5%;
+  font-size: 16px;
 }
 #score h2 {
   height: 26px;
@@ -675,27 +711,6 @@ footer .social {
   float: right;
 }
 
-/*** High Scores ***/
-.highscores #modal-content {
-  background: url(../pics/highscores_bg.jpg);
-}
-#highscores {
-  width: 100%;
-  border-collapse: collapse;
-}
-#highscores select {
-  width: 100%;
-}
-#highscores td,
-#highscores th {
-  border: 1px solid #adadad;
-  padding: 4px;
-}
-#highscores td:last-child,
-#highscores th:last-child {
-  text-align: right;
-}
-
 /*** Modal ***/
 
 #modal-mask,
@@ -763,6 +778,9 @@ footer .social {
   padding: 1rem;
   text-align: left;
 }
+:is(.highscores, .lobby-modal) #modal-content {
+  background: url(../pics/highscores_bg.jpg);
+}
 #modal-container.center #modal-content {
   text-align: center;
 }
@@ -818,60 +836,61 @@ footer .social {
   font-weight: bold;
 }
 
-/*** VDict ***/
+/* Modal tables */
+#highscores,
+.lobby-modal table {
+  width: 100%;
+  border-collapse: collapse;
+  opacity: 0.9;
+}
+#highscores select {
+  width: 100%;
+}
+:is(#highscores, .lobby-modal table) td,
+:is(#highscores, .lobby-modal table) th {
+  border: 1px solid #adadad;
+  padding: 4px;
+}
+#highscores td:last-child,
+#highscores th:last-child {
+  text-align: right;
+}
+:is(#highscores, .lobby-modal table) td.input {
+  background: #fff;
+}
 
-#suggestresult,
-#wordresult {
-  font-size: 95%;
-  -ms-user-select: text;
-  -moz-user-select: text;
-  -webkit-user-select: text;
-  user-select: text;
-}
-#suggestresult > ul {
+/*** Lobby ***/
+
+.lobby-modal h2 {
   margin-top: 0;
+  text-align: center;
 }
-#suggestresult #suggestionlist {
-  list-style: none;
-  padding: 0;
+.lobby-modal input {
+  border: 0;
 }
-#wordresult h1 {
-  display: inline-block;
-  margin-top: 0;
-  margin-bottom: 10px;
+.lobby-modal label {
+  color: #fff;
+  padding: 0 4px;
 }
-#wordresult ul {
-  padding-left: 1rem;
+#lobby-players {
+  height: 150px;
+  background: #fefeba;
+  border: 1px solid #adadad;
+  box-sizing: border-box;
+  opacity: 0.9;
+  overflow: auto;
+  padding: 4px 8px;
 }
-#wordresult ul.list2 {
-  color: #666;
-  margin-top: 4px;
-}
-#wordresult li > b {
-  font-weight: normal;
-}
-#wordresult .example-original {
-  font-style: italic;
-}
-#wordresult .phanloai {
-  background: #e6e6e6;
+.lobby-player {
+  background: rgba(58, 58, 58, 0.8);
   border-radius: 4px;
-  display: block;
-  font-weight: bold;
-  margin: 6px 0;
-  padding: 6px;
+  color: #fff;
+  cursor: pointer;
+  margin: 4px 0;
+  padding:5px;
 }
-#wordresult #play {
-  width: 24px;
-  height: 24px;
-  background: url(../pics/play.svg) no-repeat;
-  background-size: 24px;
-  display: inline-block;
-  margin-left: 4px;
-  vertical-align: text-bottom;
-}
-#wordresult #play span {
-  display: none;
+.lobby-player:hover {
+  background: #5cb811;
 }
 
 /*** Mobile ***/

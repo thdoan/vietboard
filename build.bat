@@ -27,15 +27,15 @@ xcopy /iy sounds %target%\sounds
 fart.exe %target%\index.html style.css styles.min.css?v=%timestamp%
 fart.exe %target%\index.html lang/vi_wordlist.js js/lang.min.js?v=%timestamp%
 fart.exe %target%\index.html src/redipsdrag.js js/app.min.js?v=%timestamp%
-fart.exe --c-style --remove %target%\index.html "<script src=\"src/multiplayer.js\"></script>\n"
 fart.exe --c-style --remove %target%\index.html "<script src=\"lang/vi_defs.js\"></script>\n"
 fart.exe --c-style --remove %target%\index.html "<script src=\"lang/vi_letters.js\"></script>\n"
 fart.exe --c-style --remove %target%\index.html "<script src=\"lang/vi_translate.js\"></script>\n"
 fart.exe --c-style --remove %target%\index.html "<script src=\"src/bonuses.js\"></script>\n"
-fart.exe --c-style --remove %target%\index.html "<script src=\"src/ui.js\"></script>\n"
+fart.exe --c-style --remove %target%\index.html "<script src=\"src/changelog.js\"></script>\n"
 fart.exe --c-style --remove %target%\index.html "<script src=\"src/engine.js\"></script>\n"
 fart.exe --c-style --remove %target%\index.html "<script src=\"src/events.js\"></script>\n"
-fart.exe --c-style --remove %target%\index.html "<script src=\"src/changelog.js\"></script>\n"
+fart.exe --c-style --remove %target%\index.html "<script src=\"src/multiplayer.js\"></script>\n"
+fart.exe --c-style --remove %target%\index.html "<script src=\"src/ui.js\"></script>\n"
 REM Clean up
 rmdir /s /q %temp%\vietboard
 REM End local scope
