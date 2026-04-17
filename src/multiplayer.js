@@ -438,7 +438,7 @@ function cleanupMultiplayerSession() {
 
 window.confirmRestartMultiplayer = function() {
   g_bui.prompt(
-    t('Restarting will forfeit this game. Your opponent will be notified.'),
+    t('Restarting will forfeit this game.'),
     '<button class="button secondary" onclick="hideModal()">' + t('Cancel') + '</button>'
       + '&nbsp;&nbsp;<button class="button" onclick="hideModal();finalizeMultiplayerGame(\'forfeit\', true);g_bui.restart()">' + t('Forfeit &amp; Restart') + '</button>'
   );
@@ -467,6 +467,20 @@ function shuffleRackString(rack) {
     arr[j] = tmp;
   }
   return arr.join('');
+}
+
+function normalizeBoardMatrix(matrix, fallbackValue) {
+  var normalized = [];
+  var defaultValue = typeof fallbackValue === 'undefined' ? '' : fallbackValue;
+  for (var x = 0; x < g_boardwidth; ++x) {
+    var sourceCol = Array.isArray(matrix) && Array.isArray(matrix[x]) ? matrix[x] : [];
+    normalized[x] = [];
+    for (var y = 0; y < g_boardheight; ++y) {
+      var value = sourceCol[y];
+      normalized[x][y] = (typeof value === 'undefined' || value === null) ? defaultValue : value;
+    }
+  }
+  return normalized;
 }
 
 function initializeHostGame() {
@@ -522,7 +536,7 @@ function broadcastGameState(payload) {
   }
 }
 
-function sendDragPosition(x, y) {
+function sendDragPosition(x, y, sourceId, sourceCenter) {
   if (!g_isMultiplayer || !g_channel || !g_isMyTurn) return;
   if (g_dragThrottleTimer) return;
 
@@ -530,15 +544,69 @@ function sendDragPosition(x, y) {
     g_dragThrottleTimer = null;
   }, 50);
 
+  var payload = {
+    seq: ++g_dragSeq,
+    x: x,
+    y: y
+  };
+  if (sourceId) payload.sourceId = sourceId;
+  if (sourceCenter && typeof sourceCenter.sourceCenterX === 'number' && typeof sourceCenter.sourceCenterY === 'number') {
+    payload.sourceCenterX = sourceCenter.sourceCenterX;
+    payload.sourceCenterY = sourceCenter.sourceCenterY;
+  }
+
   g_channel.send({
     type: 'broadcast',
     event: 'drag',
-    payload: {
-      seq: ++g_dragSeq,
-      x: x,
-      y: y
-    }
+    payload: payload
   });
+}
+
+function mapRemoteRackCellId(remoteId) {
+  if (typeof remoteId !== 'string') return remoteId;
+  if (remoteId.startsWith('pl') || remoteId.startsWith('op')) {
+    var prefix = remoteId.slice(0, 2);
+    var index = parseInt(remoteId.slice(2), 10);
+    if (isNaN(index)) return remoteId;
+
+    var reversedIndex = index;
+    if (typeof g_racksize === 'number' && g_racksize > 0) {
+      reversedIndex = (g_racksize - 1) - index;
+    }
+
+    if (prefix === 'pl') return 'op' + reversedIndex;
+    if (prefix === 'op') return 'pl' + reversedIndex;
+  }
+  return remoteId;
+}
+
+function localizeDragPosition(payload) {
+  if (!payload || typeof payload.x !== 'number' || typeof payload.y !== 'number') return null;
+
+  var x = payload.x;
+  var y = payload.y;
+  var sourceId = payload.sourceId;
+
+  if (typeof sourceId === 'string' && (sourceId.startsWith('pl') || sourceId.startsWith('op'))) {
+    var localSourceId = mapRemoteRackCellId(sourceId);
+    var localSourceCell = el(localSourceId);
+    if (localSourceCell && typeof payload.sourceCenterX === 'number' && typeof payload.sourceCenterY === 'number') {
+      var localRect = localSourceCell.getBoundingClientRect();
+      var offsetX = payload.x - payload.sourceCenterX;
+      var offsetY = payload.y - payload.sourceCenterY;
+      x = localRect.left + localRect.width / 2 - offsetX;
+      y = localRect.top + localRect.height / 2 - offsetY;
+    } else {
+      var dragArea = el('drag');
+      if (dragArea) {
+        var dragRect = dragArea.getBoundingClientRect();
+        x = dragRect.left + dragRect.width - (payload.x - dragRect.left);
+        y = dragRect.top + dragRect.height - (payload.y - dragRect.top);
+      }
+    }
+  }
+
+  return { x: x, y: y };
 }
 
 function sendDragEnd() {
@@ -603,35 +671,35 @@ function renderOpponentBoardTile(cell, letter, points) {
 
 function applyDragPreview(payload) {
   if (!payload || !payload.fromId || !payload.toId) return;
-  if (payload.fromId === payload.toId) return;
+
+  var fromId = mapRemoteRackCellId(payload.fromId);
+  var toId = mapRemoteRackCellId(payload.toId);
+  if (fromId === toId) return;
 
   // Phase 3: Prevent stale previews from leaving revealed opponent letters in rack.
   // If source is board and target is opponent rack, verify the tile is actually being returned
   // (not a stale preview trying to move it to a wrong location).
-  if (payload.fromId.charAt(0) === 'b' && payload.toId.indexOf('op') === 0) {
-    // Only allow board->rack transitions if we're not mid-game or if sequencing is tight
-    // This prevents orphaned visible tiles in the opponent rack after canceled moves
-    var fromCell = el(payload.fromId);
+  if (fromId.charAt(0) === 'b' && toId.indexOf('op') === 0) {
+    var fromCell = el(fromId);
     if (fromCell && fromCell.holds && fromCell.holds.letter) {
       // Tile is on board: allow the preview to move it back to rack
     } else {
-      // Tile already cleared from board: ignore this stale preview
       return;
     }
   }
 
-  var fromCell = el(payload.fromId);
-  var toCell = el(payload.toId);
+  var fromCell = el(fromId);
+  var toCell = el(toId);
 
-  if (payload.fromId && payload.fromId.charAt(0) === 'b' && fromCell) {
+  if (fromId && fromId.charAt(0) === 'b' && fromCell) {
     fromCell.innerHTML = '';
   }
 
   if (!toCell) return;
 
-  if (payload.toId && payload.toId.charAt(0) === 'b') {
+  if (toId && toId.charAt(0) === 'b') {
     renderOpponentBoardTile(toCell, payload.letter, payload.points);
-  } else if (payload.toId && payload.toId.indexOf('op') === 0) {
+  } else if (toId && toId.indexOf('op') === 0) {
     renderOpponentRackTileBack(toCell);
   }
 }
@@ -678,8 +746,11 @@ function handleDragBroadcast(payload) {
   }
 
   g_dragGhost.innerHTML = '&nbsp;&nbsp;';
-  g_dragGhost.style.left = payload.x + 'px';
-  g_dragGhost.style.top = payload.y + 'px';
+  var localPos = localizeDragPosition(payload);
+  if (localPos) {
+    g_dragGhost.style.left = localPos.x + 'px';
+    g_dragGhost.style.top = localPos.y + 'px';
+  }
 }
 
 function handleGameStateBroadcast(payload) {
@@ -729,6 +800,13 @@ function updateTurnIndicator() {
     btn.disabled = !g_isMyTurn;
   });
 
+  // Enforce turn-based tile interaction: when it is not your turn,
+  // disable dragging from your rack to prevent local unsent moves.
+  if (g_isMultiplayer && g_bui) {
+    if (g_isMyTurn) g_bui.makeTilesFixed();
+    else g_bui.fixPlayerTiles();
+  }
+
   // High Scores: always enabled during multiplayer
   const hsBtn = document.getElementById('highscores');
   if (hsBtn) {
@@ -771,6 +849,12 @@ function onMultiplayerMove() {
   var newBoard = boardinfo.board;
   var newBoardP = boardinfo.boardp;
   var newBoardT = boardinfo.boardt;
+
+  // Keep global board state in sync with current UI state before validation.
+  // checkValidPlacement reads from g_board / g_boardpoints / g_boardtypes.
+  g_board = normalizeBoardMatrix(newBoard, '');
+  g_boardpoints = normalizeBoardMatrix(newBoardP, 0);
+  g_boardtypes = normalizeBoardMatrix(newBoardT, 0);
 
   var pinfo = null;
   var pstr = '';
@@ -873,9 +957,9 @@ function handleMoveBroadcast(payload) {
         }
       }
 
-      g_board = nextBoard;
-      g_boardpoints = Array.isArray(payload.boardp) ? payload.boardp : g_boardpoints;
-      g_boardtypes = Array.isArray(payload.boardt) ? payload.boardt : g_boardtypes;
+      g_board = normalizeBoardMatrix(nextBoard, '');
+      g_boardpoints = normalizeBoardMatrix(payload.boardp, 0);
+      g_boardtypes = normalizeBoardMatrix(payload.boardt, 0);
       g_board_empty = payload.boardEmpty;
 
       if (diffWord.length > 0) {
@@ -1024,9 +1108,9 @@ document.addEventListener('appReady', function() {
         g_letpool = Array.isArray(mpData.letpool) ? mpData.letpool : (Array.isArray(g_letpool) ? g_letpool : []);
         g_pscore = typeof mpData.pscore === 'number' ? mpData.pscore : g_pscore;
         g_oscore = typeof mpData.oscore === 'number' ? mpData.oscore : g_oscore;
-        g_board = Array.isArray(mpData.board) ? mpData.board : g_board;
-        g_boardpoints = Array.isArray(mpData.boardp) ? mpData.boardp : g_boardpoints;
-        g_boardtypes = Array.isArray(mpData.boardt) ? mpData.boardt : g_boardtypes;
+        g_board = normalizeBoardMatrix(mpData.board, '');
+        g_boardpoints = normalizeBoardMatrix(mpData.boardp, 0);
+        g_boardtypes = normalizeBoardMatrix(mpData.boardt, 0);
         g_board_empty = mpData.boardEmpty;
         g_stateVersion = mpData.stateVersion || 0;
         g_isGameOver = !!mpData.isGameOver;
@@ -1118,9 +1202,9 @@ handleGameStateBroadcast = function(payload) {
     if (payload.stateVersion && payload.stateVersion < g_stateVersion) return;
 
     // We received a sync from the other player
-    g_board = Array.isArray(payload.board) ? payload.board : (Array.isArray(g_board) ? g_board : []);
-    g_boardpoints = Array.isArray(payload.boardp) ? payload.boardp : g_boardpoints;
-    g_boardtypes = Array.isArray(payload.boardt) ? payload.boardt : (Array.isArray(g_boardtypes) ? g_boardtypes : []);
+    g_board = normalizeBoardMatrix(payload.board, '');
+    g_boardpoints = normalizeBoardMatrix(payload.boardp, 0);
+    g_boardtypes = normalizeBoardMatrix(payload.boardt, 0);
     g_board_empty = payload.boardEmpty;
     g_pscore = payload.pscore;
     g_oscore = payload.oscore;

@@ -372,7 +372,27 @@ function RedipsUI() {
     g_cache['html'].miscBtns =
       '<button id="lobby" class="button secondary" title="' + t('Lobby') + '" onclick="window.showLobby()">🌐</button>' +
       '<button id="highscores" class="button secondary" title="' + t('High Scores') + '" onclick="g_bui.showHighScores()">🎖</button>' +
-      '<button id="restart" class="button secondary" title="' + t('Restart') + '" onclick="(typeof g_isMultiplayer !== \'undefined\' && g_isMultiplayer && !g_isGameOver) ? confirmRestartMultiplayer() : (g_bui.restart(),g_isMobile&&hideGameInfo())">⟳</button>';
+      '<button id="restart" class="button secondary" title="' + t('Restart') + '" onclick="confirmRestartIfNeeded()">⟳</button>';
+
+    window.confirmRestartIfNeeded = function() {
+      if (!g_isGameOver) {
+        if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
+          return confirmRestartMultiplayer();
+        }
+        return confirmRestartLocal();
+      }
+
+      g_bui.restart();
+      if (g_isMobile) hideGameInfo();
+    };
+
+    window.confirmRestartLocal = function() {
+      g_bui.prompt(
+        t('Restarting will forfeit this game.'),
+        '<button class="button secondary" onclick="hideModal()">' + t('Cancel') + '</button>'
+          + '&nbsp;&nbsp;<button class="button" onclick="hideModal();g_bui.restart();if (g_isMobile) hideGameInfo()">' + t('Restart') + '</button>'
+      );
+    };
 
     // Gameboard
     var isDisabled = !g_board_empty || isHighScore;
@@ -505,9 +525,9 @@ function RedipsUI() {
     if (g_isMobile) html += '</tr><tr>';
     html += '<td class="mark"' + (g_isMobile ? ' colspan="8"' : '') + '>' +
       (isHighScore ? '<button class="button secondary wide" onclick="g_bui.created=false;load(localStorage[\'session\'])">' + t('Return to Game') + '</button>' :
-      '<button class="button" onclick="onPlayerMoved()">' + t('Play') + '</button>' +
+      '<button id="play" class="button" onclick="onPlayerMoved()">' + t('Play') + '</button>' +
       '<button id="clear" class="button secondary" onclick="onPlayerShuffle()">' + t('Shuffle') + '</button>' +
-      '<button class="button secondary" onclick="onPlayerSwap()">' + t('Swap') + '</button>' +
+      '<button id="swap" class="button secondary" onclick="onPlayerSwap()">' + t('Swap') + '</button>' +
       '<button id="pass" class="button secondary" onclick="onPlayerMoved(true)">' + t('Pass') + '</button>') +
       '</td></tr></table></div>';
 
@@ -647,6 +667,47 @@ function RedipsUI() {
     //self.rd.style.borderDisabled = 'solid'; // Border style for disabled element unchanged
     self.rd.animation.pause = g_animation; // Set animation loop pause
 
+    function stopMultiplayerDragSync() {
+      if (self.dragSyncTimer) {
+        clearInterval(self.dragSyncTimer);
+        self.dragSyncTimer = null;
+      }
+    }
+
+    function getMultiplayerDragSource() {
+      if (!self.rd.td || !self.rd.td.source) return null;
+      var sourceCell = self.rd.td.source;
+      var rect = sourceCell.getBoundingClientRect();
+      return {
+        sourceId: sourceCell.id,
+        sourceCenterX: rect.left + rect.width / 2,
+        sourceCenterY: rect.top + rect.height / 2
+      };
+    }
+
+    function startMultiplayerDragSync() {
+      stopMultiplayerDragSync();
+      self.dragSyncTimer = setInterval(function() {
+        if (typeof g_isMultiplayer === 'undefined' || !g_isMultiplayer) return;
+        if (typeof g_isMyTurn === 'undefined' || !g_isMyTurn) return;
+        if (typeof sendDragPosition !== 'function') return;
+        if (!self.rd.obj) return;
+
+        var rect = self.rd.obj.getBoundingClientRect();
+        var dragSource = getMultiplayerDragSource();
+        sendDragPosition(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2,
+          dragSource ? dragSource.sourceId : '',
+          dragSource
+        );
+      }, 40);
+    }
+
+    self.rd.event.clicked = function() {
+      startMultiplayerDragSync();
+    };
+
     self.rd.event.dropped = function() {
       //console.log(self.rd.obj.holds);
       var holds = self.hcopy(self.rd.obj.holds);
@@ -687,6 +748,7 @@ function RedipsUI() {
       }
 
       if (typeof sendDragEnd === 'function') sendDragEnd();
+      stopMultiplayerDragSync();
     };
 
     self.rd.event.changed = function() {
@@ -699,7 +761,13 @@ function RedipsUI() {
 
       if (dragObj && typeof sendDragPosition === 'function') {
         var rect = dragObj.getBoundingClientRect();
-        sendDragPosition(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        var dragSource = getMultiplayerDragSource();
+        sendDragPosition(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2,
+          dragSource ? dragSource.sourceId : '',
+          dragSource
+        );
       }
 
       if (sourceCell && targetCell && sourceCell.id && targetCell.id && typeof sendDragPreview === 'function') {
@@ -709,6 +777,7 @@ function RedipsUI() {
 
     self.rd.event.notMoved = function() {
       if (typeof sendDragEnd === 'function') sendDragEnd();
+      stopMultiplayerDragSync();
     };
 
     self.rd.event.moved = function() {
@@ -723,7 +792,13 @@ function RedipsUI() {
 
       if (typeof sendDragPosition === 'function' && self.rd.obj) {
         var rect = self.rd.obj.getBoundingClientRect();
-        sendDragPosition(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        var dragSource = getMultiplayerDragSource();
+        sendDragPosition(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2,
+          dragSource ? dragSource.sourceId : '',
+          dragSource
+        );
       }
     };
   };
