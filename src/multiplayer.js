@@ -770,19 +770,9 @@ function handleGameStateBroadcast(payload) {
     updateGameInfoLabels();
   } else if (payload.type === 'shuffle') {
     // Phase 5: Apply opponent shuffle with visible transition
-    // Animate opponent rack to show change, then update with new rack state
-    var newRack = payload.rack || '';
-    var oldRackElement = document.querySelector('#drag .opponent tbody');
-    if (oldRackElement) {
-      oldRackElement.style.opacity = '0.5';
-      oldRackElement.style.transition = 'opacity 0.2s ease-in-out';
-      setTimeout(() => {
-        g_bui.setOpponentRack(newRack);
-        oldRackElement.style.opacity = '1';
-      }, 200);
-    } else {
-      g_bui.setOpponentRack(newRack);
-    }
+    animateRackShuffle('op', payload.rack || '', function() {
+      g_bui.setOpponentRack(payload.rack || '');
+    });
   } else if (payload.type === 'highscores_sync') {
     if (payload.highscores) {
       g_highscores = payload.highscores;

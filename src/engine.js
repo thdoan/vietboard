@@ -1380,45 +1380,79 @@ function onPlayerMoved(passed, swapped) {
 }
 
 //------------------------------------------------------------------------------
-function onPlayerShuffle() {
+function animateRackShuffle(prefix, newRack, completeCallback) {
   var elClear = el('clear');
-  elClear.disabled = true;
+  if (elClear) elClear.disabled = true;
   document.documentElement.classList.add('shuffling');
+
   var indexes = [];
-  var totalanims = 0;
+  var totalAnims = 0;
+  var expectedAnims = Math.floor(g_racksize / 2);
   var animDone = function() {
-    if (++totalanims === g_racksize / 2) {
-      elClear.disabled = false;
+    if (++totalAnims === expectedAnims) {
+      if (elClear) elClear.disabled = false;
       document.documentElement.classList.remove('shuffling');
-      if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
-        broadcastGameState({
-          type: 'shuffle',
-          rack: g_bui.getPlayerRack()
-        });
-      }
+      if (typeof completeCallback === 'function') completeCallback();
     }
   };
+
   for (var i = 0; i < g_racksize; ++i) {
     indexes.push(i);
   }
+
   var rnd, i, j;
-  while (indexes.length > 0) {
+  for (var k = 0; k < expectedAnims; ++k) {
     rnd = Math.floor(Math.random() * indexes.length);
     i = indexes[rnd];
     indexes.splice(rnd, 1);
     rnd = Math.floor(Math.random() * indexes.length);
     j = indexes[rnd];
     indexes.splice(rnd, 1);
+
+    var cellA = el(prefix + i);
+    var cellB = el(prefix + j);
+    if (!cellA || !cellB || !cellA.firstChild || !cellB.firstChild) {
+      if (elClear) elClear.disabled = false;
+      document.documentElement.classList.remove('shuffling');
+      if (typeof newRack === 'string') {
+        if (prefix === 'pl') g_bui.setPlayerRack(newRack);
+        else if (prefix === 'op') g_bui.setOpponentRack(newRack);
+      }
+      if (typeof completeCallback === 'function') completeCallback();
+      return;
+    }
+
     g_bui.rd.moveObject({
-      'obj': el('pl' + i).firstChild,
-      'target': el('pl' + j)
+      obj: cellA.firstChild,
+      target: cellB
     });
     g_bui.rd.moveObject({
-      'obj': el('pl' + j).firstChild,
-      'target': el('pl' + i),
-      'callback': animDone
+      obj: cellB.firstChild,
+      target: cellA,
+      callback: animDone
     });
   }
+
+  if (expectedAnims === 0) {
+    if (elClear) elClear.disabled = false;
+    document.documentElement.classList.remove('shuffling');
+    if (typeof newRack === 'string') {
+      if (prefix === 'pl') g_bui.setPlayerRack(newRack);
+      else if (prefix === 'op') g_bui.setOpponentRack(newRack);
+    }
+    if (typeof completeCallback === 'function') completeCallback();
+  }
+}
+
+function onPlayerShuffle() {
+  animateRackShuffle('pl', null, function() {
+    if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
+      broadcastGameState({
+        type: 'shuffle',
+        rack: g_bui.getPlayerRack()
+      });
+    }
+  });
 }
 
 //------------------------------------------------------------------------------
