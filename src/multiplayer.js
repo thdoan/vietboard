@@ -1018,6 +1018,10 @@ function handleMoveBroadcast(payload) {
     updateTurnIndicator();
     updateGameInfoLabels();
 
+    if (payload.passed) {
+      g_bui.toast(payload.swapped ? t('Opponent swapped') : t('Opponent passed'));
+    }
+
     // Check if game over
     if (payload.rackAfter === '' && g_letpool.length === 0) {
       g_isGameOver = true;
