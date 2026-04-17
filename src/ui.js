@@ -372,7 +372,7 @@ function RedipsUI() {
     g_cache['html'].miscBtns =
       '<button id="lobby" class="button secondary" title="' + t('Lobby') + '" onclick="window.showLobby()">🌐</button>' +
       '<button id="highscores" class="button secondary" title="' + t('High Scores') + '" onclick="g_bui.showHighScores()">🎖</button>' +
-      '<button id="restart" class="button secondary" title="' + t('Restart') + '" onclick="g_bui.restart();if(g_isMobile)hideGameInfo()">⟳</button>';
+      '<button id="restart" class="button secondary" title="' + t('Restart') + '" onclick="(typeof g_isMultiplayer !== \'undefined\' && g_isMultiplayer && !g_isGameOver) ? confirmRestartMultiplayer() : (g_bui.restart(),g_isMobile&&hideGameInfo())">⟳</button>';
 
     // Gameboard
     var isDisabled = !g_board_empty || isHighScore;
@@ -688,6 +688,29 @@ function RedipsUI() {
 
       if (typeof sendDragEnd === 'function') sendDragEnd();
     };
+
+    self.rd.event.changed = function() {
+      if (typeof g_isMultiplayer === 'undefined' || !g_isMultiplayer) return;
+      if (typeof g_isMyTurn === 'undefined' || !g_isMyTurn) return;
+
+      var sourceCell = self.rd.td && self.rd.td.source;
+      var targetCell = self.rd.td && self.rd.td.current;
+      var dragObj = self.rd.obj;
+
+      if (dragObj && typeof sendDragPosition === 'function') {
+        var rect = dragObj.getBoundingClientRect();
+        sendDragPosition(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      }
+
+      if (sourceCell && targetCell && sourceCell.id && targetCell.id && typeof sendDragPreview === 'function') {
+        sendDragPreview(sourceCell.id, targetCell.id, dragObj ? dragObj.holds : sourceCell.holds);
+      }
+    };
+
+    self.rd.event.notMoved = function() {
+      if (typeof sendDragEnd === 'function') sendDragEnd();
+    };
+
     self.rd.event.moved = function() {
       var id = self.rd.td.source.id;
       if (typeof sendDragSourceClear === 'function' && id.charAt(0) === self.boardId) {
@@ -992,15 +1015,22 @@ function RedipsUI() {
     var html = '';
     // In high scores view, always show player name even if not currently in a game
     var myName = (typeof g_myName !== 'undefined' && g_myName) ? String(g_myName).trim() : '';
-    var playerDisplayName = (myName && myName !== 'You') ? 'You (' + myName + ')' : 'You';
+    var youLabel = t('You');
+    var playerDisplayName = (myName && myName !== youLabel && myName !== 'You') ? youLabel + ' (' + myName + ')' : youLabel;
+    var opponentLabel = t('Opponent');
+    var computerLabel = t('Computer');
 
     if (g_highscores[sKey]) {
       for (var i = 0; i < g_highscores[sKey].length; ++i) {
         if (!g_highscores[sKey][i]) break;
         var playerName = g_highscores[sKey][i]['player'];
-        // Replace "You" labels with current player name including their username
-        if (playerName === 'You' || playerName.startsWith('You (')) {
+        // Replace localized and legacy "You" labels with current player name including username.
+        if (playerName === youLabel || playerName.startsWith(youLabel + ' (') || playerName === 'You' || playerName.startsWith('You (')) {
           playerName = playerDisplayName;
+        } else if (playerName === 'Opponent' || playerName === opponentLabel) {
+          playerName = opponentLabel;
+        } else if (playerName === 'Computer' || playerName === computerLabel) {
+          playerName = computerLabel;
         }
         html += '<tr><td>' + playerName +
           '</td><td><a class="link" title="' + t('View this match') + '" onclick="loadHighScore(\'' + sKey + '\',' + i + ')" tabindex="1">' +
@@ -1018,7 +1048,6 @@ function RedipsUI() {
   };
 
   self.restart = function() {
-    if (typeof tabulateCurrentScores === 'function') tabulateCurrentScores();
     localStorage.removeItem('session');
     g_bui = new RedipsUI();
     init('board');
@@ -1115,7 +1144,7 @@ function RedipsUI() {
     var html = '<div class="table-container"><table><tr class="header">' +
       '<td><select id="highscores-level" title="' + t('Select level') + '" onchange="el(\'highscores-data\').innerHTML=g_bui.renderHighScoreRows(el(\'highscores-layout\').value+\' \'+value);setModalHeight()">' + sLevels + '</select></td>' +
       '<td><select id="highscores-layout" title="' + t('Select bonuses layout') + '" onchange="el(\'highscores-data\').innerHTML=g_bui.renderHighScoreRows(value+\' \'+el(\'highscores-level\').value);setModalHeight()">' + elBonusesLayout.innerHTML + '</select></td></tr>' +
-      '<tr class="highlight"><th>Player</th><th>Score</th></tr><tbody id="highscores-data">' +
+      '<tr class="highlight"><th>' + t('Player') + '</th><th>' + t('Score') + '</th></tr><tbody id="highscores-data">' +
       self.renderHighScoreRows(g_layout + ' ' + g_bui.level) + '</tbody></table></div>';
     self.prompt(html, '', 'highscores wide');
   };

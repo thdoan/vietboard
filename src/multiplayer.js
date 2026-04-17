@@ -13,10 +13,14 @@ let g_gameId = null;
 let g_isMyTurn = false;
 let g_opponentId = null;
 let g_opponentName = null;
-let g_lobbyUserId = null;
+let g_lobbyUserId = localStorage.getItem('lobby_user_id');
+if (!g_lobbyUserId) {
+  g_lobbyUserId = 'user_' + Math.random().toString(36).substr(2, 9);
+  localStorage.setItem('lobby_user_id', g_lobbyUserId);
+}
 let g_myName = localStorage.getItem('player_name');
 if (!g_myName) {
-  g_myName = 'Generating...'; // Set temporary state
+  g_myName = t('Generating...'); // Set temporary state
 
   // Custom Google Apps Script Random Username Generator
   async function generateNickname() {
@@ -36,8 +40,8 @@ if (!g_myName) {
     if (response.ok) {
       sNickname = await response.text() + sRandInt;
     } else { // Fallback
-      console.warn('Failed to generate nickname.', response.status || '', '\nUsing fallback method...');
-      sNickname = 'Player_' + sRandInt;
+      console.warn(t('Failed to generate nickname.'), response.status || '', '\n' + t('Using fallback method...'));
+      sNickname = t('Player') + '_' + sRandInt;
     }
 
     g_myName = sNickname;
@@ -54,6 +58,12 @@ let g_channel = null; // Either lobby or game channel
 let g_opponentPresenceState = false;
 let g_dragThrottleTimer = null;
 let g_dragGhost = null;
+let g_dragSeq = 0;
+let g_lastRemoteDragSeq = -1;
+let g_stateVersion = 0;
+let g_isGameOver = false;
+let g_opponentDisconnectSeconds = 0;
+let g_reconnectTimer = null;
 
 // Timer state
 let g_idleTimer = null;
@@ -63,7 +73,7 @@ function initSupabase() {
   if (window.supabase) {
     window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   } else {
-    console.error('Supabase library not loaded.');
+    console.error(t('Supabase library not loaded.'));
   }
 }
 
@@ -84,7 +94,7 @@ window.showLobby = function() {
 <table>
   <tr class="header">
     <td><label for="lobby-name">${t('Your name')}</label></td>
-    <td class="input"><input id="lobby-name" value="${g_myName}" onchange="updatePlayerName(this.value)" onkeypress="if(event.key==='Enter') updatePlayerName(this.value)"></td>
+    <td class="input"><input id="lobby-name" value="${g_myName}" onchange="updatePlayerName(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();updatePlayerName(this.value);}"></td>
   </tr>
 </table>
 <p><strong>${t('Click a player to start a game:')}</strong></p>
@@ -99,7 +109,7 @@ window.showLobby = function() {
 }
 
 window.updatePlayerName = async function(newName) {
-  g_myName = newName || 'Player_' + Math.floor(Math.random() * 10000);
+  g_myName = newName || (t('Player') + '_' + Math.floor(Math.random() * 10000));
   localStorage.setItem('player_name', g_myName);
   if (DEBUG) console.log('updatePlayerName: setting to', g_myName);
   // Update input field value
@@ -137,8 +147,6 @@ window.updatePlayerName = async function(newName) {
 function joinLobbyChannel() {
   if (g_channel) g_channel.unsubscribe();
 
-  g_lobbyUserId = 'user_' + Math.random().toString(36).substr(2, 9);
-
   g_channel = window.supabaseClient.channel('lobby', {
     config: {
       presence: {
@@ -166,8 +174,20 @@ function joinLobbyChannel() {
     })
     .on('presence', { event: 'leave' }, (payload) => {
       if (DEBUG) console.log('Presence leave event received:', payload);
+      // presenceState() may be stale at callback time; use payload.key to
+      // eagerly remove the departed user before rendering
       const state = g_channel.presenceState();
-      renderLobbyPlayers(state);
+      const filtered = Object.assign({}, state);
+      if (payload && payload.key) delete filtered[payload.key];
+      renderLobbyPlayers(filtered);
+    })
+    .on('broadcast', { event: 'lobby_leave' }, ({ payload }) => {
+      if (DEBUG) console.log('Broadcast lobby_leave received:', payload);
+      // Explicitly remove departed player even if presenceState() is stale
+      const state = g_channel ? g_channel.presenceState() : {};
+      const filtered = Object.assign({}, state);
+      if (payload && payload.id) delete filtered[payload.id];
+      renderLobbyPlayers(filtered);
     })
     .on('broadcast', { event: 'invite' }, (payload) => {
       if (payload.payload.to === g_lobbyUserId) {
@@ -190,7 +210,8 @@ function renderLobbyPlayers(state) {
   let html = '';
   let count = 0;
   for (const id in state) {
-    const user = state[id][0];
+    const metas = state[id] || [];
+    const user = metas.length > 0 ? metas[metas.length - 1] : null;
     if (!user) continue; // Skip if user data is undefined/null
     if (DEBUG) console.log('Checking user id:', id, 'user:', user);
     // Don't show self. User name can change, so rely on presence key.
@@ -200,25 +221,43 @@ function renderLobbyPlayers(state) {
     }
     if (!user.lookingForGame) continue;
 
-    const safeName = user.name.replace(/'/g, "\\'");
+    const displayName = String(user.name || t('Player'));
+    const safeName = displayName.replace(/'/g, "\\'");
     html += `
 <div class="lobby-player" onclick="invitePlayer('${id}','${safeName}')">
-  <strong>${user.name}</strong>
+  <strong>${displayName}</strong>
 </div>
 `;
     count++;
   }
 
-  if (count === 0) html = '<em>No other players waiting.</em>';
+  if (count === 0) html = '<em>' + t('No other players waiting.') + '</em>';
   container.innerHTML = html;
 }
 
-window.leaveLobby = function() {
+window.leaveLobby = async function() {
   if (g_channel) {
-    g_channel.unsubscribe();
+    // Broadcast explicit leave so other clients remove us immediately,
+    // independent of presence propagation timing
+    try {
+      await g_channel.send({
+        type: 'broadcast',
+        event: 'lobby_leave',
+        payload: { id: g_lobbyUserId }
+      });
+    } catch (err) {
+      if (DEBUG) console.warn('Failed to broadcast lobby_leave:', err);
+    }
+    try {
+      if (typeof g_channel.untrack === 'function') {
+        await g_channel.untrack();
+      }
+    } catch (err) {
+      if (DEBUG) console.warn('Failed to untrack lobby presence:', err);
+    }
+    await g_channel.unsubscribe();
     g_channel = null;
   }
-  g_lobbyUserId = null;
   if (g_dragGhost) {
     g_dragGhost.remove();
     g_dragGhost = null;
@@ -226,6 +265,18 @@ window.leaveLobby = function() {
 }
 
 window.invitePlayer = function(opponentId, opponentName) {
+  if (!g_channel) return;
+
+  const state = g_channel.presenceState();
+  const metas = state[opponentId] || [];
+  const user = metas.length > 0 ? metas[metas.length - 1] : null;
+
+  if (!user || !user.lookingForGame) {
+    renderLobbyPlayers(state);
+    g_bui.prompt(t('This player is no longer available.'));
+    return;
+  }
+
   // To keep it simple, we just start a game instantly using a deterministic game ID based on the two IDs.
   // Actually, random UUID is safer. We will broadcast a "start_game" message to the lobby.
   const newGameId = 'game_' + Math.random().toString(36).substr(2, 9);
@@ -255,13 +306,15 @@ if (typeof t !== 'function') {
   window.t = function(str) { return str; };
 }
 
-function startMultiplayerGame(gameId, opponentName, isHost) {
+async function startMultiplayerGame(gameId, opponentName, isHost) {
+  g_isGameOver = false;
+  g_opponentDisconnectSeconds = 0;
   g_gameId = gameId;
   g_opponentName = opponentName;
   g_isMultiplayer = true;
   localStorage['session_mode'] = 'mp';
 
-  leaveLobby();
+  await leaveLobby();
   hideModal();
 
   // Connect to game channel
@@ -269,6 +322,11 @@ function startMultiplayerGame(gameId, opponentName, isHost) {
 }
 
 function joinGameChannel(gameId, isHost) {
+  if (g_channel) {
+    g_channel.unsubscribe();
+    g_channel = null;
+  }
+
   g_channel = window.supabaseClient.channel('game:' + gameId, {
     config: {
       presence: {
@@ -287,6 +345,7 @@ function joinGameChannel(gameId, isHost) {
         }
       }
       g_opponentPresenceState = opponentFound;
+      if (opponentFound) g_opponentDisconnectSeconds = 0;
     })
     .on('presence', { event: 'leave' }, ({ leftPresences }) => {
       if (DEBUG) console.log('Opponent left presence', leftPresences);
@@ -302,14 +361,96 @@ function joinGameChannel(gameId, isHost) {
     })
     .subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
+        if (g_reconnectTimer) {
+          clearTimeout(g_reconnectTimer);
+          g_reconnectTimer = null;
+        }
         await g_channel.track({ name: g_myName, isHost });
         startIdleTimer();
         if (isHost) {
           // Initialize game state and send it out
           setTimeout(() => initializeHostGame(), 500); // short delay to ensure opponent is connected
         }
+      } else if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') && g_isMultiplayer && !g_isGameOver) {
+        if (!g_reconnectTimer) {
+          g_reconnectTimer = setTimeout(function() {
+            g_reconnectTimer = null;
+            if (g_isMultiplayer && g_gameId && !g_isGameOver) {
+              joinGameChannel(g_gameId, false);
+            }
+          }, 1500);
+        }
       }
     });
+}
+
+function getNextMultiplayerStateVersion() {
+  g_stateVersion += 1;
+  return g_stateVersion;
+}
+window.getNextMultiplayerStateVersion = getNextMultiplayerStateVersion;
+
+function applyNonGameButtonPolicy() {
+  var hsBtn = document.getElementById('highscores');
+  if (hsBtn) hsBtn.disabled = false;
+
+  var lobbyBtn = document.getElementById('lobby');
+  if (lobbyBtn) {
+    lobbyBtn.disabled = false;
+    lobbyBtn.title = t('Lobby');
+  }
+
+  var restartBtn = document.getElementById('restart');
+  if (restartBtn) restartBtn.disabled = false;
+}
+
+function cleanupMultiplayerSession() {
+  if (g_idleTimer) {
+    clearInterval(g_idleTimer);
+    g_idleTimer = null;
+  }
+  if (g_reconnectTimer) {
+    clearTimeout(g_reconnectTimer);
+    g_reconnectTimer = null;
+  }
+  if (g_channel) {
+    g_channel.unsubscribe();
+    g_channel = null;
+  }
+
+  localStorage.removeItem('session_mp');
+  localStorage['session_mode'] = 'sp';
+
+  g_isMultiplayer = false;
+  g_isMyTurn = true;
+  g_gameId = null;
+  g_opponentName = null;
+  g_opponentPresenceState = false;
+  g_opponentDisconnectSeconds = 0;
+
+  applyNonGameButtonPolicy();
+}
+
+window.confirmRestartMultiplayer = function() {
+  g_bui.prompt(
+    t('Restarting will forfeit this game. Your opponent will be notified.'),
+    '<button class="button secondary" onclick="hideModal()">' + t('Cancel') + '</button>'
+      + '&nbsp;&nbsp;<button class="button" onclick="hideModal();finalizeMultiplayerGame(\'forfeit\', true);g_bui.restart()">' + t('Forfeit &amp; Restart') + '</button>'
+  );
+};
+
+function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
+  if (!g_isMultiplayer || g_isGameOver) return;
+  g_isGameOver = true;
+
+  broadcastGameState({
+    type: 'game_ended',
+    reason: reason || 'ended',
+    stateVersion: g_stateVersion
+  });
+
+  if (!skipLocalAnnounce) announceWinner();
+  cleanupMultiplayerSession();
 }
 
 function shuffleRackString(rack) {
@@ -333,6 +474,7 @@ function initializeHostGame() {
 
   // Call restart without prompting
   g_bui.restart(true);
+  g_isMultiplayer = true;
 
   // Wait a tick for letpool to be built, then sync it
   setTimeout(() => {
@@ -346,13 +488,16 @@ function initializeHostGame() {
     var oppRack = shuffleRackString(rawOppRack);
     g_bui.setPlayerRack(myRack);
     g_bui.setOpponentRack(oppRack);
+    g_bui.makeTilesFixed();
+    g_stateVersion = 1;
 
     broadcastGameState({
       type: 'init',
       letpool: g_letpool,
       myRack: oppRack, // What is opponent rack to us is their rack
       oppRack: myRack,
-      hostGoesFirst: hostGoesFirst
+      hostGoesFirst: hostGoesFirst,
+      stateVersion: g_stateVersion
     });
     saveMultiplayerSession();
     updateTurnIndicator();
@@ -383,6 +528,7 @@ function sendDragPosition(x, y) {
     type: 'broadcast',
     event: 'drag',
     payload: {
+      seq: ++g_dragSeq,
       x: x,
       y: y
     }
@@ -396,6 +542,7 @@ function sendDragEnd() {
     type: 'broadcast',
     event: 'drag',
     payload: {
+      seq: ++g_dragSeq,
       end: true
     }
   });
@@ -408,6 +555,7 @@ function sendDragPreview(fromId, toId, holds) {
     type: 'broadcast',
     event: 'drag',
     payload: {
+      seq: ++g_dragSeq,
       action: 'preview',
       fromId: fromId,
       toId: toId,
@@ -424,6 +572,7 @@ function sendDragSourceClear(sourceId) {
     type: 'broadcast',
     event: 'drag',
     payload: {
+      seq: ++g_dragSeq,
       action: 'clear',
       sourceId: sourceId
     }
@@ -447,6 +596,24 @@ function renderOpponentBoardTile(cell, letter, points) {
 }
 
 function applyDragPreview(payload) {
+  if (!payload || !payload.fromId || !payload.toId) return;
+  if (payload.fromId === payload.toId) return;
+
+  // Phase 3: Prevent stale previews from leaving revealed opponent letters in rack.
+  // If source is board and target is opponent rack, verify the tile is actually being returned
+  // (not a stale preview trying to move it to a wrong location).
+  if (payload.fromId.charAt(0) === 'b' && payload.toId.indexOf('op') === 0) {
+    // Only allow board->rack transitions if we're not mid-game or if sequencing is tight
+    // This prevents orphaned visible tiles in the opponent rack after canceled moves
+    var fromCell = el(payload.fromId);
+    if (fromCell && fromCell.holds && fromCell.holds.letter) {
+      // Tile is on board: allow the preview to move it back to rack
+    } else {
+      // Tile already cleared from board: ignore this stale preview
+      return;
+    }
+  }
+
   var fromCell = el(payload.fromId);
   var toCell = el(payload.toId);
 
@@ -473,6 +640,11 @@ function applyDragSourceClear(payload) {
 
 function handleDragBroadcast(payload) {
   if (!g_isMultiplayer || !payload) return;
+
+  if (typeof payload.seq === 'number') {
+    if (payload.seq <= g_lastRemoteDragSeq) return;
+    g_lastRemoteDragSeq = payload.seq;
+  }
 
   if (payload.action === 'preview') {
     applyDragPreview(payload);
@@ -511,13 +683,29 @@ function handleGameStateBroadcast(payload) {
     g_bui.setPlayerRack(payload.myRack);
     g_bui.setOpponentRack(payload.oppRack);
     g_bui.setTilesLeft(g_letpool.length);
+    g_bui.makeTilesFixed();
+    g_stateVersion = payload.stateVersion || g_stateVersion;
+    g_isGameOver = false;
     g_isMyTurn = !payload.hostGoesFirst;
     localStorage['session_mode'] = 'mp';
     saveMultiplayerSession();
     updateTurnIndicator();
     updateGameInfoLabels();
   } else if (payload.type === 'shuffle') {
-    g_bui.setOpponentRack(payload.rack || '');
+    // Phase 5: Apply opponent shuffle with visible transition
+    // Animate opponent rack to show change, then update with new rack state
+    var newRack = payload.rack || '';
+    var oldRackElement = document.querySelector('#drag .opponent tbody');
+    if (oldRackElement) {
+      oldRackElement.style.opacity = '0.5';
+      oldRackElement.style.transition = 'opacity 0.2s ease-in-out';
+      setTimeout(() => {
+        g_bui.setOpponentRack(newRack);
+        oldRackElement.style.opacity = '1';
+      }, 200);
+    } else {
+      g_bui.setOpponentRack(newRack);
+    }
   } else if (payload.type === 'highscores_sync') {
     if (payload.highscores) {
       g_highscores = payload.highscores;
@@ -527,12 +715,27 @@ function handleGameStateBroadcast(payload) {
 }
 
 function updateTurnIndicator() {
-  // Disable game buttons (Play, Clear, Swap, Pass) when opponent's turn
-  document.querySelectorAll('#drag .button').forEach((button) => {
-    button.disabled = !g_isMyTurn;
+  // Phase 4: Explicit button gating policy
+  // Move-action controls: turn-gated (Play, Clear/Shuffle, Swap, Pass)
+  const moveButtons = ['play', 'clear', 'swap', 'pass'];
+  const moveButtonIds = moveButtons.map(b => document.getElementById(b)).filter(Boolean);
+  moveButtonIds.forEach(btn => {
+    btn.disabled = !g_isMyTurn;
   });
 
-  // Disable lobby when in multiplayer game, enable when not
+  // High Scores: always enabled during multiplayer
+  const hsBtn = document.getElementById('highscores');
+  if (hsBtn) {
+    hsBtn.disabled = false;
+  }
+
+  // Restart: disabled once game starts
+  const restartBtn = document.getElementById('restart');
+  if (restartBtn) {
+    restartBtn.disabled = g_isMultiplayer && !g_board_empty;
+  }
+
+  // Lobby: disabled once game starts
   const lobbyBtn = document.getElementById('lobby');
   if (lobbyBtn) {
     if (g_isMultiplayer && !g_board_empty) {
@@ -626,7 +829,8 @@ function onMultiplayerMove() {
     rackBefore: rackBefore,
     rackAfter: rackAfter,
     letpool: g_letpool,
-    boardEmpty: g_board_empty
+    boardEmpty: g_board_empty,
+    stateVersion: getNextMultiplayerStateVersion()
   };
 
   g_isMyTurn = false;
@@ -639,6 +843,9 @@ function onMultiplayerMove() {
 
 function handleMoveBroadcast(payload) {
   if (payload.type === 'move') {
+    if (payload.stateVersion && payload.stateVersion <= g_stateVersion) return;
+    g_stateVersion = Math.max(g_stateVersion, payload.stateVersion || 0);
+
     // Apply opponent's move
     if (!payload.passed) {
       // Diff against previous board before applying the new payload board
@@ -743,7 +950,9 @@ function saveMultiplayerSession() {
       board: g_board,
       boardp: g_boardpoints,
       boardt: g_boardtypes,
-      boardEmpty: g_board_empty
+      boardEmpty: g_board_empty,
+      stateVersion: g_stateVersion,
+      isGameOver: g_isGameOver
     });
   }
 }
@@ -767,6 +976,8 @@ window.addEventListener('appReady', function() {
         g_boardpoints = mpData.boardp;
         g_boardtypes = mpData.boardt;
         g_board_empty = mpData.boardEmpty;
+        g_stateVersion = mpData.stateVersion || 0;
+        g_isGameOver = !!mpData.isGameOver;
 
         // Apply board
         setTimeout(() => {
@@ -812,6 +1023,17 @@ const originalHandleMoveBroadcast2 = handleGameStateBroadcast;
 handleGameStateBroadcast = function(payload) {
   originalHandleMoveBroadcast2(payload);
 
+  if (payload.type === 'game_ended') {
+    if (g_isGameOver) return;
+    g_isGameOver = true;
+    if (payload.reason === 'forfeit') {
+      g_bui.prompt(t('Opponent has left the game.'));
+    }
+    announceWinner();
+    cleanupMultiplayerSession();
+    return;
+  }
+
   if (payload.type === 'request_state') {
     // The other player just refreshed and is asking for the authoritative state
     // Send them our current state view so they can catch up if they missed anything
@@ -826,9 +1048,12 @@ handleGameStateBroadcast = function(payload) {
       myRack: g_bui.getOpponentRack(),
       oppRack: g_bui.getPlayerRack(),
       letpool: g_letpool,
-      isMyTurn: !g_isMyTurn
+      isMyTurn: !g_isMyTurn,
+      stateVersion: g_stateVersion
     });
   } else if (payload.type === 'state_sync') {
+    if (payload.stateVersion && payload.stateVersion < g_stateVersion) return;
+
     // We received a sync from the other player
     g_board = payload.board;
     g_boardpoints = payload.boardp;
@@ -838,6 +1063,7 @@ handleGameStateBroadcast = function(payload) {
     g_oscore = payload.oscore;
     g_letpool = payload.letpool;
     g_isMyTurn = payload.isMyTurn;
+    g_stateVersion = Math.max(g_stateVersion, payload.stateVersion || 0);
 
     g_bui.setPlayerRack(payload.myRack);
     g_bui.setOpponentRack(payload.oppRack);
@@ -871,34 +1097,33 @@ handleGameStateBroadcast = function(payload) {
 function startIdleTimer() {
   if (g_idleTimer) clearInterval(g_idleTimer);
   g_idleSeconds = 0;
-
-  let opponentDisconnectSeconds = 0;
+  g_opponentDisconnectSeconds = 0;
 
   g_idleTimer = setInterval(() => {
-    if (!g_isMultiplayer) return;
+    if (!g_isMultiplayer || g_isGameOver) return;
 
     // Check if opponent is missing
     if (!g_opponentPresenceState && g_opponentName) {
-      opponentDisconnectSeconds++;
+      g_opponentDisconnectSeconds++;
     } else {
-      opponentDisconnectSeconds = 0;
+      g_opponentDisconnectSeconds = 0;
     }
 
     // If opponent is missing for 5 minutes, forfeit game
-    if (opponentDisconnectSeconds === 240) {
+    if (g_opponentDisconnectSeconds === 240) {
       g_bui.prompt(t('WARNING: Opponent disconnected. Game will forfeit in 1 minute.'));
     }
 
-    if (opponentDisconnectSeconds >= 290 && opponentDisconnectSeconds <= 300) {
-      var timeLeft = 300 - opponentDisconnectSeconds;
+    if (g_opponentDisconnectSeconds >= 290 && g_opponentDisconnectSeconds <= 300) {
+      var timeLeft = 300 - g_opponentDisconnectSeconds;
       var statusEl = document.getElementById('status');
-      if (statusEl) statusEl.innerHTML = '<span style="color:red">Opponent forfeits in ' + timeLeft + 's...</span>';
+      if (statusEl) statusEl.innerHTML = '<span style="color:red">' + t('Opponent forfeits in ') + timeLeft + t('s...') + '</span>';
     }
 
-    if (opponentDisconnectSeconds >= 300) {
+    if (g_opponentDisconnectSeconds >= 300) {
       clearInterval(g_idleTimer);
       g_bui.prompt(t('Opponent forfeited due to disconnection.'));
-      announceWinner();
+      finalizeMultiplayerGame('disconnect_forfeit');
       return;
     }
 
@@ -912,12 +1137,12 @@ function startIdleTimer() {
     if (g_idleSeconds >= 290 && g_idleSeconds <= 300) {
       var timeLeft = 300 - g_idleSeconds;
       var statusEl = document.getElementById('status');
-      if (statusEl) statusEl.innerHTML = '<span style="color:red">Game ends in ' + timeLeft + 's...</span>';
+      if (statusEl) statusEl.innerHTML = '<span style="color:red">' + t('Game ends in ') + timeLeft + t('s...') + '</span>';
     }
 
     if (g_idleSeconds >= 300) {
       clearInterval(g_idleTimer);
-      announceWinner();
+      finalizeMultiplayerGame('inactivity_timeout');
       g_bui.prompt(t('Game over due to inactivity.'));
     }
   }, 1000);

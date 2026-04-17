@@ -138,6 +138,10 @@ function init(iddiv) {
 //------------------------------------------------------------------------------
 function announceWinner() {
   //console.log('announceWinner');
+  var isMP = (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer);
+  var opponentNoun = isMP ? t('Opponent') : t('Computer');
+  var opponentWinsText = isMP ? t('Opponent wins.') : t('Computer wins.');
+
   var oleft = g_bui.getOpponentRack();
   var pleft = g_bui.getPlayerRack();
 
@@ -155,14 +159,14 @@ function announceWinner() {
   g_pscore -= pdeduct;
 
   var html = '<table id="gameover" class="centered"><tr>';
-  var text = 'GAMEOVER';
+  var text = t('GAMEOVER');
   for (var i = 0; i < text.length; ++i) {
     html += '<td class="tile"><div class="drag t' + randInt(1, 2) + '">' + text[i] + '</div></td>';
   }
   html += '</tr></table><ul><li>';
-  html += t('You') + ': <strong>' + g_pscore + '</strong></li><li>' + (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer ? t('Opponent') : t('Computer')) + ': <strong>' + g_oscore + '</strong></li></ul>';
+  html += t('You') + ': <strong>' + g_pscore + '</strong></li><li>' + opponentNoun + ': <strong>' + g_oscore + '</strong></li></ul>';
   var msg = '<h3>' + t('It&rsquo;s a tie!');
-  if (g_oscore > g_pscore) msg = '<h3 class="opponent">' + (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer ? t('Opponent wins.') : t('Computer wins.'));
+  if (g_oscore > g_pscore) msg = '<h3 class="opponent">' + opponentWinsText;
   else if (g_oscore < g_pscore) msg = '<h3 class="player">' + t('You win!');
   html += msg + '</h3>';
   g_bui.prompt(html, '<button class="button" onclick="hideModal();g_bui.restart()">' + t('Play Again') + '</button>', 'gameover wide');
@@ -203,7 +207,7 @@ function announceWinner() {
   // GA
   gtag('event', 'Game Over', {
     'event_category': 'Gameplay - Lvl ' + (g_playlevel + 1),
-    'event_label': 'Player=' + g_pscore + ', Computer=' + g_oscore,
+    'event_label': 'Player=' + g_pscore + ', ' + opponentNoun + '=' + g_oscore,
     'value': g_letpool.length
   });
 
@@ -215,20 +219,23 @@ function announceWinner() {
 
 //------------------------------------------------------------------------------
 function getHighScoreNames() {
+  var youLabel = 'You';
+  var computerLabel = 'Computer';
+  var opponentLabel = 'Opponent';
   var isMP = (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer);
   if (!isMP) {
     return {
-      'player': 'You',
-      'opponent': 'Computer'
+      'player': youLabel,
+      'opponent': computerLabel
     };
   }
 
   var myName = (typeof g_myName !== 'undefined' && g_myName) ? String(g_myName).trim() : '';
-  var oppName = (typeof g_opponentName !== 'undefined' && g_opponentName) ? String(g_opponentName).trim() : 'Opponent';
+  var oppName = (typeof g_opponentName !== 'undefined' && g_opponentName) ? String(g_opponentName).trim() : opponentLabel;
 
   return {
     'player': (myName && myName !== 'You') ? 'You (' + myName + ')' : 'You',
-    'opponent': oppName || 'Opponent'
+    'opponent': oppName || opponentLabel
   };
 }
 
@@ -1329,7 +1336,10 @@ function onPlayerMoved(passed, swapped) {
   if (passed) {
     el('pass').disabled = true;
     g_bui.cancelPlayerPlacement();
-    g_bui.showBusy();
+    // Phase 4: Skip busy modal in multiplayer mode
+    if (typeof g_isMultiplayer === 'undefined' || !g_isMultiplayer) {
+      g_bui.showBusy();
+    }
   }
   self.passed = passed;
   clearTimeout(g_bui.timer); // Clear hideModal() 300ms delay
@@ -1417,7 +1427,8 @@ function onPlayerSwapped(keep, swap) {
       swapped: true,
       rackAfter: g_bui.getPlayerRack(),
       letpool: g_letpool,
-      score: 0
+      score: 0,
+      stateVersion: (typeof getNextMultiplayerStateVersion === 'function') ? getNextMultiplayerStateVersion() : 0
     };
 
     g_isMyTurn = false;
