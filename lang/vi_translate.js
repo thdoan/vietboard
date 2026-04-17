@@ -74,7 +74,7 @@ var translation_map = {
   'this browser is not supported. Please upgrade to a modern browser.': 'trình duyệt này không được hỗ trợ. Vui lòng nâng cấp trình duyệt.',
   'This will restart the game.': 'Trò chơi sẽ khởi động lại.',
   'This player is no longer available.': 'Người chơi này không còn khả dụng.',
-  'Restarting will forfeit this game. Your opponent will be notified.': 'Khởi động lại sẽ thua cuộc. Đối thủ của bạn sẽ được thông báo.',
+  'Restarting will forfeit this game.': 'Khởi động lại sẽ thua cuộc.',
   'Forfeit &amp; Restart': 'Bỏ Cuộc &amp; Khởi Động Lại',
   'Opponent has left the game.': 'Đối thủ đã rời trò chơi.',
   'Tiles left:': 'Số chữ còn lại:',

@@ -132,7 +132,7 @@ function init(iddiv) {
   g_bui.setPlayerRack(takeLetters(''));
   //g_bui.setPlayerRack(takeLetters('qẵễỗệộỵv'));
   g_bui.setTilesLeft(g_letpool.length);
-  g_bui.makeTilesFixed();
+  setSinglePlayerTurn(true);
 }
 
 //------------------------------------------------------------------------------
@@ -1139,6 +1139,21 @@ function onPlayerClear() {
   g_bui.cancelPlayerPlacement();
 }
 
+function setSinglePlayerTurn(isPlayerTurn) {
+  if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) return;
+
+  var buttonIds = ['play', 'clear', 'swap', 'pass'];
+  for (var i = 0; i < buttonIds.length; ++i) {
+    var btn = el(buttonIds[i]);
+    if (btn) btn.disabled = !isPlayerTurn;
+  }
+
+  if (g_bui) {
+    if (isPlayerTurn) g_bui.makeTilesFixed();
+    else g_bui.fixPlayerTiles();
+  }
+}
+
 //------------------------------------------------------------------------------
 function onPlayerMove() {
   if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
@@ -1167,6 +1182,14 @@ function onPlayerMove() {
     var pstr = pinfo.played;
 
     if (pstr === '') {
+      setSinglePlayerTurn(true);
+      var pendingPlacement = g_bui.getPlayerPlacement();
+      for (var i = 0; i < pendingPlacement.length; ++i) {
+        var pendingCell = el(pendingPlacement[i].id);
+        if (pendingCell && pendingCell.firstChild) {
+          g_bui.rd.enableDrag(true, pendingCell.firstChild);
+        }
+      }
       g_bui.prompt(gErrPrefix() + pinfo.msg);
       return;
     }
@@ -1225,7 +1248,7 @@ function onPlayerMove() {
   //console.log('Opponent word is: ' + play_word.word);
 
   var animCallback = function() {
-    g_bui.makeTilesFixed();
+    setSinglePlayerTurn(true);
     // Create the array of word and created orthogonal words created by
     // opponent move.
     var words = play_word.owords;
@@ -1260,7 +1283,6 @@ function onPlayerMove() {
     if (DEBUG) console.log('After taking letters, opponent rack is: ' + newLetters);
     g_bui.setOpponentRack(newLetters);
     g_bui.setTilesLeft(g_letpool.length);
-    el('pass').disabled = false;
     // Save session
     localStorage['session'] = getSession();
     localStorage['session_mode'] = 'sp';
@@ -1283,7 +1305,7 @@ function onPlayerMove() {
       announceWinner();
     } else {
       // Swap up to four random tiles
-      g_bui.makeTilesFixed();
+      setSinglePlayerTurn(true);
       if (g_letpool.length > 0) {
         var tilesToSwap = Math.min(Math.ceil(g_racksize / 2), ostr.length, g_letpool.length);
         // Shuffle rack
@@ -1319,7 +1341,6 @@ function onPlayerMove() {
       } else {
         g_bui.prompt(t('I pass, your turn.'));
       }
-      el('pass').disabled = false;
       // Save session
       localStorage['session'] = getSession();
       localStorage['session_mode'] = 'sp';
@@ -1333,8 +1354,11 @@ function onPlayerMove() {
 //------------------------------------------------------------------------------
 function onPlayerMoved(passed, swapped) {
   //console.log('onPlayerMoved', passed, swapped);
+  if (typeof g_isMultiplayer === 'undefined' || !g_isMultiplayer) {
+    setSinglePlayerTurn(false);
+  }
+
   if (passed) {
-    el('pass').disabled = true;
     g_bui.cancelPlayerPlacement();
     // Phase 4: Skip busy modal in multiplayer mode
     if (typeof g_isMultiplayer === 'undefined' || !g_isMultiplayer) {
