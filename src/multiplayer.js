@@ -64,6 +64,7 @@ let g_stateVersion = 0;
 let g_isGameOver = false;
 let g_opponentDisconnectSeconds = 0;
 let g_reconnectTimer = null;
+let g_lastMoveAt = 0;
 
 // Timer state
 let g_idleTimer = null;
@@ -427,6 +428,10 @@ function cleanupMultiplayerSession() {
   g_opponentName = null;
   g_opponentPresenceState = false;
   g_opponentDisconnectSeconds = 0;
+  g_stateVersion = 0;
+  g_lastMoveAt = 0;
+  g_lastRemoteDragSeq = -1;
+  g_dragSeq = 0;
 
   applyNonGameButtonPolicy();
 }
@@ -499,6 +504,7 @@ function initializeHostGame() {
       hostGoesFirst: hostGoesFirst,
       stateVersion: g_stateVersion
     });
+    g_lastMoveAt = Date.now();
     saveMultiplayerSession();
     updateTurnIndicator();
     updateGameInfoLabels();
@@ -838,6 +844,7 @@ function onMultiplayerMove() {
   updateGameInfoLabels();
   broadcastGameState(moveData);
 
+  g_lastMoveAt = Date.now();
   saveMultiplayerSession();
 }
 
@@ -849,13 +856,16 @@ function handleMoveBroadcast(payload) {
     // Apply opponent's move
     if (!payload.passed) {
       // Diff against previous board before applying the new payload board
-      var prevBoard = g_board;
+      var prevBoard = Array.isArray(g_board) ? g_board : [];
+      var nextBoard = Array.isArray(payload.board) ? payload.board : [];
 
       var diffWord = [];
       for (var y = 0; y < g_boardheight; ++y) {
+        var prevRow = Array.isArray(prevBoard[y]) ? prevBoard[y] : [];
+        var nextRow = Array.isArray(nextBoard[y]) ? nextBoard[y] : [];
         for (var x = 0; x < g_boardwidth; ++x) {
-          var charBefore = prevBoard[y][x];
-          var charAfter = payload.board[y][x];
+          var charBefore = prevRow[x] || ' ';
+          var charAfter = nextRow[x] || ' ';
           if (charAfter !== ' ' && charBefore === ' ') {
             var ltr = charAfter === charAfter.toLowerCase() ? '*' : charAfter;
             diffWord.push([y, x, charAfter, g_letscore[ltr]]);
@@ -863,9 +873,9 @@ function handleMoveBroadcast(payload) {
         }
       }
 
-      g_board = payload.board;
-      g_boardpoints = payload.boardp;
-      g_boardtypes = payload.boardt;
+      g_board = nextBoard;
+      g_boardpoints = Array.isArray(payload.boardp) ? payload.boardp : g_boardpoints;
+      g_boardtypes = Array.isArray(payload.boardt) ? payload.boardt : g_boardtypes;
       g_board_empty = payload.boardEmpty;
 
       if (diffWord.length > 0) {
@@ -886,8 +896,12 @@ function handleMoveBroadcast(payload) {
           updateTurnIndicator();
 
           if (payload.rackAfter === '' && g_letpool.length === 0) {
+            g_isGameOver = true;
             announceWinner();
+            cleanupMultiplayerSession();
+            return;
           }
+          g_lastMoveAt = Date.now();
           saveMultiplayerSession();
         });
 
@@ -895,12 +909,16 @@ function handleMoveBroadcast(payload) {
         return;
       } else {
         for (var y = 0; y < g_boardheight; ++y) {
+          var boardRow = g_board[y];
+          var boardTypeRow = g_boardtypes[y];
+          if (!Array.isArray(boardRow) || !Array.isArray(boardTypeRow)) continue;
+
           for (var x = 0; x < g_boardwidth; ++x) {
             var cell = el('b' + y + '_' + x);
-            var char = g_board[y][x];
+            var char = boardRow[x];
             if (char !== ' ' && cell && cell.innerHTML === '') {
               var ltr = char === char.toLowerCase() ? '*' : char;
-              var tClass = g_boardtypes[y][x] === 1 ? 't2' : 't1';
+              var tClass = boardTypeRow[x] === 1 ? 't2' : 't1';
               var html = '<div class="drag ' + tClass + '">' + ltr + '<sub>' + g_letscore[ltr] + '</sub></div>';
               cell.innerHTML = html;
             }
@@ -914,8 +932,8 @@ function handleMoveBroadcast(payload) {
     g_oscore += payload.score;
     g_bui.setOpponentScore(payload.score, g_oscore);
     g_bui.setOpponentRack(payload.rackAfter);
-    g_letpool = payload.letpool;
-    g_bui.setTilesLeft(g_letpool.length);
+    g_letpool = Array.isArray(payload.letpool) ? payload.letpool : (Array.isArray(g_letpool) ? g_letpool : []);
+    g_bui.setTilesLeft((g_letpool || []).length);
 
     if (!payload.passed) {
       var elStatus = el('status');
@@ -928,15 +946,35 @@ function handleMoveBroadcast(payload) {
 
     // Check if game over
     if (payload.rackAfter === '' && g_letpool.length === 0) {
+      g_isGameOver = true;
       announceWinner();
+      cleanupMultiplayerSession();
+      return;
     }
 
+    g_lastMoveAt = Date.now();
     saveMultiplayerSession();
   }
 }
 
 function saveMultiplayerSession() {
   if (g_isMultiplayer) {
+    var now = Date.now();
+    var inferredLastMoveAt = g_lastMoveAt || 0;
+    var previousSnapshot = null;
+
+    try {
+      previousSnapshot = JSON.parse(localStorage['session_mp'] || '{}');
+    } catch (err) {
+      previousSnapshot = null;
+    }
+
+    if (!inferredLastMoveAt && previousSnapshot && typeof previousSnapshot.lastMoveAt === 'number') {
+      inferredLastMoveAt = previousSnapshot.lastMoveAt;
+    }
+
+    if (!inferredLastMoveAt) inferredLastMoveAt = now;
+
     localStorage['session_mode'] = 'mp';
     localStorage['session_mp'] = JSON.stringify({
       gameId: g_gameId,
@@ -952,50 +990,70 @@ function saveMultiplayerSession() {
       boardt: g_boardtypes,
       boardEmpty: g_board_empty,
       stateVersion: g_stateVersion,
-      isGameOver: g_isGameOver
+      isGameOver: g_isGameOver,
+      savedAt: now,
+      lastMoveAt: inferredLastMoveAt
     });
   }
 }
 
-window.addEventListener('appReady', function() {
+document.addEventListener('appReady', function() {
   // Check if we have a multiplayer session to resume
   if (localStorage['session_mp']) {
     try {
       var mpData = JSON.parse(localStorage['session_mp']);
-      if (mpData && mpData.gameId) {
+      var now = Date.now();
+      var MAX_RESUME_AGE_MS = 30 * 60 * 1000; // 30 minutes
+      var hasRecentSnapshot = mpData && typeof mpData.savedAt === 'number' && (now - mpData.savedAt) <= MAX_RESUME_AGE_MS;
+      var hasRecentMove = mpData && typeof mpData.lastMoveAt === 'number' && (now - mpData.lastMoveAt) <= MAX_RESUME_AGE_MS;
+      var hasUsableState = mpData &&
+        typeof mpData.gameId === 'string' && mpData.gameId !== '' &&
+        typeof mpData.stateVersion === 'number' && mpData.stateVersion > 0 &&
+        typeof mpData.myRack === 'string' &&
+        typeof mpData.oppRack === 'string' &&
+        Array.isArray(mpData.letpool);
+
+      // Resume only with a recent, valid in-game snapshot.
+      if (hasUsableState && (hasRecentSnapshot || hasRecentMove)) {
         if (DEBUG) console.log('Resuming multiplayer session...');
 
         g_gameId = mpData.gameId;
         g_opponentName = mpData.opponentName;
         g_isMultiplayer = true;
         g_isMyTurn = mpData.isMyTurn;
-        g_letpool = mpData.letpool;
-        g_pscore = mpData.pscore;
-        g_oscore = mpData.oscore;
-        g_board = mpData.board;
-        g_boardpoints = mpData.boardp;
-        g_boardtypes = mpData.boardt;
+        g_letpool = Array.isArray(mpData.letpool) ? mpData.letpool : (Array.isArray(g_letpool) ? g_letpool : []);
+        g_pscore = typeof mpData.pscore === 'number' ? mpData.pscore : g_pscore;
+        g_oscore = typeof mpData.oscore === 'number' ? mpData.oscore : g_oscore;
+        g_board = Array.isArray(mpData.board) ? mpData.board : g_board;
+        g_boardpoints = Array.isArray(mpData.boardp) ? mpData.boardp : g_boardpoints;
+        g_boardtypes = Array.isArray(mpData.boardt) ? mpData.boardt : g_boardtypes;
         g_board_empty = mpData.boardEmpty;
         g_stateVersion = mpData.stateVersion || 0;
         g_isGameOver = !!mpData.isGameOver;
 
         // Apply board
         setTimeout(() => {
-          g_bui.setPlayerRack(mpData.myRack);
-          g_bui.setOpponentRack(mpData.oppRack);
+          g_bui.setPlayerRack(String(mpData.myRack || ''));
+          g_bui.setOpponentRack(String(mpData.oppRack || ''));
           g_bui.setPlayerScore(0, g_pscore);
           g_bui.setOpponentScore(0, g_oscore);
-          g_bui.setTilesLeft(g_letpool.length);
+          g_bui.setTilesLeft((g_letpool || []).length);
 
-          for (var y = 0; y < g_boardheight; ++y) {
-            for (var x = 0; x < g_boardwidth; ++x) {
-              var cell = el('b' + y + '_' + x);
-              var char = g_board[y][x];
-              if (char !== ' ' && cell && cell.innerHTML === '') {
-                var ltr = char === char.toLowerCase() ? '*' : char;
-                var tClass = g_boardtypes[y][x] === 1 ? 't1' : 't2';
-                var html = '<div class="drag ' + tClass + '">' + ltr + '<sub>' + g_letscore[ltr] + '</sub></div>';
-                cell.innerHTML = html;
+          if (Array.isArray(g_board) && Array.isArray(g_boardtypes)) {
+            for (var y = 0; y < g_boardheight; ++y) {
+              var boardRow = g_board[y];
+              var boardTypeRow = g_boardtypes[y];
+              if (!Array.isArray(boardRow) || !Array.isArray(boardTypeRow)) continue;
+
+              for (var x = 0; x < g_boardwidth; ++x) {
+                var cell = el('b' + y + '_' + x);
+                var char = boardRow[x];
+                if (char !== ' ' && typeof char !== 'undefined' && cell && cell.innerHTML === '') {
+                  var ltr = char === char.toLowerCase() ? '*' : char;
+                  var tClass = boardTypeRow[x] === 1 ? 't1' : 't2';
+                  var html = '<div class="drag ' + tClass + '">' + ltr + '<sub>' + g_letscore[ltr] + '</sub></div>';
+                  cell.innerHTML = html;
+                }
               }
             }
           }
@@ -1011,6 +1069,10 @@ window.addEventListener('appReady', function() {
             broadcastGameState({ type: 'request_state' });
           }, 1000);
         }, 500);
+      } else {
+        // Prevent stale/incomplete snapshots from forcing broken reconnect attempts.
+        localStorage.removeItem('session_mp');
+        if (localStorage['session_mode'] === 'mp') localStorage['session_mode'] = 'sp';
       }
     } catch (e) {
       console.error(e);
@@ -1049,35 +1111,41 @@ handleGameStateBroadcast = function(payload) {
       oppRack: g_bui.getPlayerRack(),
       letpool: g_letpool,
       isMyTurn: !g_isMyTurn,
-      stateVersion: g_stateVersion
+      stateVersion: g_stateVersion,
+      lastMoveAt: g_lastMoveAt || Date.now()
     });
   } else if (payload.type === 'state_sync') {
     if (payload.stateVersion && payload.stateVersion < g_stateVersion) return;
 
     // We received a sync from the other player
-    g_board = payload.board;
-    g_boardpoints = payload.boardp;
-    g_boardtypes = payload.boardt;
+    g_board = Array.isArray(payload.board) ? payload.board : (Array.isArray(g_board) ? g_board : []);
+    g_boardpoints = Array.isArray(payload.boardp) ? payload.boardp : g_boardpoints;
+    g_boardtypes = Array.isArray(payload.boardt) ? payload.boardt : (Array.isArray(g_boardtypes) ? g_boardtypes : []);
     g_board_empty = payload.boardEmpty;
     g_pscore = payload.pscore;
     g_oscore = payload.oscore;
-    g_letpool = payload.letpool;
+    g_letpool = Array.isArray(payload.letpool) ? payload.letpool : (Array.isArray(g_letpool) ? g_letpool : []);
     g_isMyTurn = payload.isMyTurn;
     g_stateVersion = Math.max(g_stateVersion, payload.stateVersion || 0);
+    if (typeof payload.lastMoveAt === 'number') g_lastMoveAt = payload.lastMoveAt;
 
-    g_bui.setPlayerRack(payload.myRack);
-    g_bui.setOpponentRack(payload.oppRack);
+    g_bui.setPlayerRack(String(payload.myRack || ''));
+    g_bui.setOpponentRack(String(payload.oppRack || ''));
     g_bui.setPlayerScore(0, g_pscore);
     g_bui.setOpponentScore(0, g_oscore);
-    g_bui.setTilesLeft(g_letpool.length);
+    g_bui.setTilesLeft((g_letpool || []).length);
 
     for (var y = 0; y < g_boardheight; ++y) {
+      var boardRow = g_board[y];
+      var boardTypeRow = g_boardtypes[y];
+      if (!Array.isArray(boardRow) || !Array.isArray(boardTypeRow)) continue;
+
       for (var x = 0; x < g_boardwidth; ++x) {
         var cell = el('b' + y + '_' + x);
-        var char = g_board[y][x];
+        var char = boardRow[x];
         if (char !== ' ' && cell && cell.innerHTML === '') {
           var ltr = char === char.toLowerCase() ? '*' : char;
-          var tClass = g_boardtypes[y][x] === 1 ? 't2' : 't1';
+          var tClass = boardTypeRow[x] === 1 ? 't2' : 't1';
           var html = '<div class="drag ' + tClass + '">' + ltr + '<sub>' + g_letscore[ltr] + '</sub></div>';
           cell.innerHTML = html;
         }
