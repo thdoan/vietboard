@@ -138,11 +138,9 @@ function init(iddiv) {
 }
 
 //------------------------------------------------------------------------------
-function announceWinner() {
-  //console.log('announceWinner');
+function finalizeGameScores() {
   var isMP = (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer);
   var opponentNoun = isMP ? t('Opponent') : t('Computer');
-  var opponentWinsText = isMP ? t('Opponent wins.') : t('Computer wins.');
 
   var oleft = g_bui.getOpponentRack();
   var pleft = g_bui.getPlayerRack();
@@ -160,29 +158,11 @@ function announceWinner() {
   g_oscore -= odeduct;
   g_pscore -= pdeduct;
 
-  var html = '<table id="gameover" class="centered"><tr>';
-  var text = t('GAMEOVER');
-  for (var i = 0; i < text.length; ++i) {
-    html += '<td class="tile"><div class="drag t' + randInt(1, 2) + '">' + text[i] + '</div></td>';
-  }
-  html += '</tr></table><ul><li>';
-  html += t('You') + ': <strong>' + g_pscore + '</strong></li><li>' + opponentNoun + ': <strong>' + g_oscore + '</strong></li></ul>';
-  var msg = '<h3>' + t('It&rsquo;s a tie!');
-  if (g_oscore > g_pscore) msg = '<h3 class="opponent">' + opponentWinsText;
-  else if (g_oscore < g_pscore) msg = '<h3 class="player">' + t('You win!');
-  html += msg + '</h3>';
-  g_bui.prompt(html, '<button class="button" onclick="hideModal();g_bui.restart()">' + t('Play Again') + '</button>', 'gameover wide');
-  var timer = setInterval(function() {
-    var tile = el('#gameover td:not(.on)');
-    if (tile) el('#gameover td:not(.on)').classList.add('on');
-    else clearInterval(timer);
-  }, 100);
-
   // Update total scores
-  el('oscore').textContent = g_oscore;
-  el('pscore').textContent = g_pscore;
-  el('score-opponent').textContent = g_oscore;
-  el('score-player').textContent = g_pscore;
+  if (el('oscore')) el('oscore').textContent = g_oscore;
+  if (el('pscore')) el('pscore').textContent = g_pscore;
+  if (el('score-opponent')) el('score-opponent').textContent = g_oscore;
+  if (el('score-player')) el('score-player').textContent = g_pscore;
 
   // Update high scores table if applicable
   var sHighScoresKey = g_layout + ' ' + g_bui.level;
@@ -227,7 +207,33 @@ function announceWinner() {
   if (typeof syncHighScoresMultiplayer === 'function') {
     syncHighScoresMultiplayer();
   }
+}
 
+function announceWinner() {
+  //console.log('announceWinner');
+  var isMP = (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer);
+  var opponentNoun = isMP ? t('Opponent') : t('Computer');
+  var opponentWinsText = isMP ? t('Opponent wins.') : t('Computer wins.');
+
+  finalizeGameScores();
+
+  var html = '<table id="gameover" class="centered"><tr>';
+  var text = t('GAMEOVER');
+  for (var i = 0; i < text.length; ++i) {
+    html += '<td class="tile"><div class="drag t' + randInt(1, 2) + '">' + text[i] + '</div></td>';
+  }
+  html += '</tr></table><ul><li>';
+  html += t('You') + ': <strong>' + g_pscore + '</strong></li><li>' + opponentNoun + ': <strong>' + g_oscore + '</strong></li></ul>';
+  var msg = '<h3>' + t('It&rsquo;s a tie!');
+  if (g_oscore > g_pscore) msg = '<h3 class="opponent">' + opponentWinsText;
+  else if (g_oscore < g_pscore) msg = '<h3 class="player">' + t('You win!');
+  html += msg + '</h3>';
+  g_bui.prompt(html, '<button class="button" onclick="hideModal();g_bui.restart()">' + t('Play Again') + '</button>', 'gameover wide');
+  var timer = setInterval(function() {
+    var tile = el('#gameover td:not(.on)');
+    if (tile) el('#gameover td:not(.on)').classList.add('on');
+    else clearInterval(timer);
+  }, 100);
 }
 
 //------------------------------------------------------------------------------

@@ -402,7 +402,7 @@ function RedipsUI() {
       g_bui.prompt(
         t('Restarting will forfeit this game.'),
         '<button class="button secondary" onclick="hideModal()">' + t('Cancel') + '</button>'
-          + '&nbsp;&nbsp;<button class="button" onclick="hideModal();g_bui.restart();if (g_isMobile) hideGameInfo()">' + t('Restart') + '</button>'
+          + '&nbsp;&nbsp;<button class="button" onclick="hideModal();if (typeof finalizeGameScores === \'function\') finalizeGameScores();g_bui.restart();if (g_isMobile) hideGameInfo()">' + t('Restart') + '</button>'
       );
     };
 
