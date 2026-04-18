@@ -7,10 +7,12 @@ html {
 }
 
 /* Fade in */
-html.loading {
+html.loading,
+.wordinfo #modal-content {
   background: url('data:image/gif;base64,R0lGODlhEAAQAPECALe1rXd1bP///wAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQFBQACACwAAAAAEAAQAAACMJQvAMio2g58KwRGU7VXPsR1XmM5S2SUWRSuJKehqRgzpQkdIb5Au6nx0TAf2ahRAAAh+QQFBQACACwGAAIACAAOAAACFJQNcJh67V5ctNqLbwh07+VxoHgUACH5BAUFAAIALAIABgAOAAgAAAIUlI8CkL3b0GPxQBFCPTlv3H2gWAAAIfkEBQUAAgAsAAAGAA4ACAAAAhRUIqlrh7zcg+rQSwHASWvubeBWAAAh+QQFBQACACwCAAIACAAOAAACFFQimXdq7F6ctNqLEwBxb+dxIFcAACH5BAUFAAIALAIAAAAIAA4AAAIUlB1xmHrtXly02osvAHTv5XGgeBQAIfkEBQUAAgAsAAACAA4ACAAAAhSUjxKRvdvQY/FAAUA9OW/cfaBYAAAh+QQFBQACACwCAAIADgAIAAACFBQgqWuHvNyD6tBLQ8BJa+5t4FYAADs=') no-repeat calc(50% - 20px) center;
 }
-html.loading:after {
+html.loading:after,
+.wordinfo #modal-content:after {
   position: absolute;
   top: 50%;
   left: 50%;
@@ -563,6 +565,18 @@ table.board td .drag,
   font-weight: bold;
   margin: 6px 0;
   padding: 6px;
+}
+
+.wordinfo #modal-content {
+  background-color: #fff;
+  padding: 0 0 1rem 0;
+}
+#dict {
+  position: relative;
+  width: 360px;
+  height: 400px;
+  border: 0;
+  z-index: 1;
 }
 
 /*** Game Info ***/

@@ -1340,7 +1340,7 @@ function RedipsUI() {
       alert(t('Word definitions not enabled.'));
       return;
     }
-    if (word) {
+    if (word in g_defs) {
       // Try to get definition locally first
       var html = '<div id="wordresult"><div style="text-align:center"><h1>' + word + '</h1></div>';
       if (typeof g_defs[word] === 'string') {
@@ -1365,15 +1365,11 @@ function RedipsUI() {
       html += '</div>';
       self.prompt(html);
     } else {
-      // If it doesn't exist, look it up online
-      // Use Laban dict in an iframe
-  var iframeHtml = '<iframe src="https://dict.laban.vn/find?type=1&query=' + encodeURIComponent(word) + '" width="100%" height="400" frameborder="0" style="border:none; background:#fff;"></iframe>';
-  self.prompt(iframeHtml, null, 'wide');
-
-  gtag('event', word, {
-    'event_category': 'Definition',
-    'event_label': 'Laban Dict iframe'
-  });
+      self.prompt('<iframe id="dict" src="https://vdict.com/' + encodeURIComponent(word) + ',2,0,0.html"></iframe>', null, 'wordinfo wide');
+      gtag('event', word, {
+        'event_category': 'Definition',
+        'event_label': 'Found'
+      });
     }
   };
 
