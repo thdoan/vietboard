@@ -187,19 +187,25 @@ function announceWinner() {
   var sHighScoresSession = getSession();
   var names = getHighScoreNames();
   if (!g_highscores[sHighScoresKey]) g_highscores[sHighScoresKey] = [];
-  g_highscores[sHighScoresKey].push({
-    'player': names.opponent,
-    'score': g_oscore,
-    'session': sHighScoresSession
-  });
-  g_highscores[sHighScoresKey].push({
-    'player': names.player,
-    'score': g_pscore,
-    'session': sHighScoresSession
-  });
+  if (g_oscore > 0) {
+    g_highscores[sHighScoresKey].push({
+      'playerId': g_opponentId || '',
+      'player': names.opponent,
+      'score': g_oscore,
+      'session': sHighScoresSession
+    });
+  }
+  if (g_pscore > 0) {
+    g_highscores[sHighScoresKey].push({
+      'playerId': g_lobbyUserId || '',
+      'player': names.player,
+      'score': g_pscore,
+      'session': sHighScoresSession
+    });
+  }
   g_highscores[sHighScoresKey].sort(gCompareScores);
-  g_highscores[sHighScoresKey].length = 10;
   localStorage['highscores'] = JSON.stringify(g_highscores);
+  if (typeof saveGlobalHighScores === 'function') saveGlobalHighScores();
 
   // Clear session
   localStorage.removeItem('session');
@@ -218,14 +224,22 @@ function announceWinner() {
 }
 
 //------------------------------------------------------------------------------
+function normalizeHighScorePlayerName(name) {
+  if (typeof name !== 'string') return '';
+  var match = name.match(/^You \((.+)\)$/);
+  if (match) return match[1];
+  return name;
+}
+
 function getHighScoreNames() {
   var youLabel = 'You';
   var computerLabel = 'Computer';
   var opponentLabel = 'Opponent';
   var isMP = (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer);
   if (!isMP) {
+    var myName = (typeof g_myName !== 'undefined' && g_myName) ? String(g_myName).trim() : '';
     return {
-      'player': youLabel,
+      'player': myName || youLabel,
       'opponent': computerLabel
     };
   }
@@ -234,7 +248,7 @@ function getHighScoreNames() {
   var oppName = (typeof g_opponentName !== 'undefined' && g_opponentName) ? String(g_opponentName).trim() : opponentLabel;
 
   return {
-    'player': (myName && myName !== 'You') ? 'You (' + myName + ')' : 'You',
+    'player': myName || youLabel,
     'opponent': oppName || opponentLabel
   };
 }

@@ -1136,12 +1136,20 @@ function RedipsUI() {
     var computerLabel = t('Computer');
 
     if (g_highscores[sKey]) {
+      var currentUserName = (typeof g_myName !== 'undefined' && g_myName) ? String(g_myName).trim() : '';
+      var currentUserId = (typeof g_lobbyUserId !== 'undefined' && g_lobbyUserId) ? String(g_lobbyUserId).trim() : '';
       for (var i = 0; i < g_highscores[sKey].length; ++i) {
         if (!g_highscores[sKey][i]) break;
+        var score = Number(g_highscores[sKey][i]['score']);
+        if (!(score > 0)) continue;
         var playerName = g_highscores[sKey][i]['player'];
-        // Replace localized and legacy "You" labels with current player name including username.
-        if (playerName === youLabel || playerName.startsWith(youLabel + ' (') || playerName === 'You' || playerName.startsWith('You (')) {
-          playerName = playerDisplayName;
+        var playerId = g_highscores[sKey][i]['playerId'] || '';
+        if (currentUserId && playerId === currentUserId) {
+          playerName = currentUserName ? youLabel + ' (' + currentUserName + ')' : youLabel;
+        } else if (currentUserName && playerName === currentUserName) {
+          playerName = youLabel + ' (' + currentUserName + ')';
+        } else if (playerName === youLabel || playerName === 'You' || playerName.startsWith(youLabel + ' (') || playerName.startsWith('You (')) {
+          playerName = currentUserName ? youLabel + ' (' + currentUserName + ')' : youLabel;
         } else if (playerName === 'Opponent' || playerName === opponentLabel) {
           playerName = opponentLabel;
         } else if (playerName === 'Computer' || playerName === computerLabel) {
@@ -1250,7 +1258,10 @@ function RedipsUI() {
     showModal(t('Computer thinking, please wait...'));
   };
 
-  self.showHighScores = function() {
+  self.showHighScores = async function() {
+    if (typeof loadGlobalHighScores === 'function') {
+      await loadGlobalHighScores();
+    }
     var sLevels = '';
     for (var i = 1; i < 11; ++i) {
       sLevels += '<option' + (i == g_bui.level ? ' selected' : '') + '>' + i + '</option>';

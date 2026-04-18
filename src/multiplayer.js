@@ -3,6 +3,8 @@
 // Supabase details
 const SUPABASE_URL = 'https://awolvbshyvcrsqwrbjxe.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_Oju2rh1kaNFcvlPfnssF7A_4YpvQKCH'; // Note: publishable key, safe for client-side
+const SUPABASE_HIGHSCORES_TABLE = 'highscores';
+const SUPABASE_HIGHSCORES_ID = 'vietboard';
 
 // We will load the Supabase client via unpkg in index.html
 window.supabaseClient = null;
@@ -55,6 +57,7 @@ if (!g_myName) {
   generateNickname();
 }
 let g_channel = null; // Either lobby or game channel
+let g_explicitLeftUsers = new Set();
 let g_opponentPresenceState = false;
 let g_dragThrottleTimer = null;
 let g_dragGhost = null;
@@ -65,6 +68,9 @@ let g_isGameOver = false;
 let g_opponentDisconnectSeconds = 0;
 let g_reconnectTimer = null;
 let g_lastMoveAt = 0;
+let g_broadcastPipeline = [];
+let g_broadcastPipelineTimer = null;
+const BROADCAST_PIPELINE_DEBOUNCE_MS = 100;
 
 // Timer state
 let g_idleTimer = null;
@@ -78,9 +84,94 @@ function initSupabase() {
   }
 }
 
+async function mergeGlobalHighScores(remoteScores) {
+  if (!remoteScores || typeof remoteScores !== 'object') return;
+
+  var merged = {};
+  var keys = {};
+  for (var key in g_highscores) keys[key] = true;
+  for (var key in remoteScores) keys[key] = true;
+
+  for (var key in keys) {
+    var localList = Array.isArray(g_highscores[key]) ? g_highscores[key] : [];
+    var remoteList = Array.isArray(remoteScores[key]) ? remoteScores[key] : [];
+    var combined = localList.concat(remoteList);
+    var seen = {};
+    var unique = [];
+
+    for (var i = 0; i < combined.length; ++i) {
+      var item = combined[i];
+      if (!item || typeof item.score === 'undefined') continue;
+      var score = Number(item.score);
+      if (!(score > 0)) continue;
+      var playerId = item.playerId || '';
+      var rawName = normalizeHighScorePlayerName(item.player || '');
+      var stableKey = (playerId || rawName) + '|' + score + '|' + (item.session || '');
+      if (seen[stableKey]) continue;
+      seen[stableKey] = true;
+      unique.push({
+        player: rawName,
+        playerId: playerId,
+        score: score,
+        session: item.session || ''
+      });
+    }
+
+    unique.sort(gCompareScores);
+    if (unique.length > 0) merged[key] = unique;
+  }
+
+  g_highscores = merged;
+  localStorage['highscores'] = JSON.stringify(g_highscores);
+}
+
+async function loadGlobalHighScores() {
+  if (!window.supabaseClient) return;
+  try {
+    var { data, error } = await window.supabaseClient
+      .from(SUPABASE_HIGHSCORES_TABLE)
+      .select('scores')
+      .eq('id', SUPABASE_HIGHSCORES_ID)
+      .single();
+
+    if (error) {
+      console.warn('Failed to load global high scores:', error.message || error);
+      return;
+    }
+
+    if (data && data.scores && typeof data.scores === 'object') {
+      await mergeGlobalHighScores(data.scores);
+    } else {
+      await saveGlobalHighScores();
+    }
+  } catch (err) {
+    console.warn('Failed to load global high scores:', err);
+  }
+}
+
+async function saveGlobalHighScores() {
+  if (!window.supabaseClient) return;
+  try {
+    var payload = {
+      id: SUPABASE_HIGHSCORES_ID,
+      scores: g_highscores
+    };
+    var { error } = await window.supabaseClient
+      .from(SUPABASE_HIGHSCORES_TABLE)
+      .upsert(payload, { onConflict: 'id' });
+
+    if (error) {
+      console.warn('Failed to save global high scores:', error.message || error);
+    }
+  } catch (err) {
+    console.warn('Failed to save global high scores:', err);
+  }
+}
+
 // Call init once the script loads, assuming supabase-js is loaded first.
 // We will move this call or ensure script order in index.html.
 window.addEventListener('load', initSupabase);
+window.addEventListener('appReady', loadGlobalHighScores);
 
 // -----------------------------------------------------------------------------
 // LOBBY & MATCHMAKING
@@ -106,7 +197,8 @@ window.showLobby = function() {
 
   g_bui.prompt(html, `<button class="button" onclick="leaveLobby();hideModal()">${t('Close')}</button>`, 'lobby-modal wide');
 
-  joinLobbyChannel();
+  // Ensure clean state - leave any existing channel before joining lobby
+  leaveLobby().then(() => joinLobbyChannel());
 }
 
 window.updatePlayerName = async function(newName) {
@@ -156,43 +248,43 @@ function joinLobbyChannel() {
     },
   });
 
+  function filterExplicitLeft(state) {
+    const filtered = Object.assign({}, state);
+    for (const id of g_explicitLeftUsers) {
+      delete filtered[id];
+    }
+    return filtered;
+  }
+
   g_channel
     .on('presence', { event: 'sync' }, () => {
       if (DEBUG) console.log('Presence sync event received');
       const state = g_channel.presenceState();
       if (DEBUG) console.log('Presence state:', state);
-      renderLobbyPlayers(state);
+      renderLobbyPlayers(filterExplicitLeft(state));
     })
     .on('presence', { event: 'join' }, (payload) => {
       if (DEBUG) console.log('Presence join event received:', payload);
-      const state = g_channel.presenceState();
-      renderLobbyPlayers(state);
+      if (payload && payload.key) g_explicitLeftUsers.delete(payload.key);
+      renderLobbyPlayers(filterExplicitLeft(g_channel.presenceState()));
     })
     .on('presence', { event: 'update' }, (payload) => {
       if (DEBUG) console.log('Presence update event received:', payload);
-      const state = g_channel.presenceState();
-      renderLobbyPlayers(state);
+      renderLobbyPlayers(filterExplicitLeft(g_channel.presenceState()));
     })
     .on('presence', { event: 'leave' }, (payload) => {
       if (DEBUG) console.log('Presence leave event received:', payload);
-      // presenceState() may be stale at callback time; use payload.key to
-      // eagerly remove the departed user before rendering
-      const state = g_channel.presenceState();
-      const filtered = Object.assign({}, state);
-      if (payload && payload.key) delete filtered[payload.key];
-      renderLobbyPlayers(filtered);
+      renderLobbyPlayers(filterExplicitLeft(g_channel.presenceState()));
     })
     .on('broadcast', { event: 'lobby_leave' }, ({ payload }) => {
       if (DEBUG) console.log('Broadcast lobby_leave received:', payload);
-      // Explicitly remove departed player even if presenceState() is stale
-      const state = g_channel ? g_channel.presenceState() : {};
-      const filtered = Object.assign({}, state);
-      if (payload && payload.id) delete filtered[payload.id];
-      renderLobbyPlayers(filtered);
+      if (payload && payload.id) g_explicitLeftUsers.add(payload.id);
+      renderLobbyPlayers(filterExplicitLeft(g_channel ? g_channel.presenceState() : {}));
     })
     .on('broadcast', { event: 'invite' }, (payload) => {
       if (payload.payload.to === g_lobbyUserId) {
         if (DEBUG) console.log('Received invite!', payload);
+        g_opponentId = payload.payload.fromId || null;
         startMultiplayerGame(payload.payload.gameId, payload.payload.fromName, false);
       }
     })
@@ -237,6 +329,7 @@ function renderLobbyPlayers(state) {
 }
 
 window.leaveLobby = async function() {
+  g_explicitLeftUsers.clear();
   if (g_channel) {
     // Broadcast explicit leave so other clients remove us immediately,
     // independent of presence propagation timing
@@ -246,6 +339,8 @@ window.leaveLobby = async function() {
         event: 'lobby_leave',
         payload: { id: g_lobbyUserId }
       });
+      // Wait briefly to ensure broadcast propagates before untracking/unsubscribing
+      await new Promise(res => setTimeout(res, 120));
     } catch (err) {
       if (DEBUG) console.warn('Failed to broadcast lobby_leave:', err);
     }
@@ -288,13 +383,15 @@ window.invitePlayer = function(opponentId, opponentName) {
     event: 'invite',
     payload: {
       to: opponentId,
+      fromId: g_lobbyUserId,
       fromName: g_myName,
       gameId: newGameId
     }
   });
 
   // And start our side
-  startMultiplayerGame(newGameId, opponentName, true);
+  g_opponentId = opponentId;
+  startMultiplayerGame(newGameId, opponentId, opponentName, true);
 }
 
 // Listen for invites in the lobby
@@ -307,10 +404,11 @@ if (typeof t !== 'function') {
   window.t = function(str) { return str; };
 }
 
-async function startMultiplayerGame(gameId, opponentName, isHost) {
+async function startMultiplayerGame(gameId, opponentId, opponentName, isHost) {
   g_isGameOver = false;
   g_opponentDisconnectSeconds = 0;
   g_gameId = gameId;
+  g_opponentId = opponentId || null;
   g_opponentName = opponentName;
   g_isMultiplayer = true;
   localStorage['session_mode'] = 'mp';
@@ -331,7 +429,7 @@ function joinGameChannel(gameId, isHost) {
   g_channel = window.supabaseClient.channel('game:' + gameId, {
     config: {
       presence: {
-        key: g_myName,
+        key: g_lobbyUserId,
       },
     },
   });
@@ -340,13 +438,23 @@ function joinGameChannel(gameId, isHost) {
     .on('presence', { event: 'sync' }, () => {
       const state = g_channel.presenceState();
       let opponentFound = false;
+      let opponentId = null;
+      let opponentName = null;
       for (const id in state) {
-        for (const p of state[id]) {
-          if (p.name !== g_myName) opponentFound = true;
+        if (id === g_lobbyUserId) continue;
+        opponentFound = true;
+        opponentId = id;
+        const metas = Array.isArray(state[id]) ? state[id] : [];
+        if (metas.length > 0 && typeof metas[0].name === 'string') {
+          opponentName = metas[0].name;
         }
       }
       g_opponentPresenceState = opponentFound;
-      if (opponentFound) g_opponentDisconnectSeconds = 0;
+      if (opponentFound) {
+        g_opponentDisconnectSeconds = 0;
+        g_opponentId = opponentId || g_opponentId;
+        if (opponentName) g_opponentName = opponentName;
+      }
     })
     .on('presence', { event: 'leave' }, ({ leftPresences }) => {
       if (DEBUG) console.log('Opponent left presence', leftPresences);
@@ -366,7 +474,7 @@ function joinGameChannel(gameId, isHost) {
           clearTimeout(g_reconnectTimer);
           g_reconnectTimer = null;
         }
-        await g_channel.track({ name: g_myName, isHost });
+        await g_channel.track({ name: g_myName, id: g_lobbyUserId, isHost });
         startIdleTimer();
         if (isHost) {
           // Initialize game state and send it out
@@ -525,14 +633,65 @@ function initializeHostGame() {
   }, 100);
 }
 
+function sendBroadcastNow(event, payload) {
+  if (!g_channel) return;
+  g_channel.send({
+    type: 'broadcast',
+    event: event,
+    payload: payload
+  });
+}
+
+function processBroadcastPipeline() {
+  if (!g_channel || !g_broadcastPipeline.length) return;
+  var pipeline = g_broadcastPipeline;
+  g_broadcastPipeline = [];
+  g_broadcastPipelineTimer = null;
+
+  var lastCollapsibleIndex = {};
+
+  for (var i = 0; i < pipeline.length; ++i) {
+    var item = pipeline[i];
+    if (!item.options || !item.options.collapse) continue;
+    var key = item.event + '|' + (item.options.collapseKey || 'all');
+    lastCollapsibleIndex[key] = i;
+  }
+
+  for (var j = 0; j < pipeline.length; ++j) {
+    var queued = pipeline[j];
+    if (!queued) continue;
+    if (queued.options && queued.options.collapse) {
+      var key = queued.event + '|' + (queued.options.collapseKey || 'all');
+      if (lastCollapsibleIndex[key] !== j) continue;
+    }
+    sendBroadcastNow(queued.event, queued.payload);
+  }
+}
+
+function enqueueBroadcast(event, payload, options) {
+  if (!g_channel) return;
+  var opts = options || {};
+  if (!opts.collapse) {
+    sendBroadcastNow(event, payload);
+    return;
+  }
+
+  g_broadcastPipeline.push({ event: event, payload: payload, options: opts });
+  if (g_broadcastPipelineTimer) clearTimeout(g_broadcastPipelineTimer);
+  g_broadcastPipelineTimer = setTimeout(processBroadcastPipeline, opts.delay || BROADCAST_PIPELINE_DEBOUNCE_MS);
+}
+
 function broadcastGameState(payload) {
-  if (g_channel) {
-    const eventName = (payload && payload.type === 'move') ? 'move' : 'gamestate';
-    g_channel.send({
-      type: 'broadcast',
-      event: eventName,
-      payload: payload
+  if (!g_channel) return;
+  const eventName = (payload && payload.type === 'move') ? 'move' : 'gamestate';
+  const shouldCollapse = payload && payload.type === 'highscores_sync';
+  if (shouldCollapse) {
+    enqueueBroadcast(eventName, payload, {
+      collapse: true,
+      collapseKey: payload.type || 'gamestate'
     });
+  } else {
+    sendBroadcastNow(eventName, payload);
   }
 }
 
@@ -586,6 +745,10 @@ function localizeDragPosition(payload) {
   var x = payload.x;
   var y = payload.y;
   var sourceId = payload.sourceId;
+
+  if (typeof sourceId === 'string' && sourceId.charAt(0) === 'b') {
+    return { x: x, y: y };
+  }
 
   if (typeof sourceId === 'string' && (sourceId.startsWith('pl') || sourceId.startsWith('op'))) {
     var localSourceId = mapRemoteRackCellId(sourceId);
@@ -777,6 +940,15 @@ function handleGameStateBroadcast(payload) {
     if (payload.highscores) {
       g_highscores = payload.highscores;
       localStorage['highscores'] = JSON.stringify(g_highscores);
+      var highscoresModal = document.getElementById('modal-container');
+      if (highscoresModal && highscoresModal.classList.contains('highscores') && highscoresModal.style.display !== 'none') {
+        var layoutSelect = document.getElementById('highscores-layout');
+        var levelSelect = document.getElementById('highscores-level');
+        if (layoutSelect && levelSelect) {
+          document.getElementById('highscores-data').innerHTML = g_bui.renderHighScoreRows(layoutSelect.value + ' ' + levelSelect.value);
+          setModalHeight();
+        }
+      }
     }
   }
 }
