@@ -186,7 +186,7 @@ window.showLobby = function() {
 <table>
   <tr class="header">
     <td><label for="lobby-name">${t('Your name')}</label></td>
-    <td class="input"><input id="lobby-name" value="${g_myName}" onchange="updatePlayerName(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();updatePlayerName(this.value);}"></td>
+    <td class="input"><input id="lobby-name" value="${g_myName}"></td>
   </tr>
 </table>
 <p><strong>${t('Click a player to start a game:')}</strong></p>
@@ -196,6 +196,21 @@ window.showLobby = function() {
 `;
 
   g_bui.prompt(html, `<button class="button" onclick="leaveLobby();hideModal()">${t('Close')}</button>`, 'lobby-modal wide');
+
+  const lobbyNameInput = document.getElementById('lobby-name');
+  if (lobbyNameInput) {
+    lobbyNameInput.addEventListener('keyup', function(event) {
+      if (event.key === 'Enter') {
+        updatePlayerName(this.value);
+      }
+    });
+
+    lobbyNameInput.addEventListener('blur', function() {
+      if (this.value !== g_myName) {
+        updatePlayerName(this.value);
+      }
+    });
+  }
 
   // Ensure clean state - leave any existing channel before joining lobby
   leaveLobby().then(() => joinLobbyChannel());
