@@ -557,6 +557,7 @@ function cleanupMultiplayerSession() {
   g_dragSeq = 0;
 
   applyNonGameButtonPolicy();
+  updateGameInfoLabels();
 }
 
 window.confirmRestartMultiplayer = function() {
