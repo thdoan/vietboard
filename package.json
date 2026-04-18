@@ -1,0 +1,11 @@
+{
+  "name": "vietboard-test-suite",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "node test/multiplayer.test.js"
+  },
+  "devDependencies": {
+    "puppeteer": "5.5.0"
+  }
+}
