@@ -38,6 +38,8 @@ var g_lmults = [1, 2, 3, 1, 1]; // Letter multipliers by index
 var g_wmults = [1, 1, 1, 2, 3]; // Word multipliers by index
 var g_allLettersBonus = 50;     // Bonus when all letters in rack are played
 
+const COMPUTER_PLAYER_ID = 'computer';
+
 // Computer play level
 var g_playlevel = g_bui.getPlayLevel();
 
@@ -186,22 +188,27 @@ function announceWinner() {
   var sHighScoresKey = g_layout + ' ' + g_bui.level;
   var sHighScoresSession = getSession();
   var names = getHighScoreNames();
+  var opponentId = g_isMultiplayer ? (g_opponentId || '') : COMPUTER_PLAYER_ID;
   if (!g_highscores[sHighScoresKey]) g_highscores[sHighScoresKey] = [];
-  if (g_oscore > 0) {
-    g_highscores[sHighScoresKey].push({
-      'playerId': g_opponentId || '',
+  var scoreEntries = [];
+  if (typeof g_oscore === 'number' && g_oscore > 0) {
+    scoreEntries.push({
+      'playerId': opponentId,
       'player': names.opponent,
       'score': g_oscore,
       'session': sHighScoresSession
     });
   }
-  if (g_pscore > 0) {
-    g_highscores[sHighScoresKey].push({
+  if (typeof g_pscore === 'number' && g_pscore > 0) {
+    scoreEntries.push({
       'playerId': g_lobbyUserId || '',
       'player': names.player,
       'score': g_pscore,
       'session': sHighScoresSession
     });
+  }
+  if (scoreEntries.length) {
+    g_highscores[sHighScoresKey].push.apply(g_highscores[sHighScoresKey], scoreEntries);
   }
   g_highscores[sHighScoresKey].sort(gCompareScores);
   localStorage['highscores'] = JSON.stringify(g_highscores);
