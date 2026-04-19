@@ -768,10 +768,10 @@ function localizeDragPosition(payload) {
 
   console.log("localizeDragPosition START:", JSON.stringify(payload));
 
-  if (typeof sourceId === 'string' && (sourceId.startsWith('pl') || sourceId.startsWith('op') || sourceId.charAt(0) === 'b')) {
+  if (typeof sourceId === 'string' && (sourceId.startsWith('pl') || sourceId.startsWith('op') || sourceId.charAt(0) === (typeof g_bui !== 'undefined' ? g_bui.boardId : 'c'))) {
     var localSourceId = mapRemoteRackCellId(sourceId);
     var localSourceCell = el(localSourceId);
-    var isBoard = sourceId.charAt(0) === 'b';
+    var isBoard = sourceId.charAt(0) === (typeof g_bui !== 'undefined' ? g_bui.boardId : 'c');
 
     console.log("localizeDragPosition source mapped:", sourceId, "->", localSourceId, "isBoard:", isBoard);
 
@@ -889,7 +889,7 @@ function applyDragPreview(payload) {
   // Phase 3: Prevent stale previews from leaving revealed opponent letters in rack.
   // If source is board and target is opponent rack, verify the tile is actually being returned
   // (not a stale preview trying to move it to a wrong location).
-  if (fromId.charAt(0) === 'b' && toId.indexOf('op') === 0) {
+  if (fromId.charAt(0) === (typeof g_bui !== 'undefined' ? g_bui.boardId : 'c') && toId.indexOf('op') === 0) {
     var fromCell = el(fromId);
     if (fromCell && fromCell.holds && fromCell.holds.letter) {
       // Tile is on board: allow the preview to move it back to rack
@@ -901,13 +901,13 @@ function applyDragPreview(payload) {
   var fromCell = el(fromId);
   var toCell = el(toId);
 
-  if (fromId && fromId.charAt(0) === 'b' && fromCell) {
+  if (fromId && fromId.charAt(0) === (typeof g_bui !== 'undefined' ? g_bui.boardId : 'c') && fromCell) {
     fromCell.innerHTML = '';
   }
 
   if (!toCell) return;
 
-  if (toId && toId.charAt(0) === 'b') {
+  if (toId && toId.charAt(0) === (typeof g_bui !== 'undefined' ? g_bui.boardId : 'c')) {
     renderOpponentRackTileBack(toCell);
     console.log("applyDragPreview: rendered back tile on board", toId);
     // Explicitly re-initialize REDIPS drag so the newly created innerHTML element is properly recognized by the drag system
@@ -923,7 +923,7 @@ function applyDragPreview(payload) {
 
 function applyDragSourceClear(payload) {
   if (!payload || !payload.sourceId) return;
-  if (payload.sourceId.charAt(0) !== 'b') return;
+  if (payload.sourceId.charAt(0) !== (typeof g_bui !== 'undefined' ? g_bui.boardId : 'c')) return;
 
   var sourceCell = el(payload.sourceId);
   if (sourceCell) sourceCell.innerHTML = '';
@@ -1220,7 +1220,7 @@ function handleMoveBroadcast(payload) {
           if (!Array.isArray(boardRow) || !Array.isArray(boardTypeRow)) continue;
 
           for (var x = 0; x < g_boardwidth; ++x) {
-            var cell = el('b' + y + '_' + x);
+            var cell = el((typeof g_bui !== 'undefined' ? g_bui.boardId : 'c') + y + '_' + x);
             var char = boardRow[x];
             if (char !== ' ' && cell && cell.innerHTML === '') {
               var ltr = char === char.toLowerCase() ? '*' : char;
@@ -1356,7 +1356,7 @@ document.addEventListener('appReady', function() {
               if (!Array.isArray(boardRow) || !Array.isArray(boardTypeRow)) continue;
 
               for (var x = 0; x < g_boardwidth; ++x) {
-                var cell = el('b' + y + '_' + x);
+                var cell = el((typeof g_bui !== 'undefined' ? g_bui.boardId : 'c') + y + '_' + x);
                 var char = boardRow[x];
                 if (char !== ' ' && typeof char !== 'undefined' && cell && cell.innerHTML === '') {
                   var ltr = char === char.toLowerCase() ? '*' : char;
@@ -1451,7 +1451,7 @@ handleGameStateBroadcast = function(payload) {
       if (!Array.isArray(boardRow) || !Array.isArray(boardTypeRow)) continue;
 
       for (var x = 0; x < g_boardwidth; ++x) {
-        var cell = el('b' + y + '_' + x);
+        var cell = el((typeof g_bui !== 'undefined' ? g_bui.boardId : 'c') + y + '_' + x);
         var char = boardRow[x];
         if (char !== ' ' && cell && cell.innerHTML === '') {
           var ltr = char === char.toLowerCase() ? '*' : char;
