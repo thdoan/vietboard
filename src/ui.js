@@ -346,13 +346,16 @@ function RedipsUI() {
 
   self.cancelPlayerPlacement = function(cellId) {
     var placement = self.getPlayerPlacement();
-    var divs = [];
+    var tileInfos = [];
     var id;
     for (var i = 0; i < placement.length; ++i) {
       id = placement[i].id;
       if (cellId && cellId !== id) continue;
       var cell = el(id);
-      divs.push(cell.firstChild);
+      tileInfos.push({
+        div: cell.firstChild,
+        sourceId: id
+      });
       cell.holds = '';
       cell.innerHTML = '';
 
@@ -367,12 +370,17 @@ function RedipsUI() {
     for (var i = 0; i < self.racksize; ++i) {
       id = self.plrRackId + i;
       var rcell = el(id);
-      if (rcell.holds === '' && count < divs.length) {
-        var div = divs[count++];
+      if (rcell.holds === '' && count < tileInfos.length) {
+        var info = tileInfos[count++];
+        var div = info.div;
         // Joker tile - remove previously selected letter from tile?
         if (div.holds.points === 0) div.innerHTML = '&nbsp;&nbsp;';
         rcell.appendChild(div);
         rcell.holds = self.hcopy(div.holds);
+
+        if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof sendDragPreview === 'function') {
+          sendDragPreview(info.sourceId, id, rcell.holds);
+        }
       }
     }
     if (cellId) delete self.newplays[cellId];
