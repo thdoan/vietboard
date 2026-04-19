@@ -87,6 +87,9 @@ function setLang(sLang) {
 
 // Set bonuses layout
 function setLayout(elSelect) {
+  g_layout = elSelect.value;
+  localStorage['layout'] = elSelect.value;
+
   if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof saveMultiplayerSession === 'function') {
     saveMultiplayerSession();
     localStorage['session_mode'] = 'mp';
@@ -94,8 +97,6 @@ function setLayout(elSelect) {
     localStorage['session'] = getSession();
     localStorage['session_mode'] = 'sp';
   }
-
-  localStorage['layout'] = elSelect.value;
   // GA
   gtag('event', elSelect.value, {
     'event_category': 'Bonuses Layout'
@@ -105,6 +106,9 @@ function setLayout(elSelect) {
 
 // Set tileset
 function setTileset(elSelect) {
+  g_tileset = elSelect.value;
+  localStorage['tileset'] = elSelect.value;
+
   if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof saveMultiplayerSession === 'function') {
     saveMultiplayerSession();
     localStorage['session_mode'] = 'mp';
@@ -112,8 +116,6 @@ function setTileset(elSelect) {
     localStorage['session'] = getSession();
     localStorage['session_mode'] = 'sp';
   }
-
-  localStorage['tileset'] = elSelect.value;
   // GA
   gtag('event', elSelect.value, {
     'event_category': 'Tileset'
@@ -217,11 +219,11 @@ function load(sSession, isHighScore) {
   g_playlevel = oSession['level'] - 1;
   g_bui.level = oSession['level'];
   g_passes = oSession['passes'];
+  g_board_empty = oSession['empty'];
   g_bui.create('board', g_boardwidth, g_boardheight, g_letscore, g_racksize, g_layout, isHighScore);
   g_bui.setOpponentRack(oSession['orack']);
   g_bui.setPlayerRack(oSession['prack']);
   g_matches_cache = {};
-  g_board_empty = oSession['empty'];
   g_opponent_has_joker = oSession['orack'].indexOf('*') > -1;
   var html = '<table>';
   for (var i = 0; i < g_history.length; ++i) {
