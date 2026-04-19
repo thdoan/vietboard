@@ -578,7 +578,11 @@ function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
     stateVersion: g_stateVersion
   });
 
-  if (!skipLocalAnnounce) announceWinner();
+  if (!skipLocalAnnounce) {
+    announceWinner();
+  } else if (typeof finalizeGameScores === 'function') {
+    finalizeGameScores();
+  }
   cleanupMultiplayerSession();
 }
 
