@@ -87,6 +87,9 @@ function setLang(sLang) {
 
 // Set bonuses layout
 function setLayout(elSelect) {
+  g_layout = elSelect.value;
+  localStorage['layout'] = elSelect.value;
+
   if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof saveMultiplayerSession === 'function') {
     saveMultiplayerSession();
     localStorage['session_mode'] = 'mp';
@@ -94,8 +97,6 @@ function setLayout(elSelect) {
     localStorage['session'] = getSession();
     localStorage['session_mode'] = 'sp';
   }
-
-  localStorage['layout'] = elSelect.value;
   // GA
   gtag('event', elSelect.value, {
     'event_category': 'Bonuses Layout'
@@ -105,6 +106,9 @@ function setLayout(elSelect) {
 
 // Set tileset
 function setTileset(elSelect) {
+  g_tileset = elSelect.value;
+  localStorage['tileset'] = elSelect.value;
+
   if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof saveMultiplayerSession === 'function') {
     saveMultiplayerSession();
     localStorage['session_mode'] = 'mp';
@@ -112,8 +116,6 @@ function setTileset(elSelect) {
     localStorage['session'] = getSession();
     localStorage['session_mode'] = 'sp';
   }
-
-  localStorage['tileset'] = elSelect.value;
   // GA
   gtag('event', elSelect.value, {
     'event_category': 'Tileset'
