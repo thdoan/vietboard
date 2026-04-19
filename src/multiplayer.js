@@ -769,18 +769,31 @@ function localizeDragPosition(payload) {
   if (typeof sourceId === 'string' && (sourceId.startsWith('pl') || sourceId.startsWith('op') || sourceId.charAt(0) === 'b')) {
     var localSourceId = mapRemoteRackCellId(sourceId);
     var localSourceCell = el(localSourceId);
+    var isBoard = sourceId.charAt(0) === 'b';
+
     if (localSourceCell && typeof payload.sourceCenterX === 'number' && typeof payload.sourceCenterY === 'number') {
       var localRect = localSourceCell.getBoundingClientRect();
       var offsetX = payload.x - payload.sourceCenterX;
       var offsetY = payload.y - payload.sourceCenterY;
-      x = localRect.left + localRect.width / 2 - offsetX;
-      y = localRect.top + localRect.height / 2 - offsetY;
+
+      if (isBoard) {
+        x = localRect.left + localRect.width / 2 + offsetX;
+        y = localRect.top + localRect.height / 2 + offsetY;
+      } else {
+        x = localRect.left + localRect.width / 2 - offsetX;
+        y = localRect.top + localRect.height / 2 - offsetY;
+      }
     } else {
       var dragArea = el('drag');
       if (dragArea) {
         var dragRect = dragArea.getBoundingClientRect();
-        x = dragRect.left + dragRect.width - (payload.x - dragRect.left);
-        y = dragRect.top + dragRect.height - (payload.y - dragRect.top);
+        if (isBoard) {
+          x = payload.x;
+          y = payload.y;
+        } else {
+          x = dragRect.left + dragRect.width - (payload.x - dragRect.left);
+          y = dragRect.top + dragRect.height - (payload.y - dragRect.top);
+        }
       }
     }
   }
@@ -835,6 +848,14 @@ function sendDragSourceClear(sourceId) {
 function renderOpponentRackTileBack(cell) {
   if (!cell) return;
   cell.innerHTML = '<div class="drag t2">&nbsp;&nbsp;</div>';
+  if (g_bui && g_bui.rd && typeof g_bui.rd.init === 'function') {
+    var rd = g_bui.rd;
+    // Attempt to make REDIPS recognize the new drag element
+    if (cell.firstChild) {
+      cell.firstChild.redips = { enabled: true };
+      rd.enableDrag(false, cell.firstChild);
+    }
+  }
 }
 
 function renderOpponentBoardTile(cell, letter, points) {
@@ -878,6 +899,12 @@ function applyDragPreview(payload) {
 
   if (toId && toId.charAt(0) === 'b') {
     renderOpponentRackTileBack(toCell);
+    // Explicitly re-initialize REDIPS drag so the newly created innerHTML element is properly recognized by the drag system
+    if (g_bui && g_bui.rd && typeof g_bui.rd.init === 'function') {
+      // Pass the cell so we don't re-init the whole page
+      g_bui.rd.init();
+      g_bui.rd.enableDrag(false, toCell.firstChild);
+    }
   } else if (toId && toId.indexOf('op') === 0) {
     renderOpponentRackTileBack(toCell);
   }
