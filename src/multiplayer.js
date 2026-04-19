@@ -766,11 +766,7 @@ function localizeDragPosition(payload) {
   var y = payload.y;
   var sourceId = payload.sourceId;
 
-  if (typeof sourceId === 'string' && sourceId.charAt(0) === 'b') {
-    return { x: x, y: y };
-  }
-
-  if (typeof sourceId === 'string' && (sourceId.startsWith('pl') || sourceId.startsWith('op'))) {
+  if (typeof sourceId === 'string' && (sourceId.startsWith('pl') || sourceId.startsWith('op') || sourceId.charAt(0) === 'b')) {
     var localSourceId = mapRemoteRackCellId(sourceId);
     var localSourceCell = el(localSourceId);
     if (localSourceCell && typeof payload.sourceCenterX === 'number' && typeof payload.sourceCenterY === 'number') {
@@ -881,7 +877,7 @@ function applyDragPreview(payload) {
   if (!toCell) return;
 
   if (toId && toId.charAt(0) === 'b') {
-    renderOpponentBoardTile(toCell, payload.letter, payload.points);
+    renderOpponentRackTileBack(toCell);
   } else if (toId && toId.indexOf('op') === 0) {
     renderOpponentRackTileBack(toCell);
   }
