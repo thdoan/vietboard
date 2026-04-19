@@ -766,15 +766,22 @@ function localizeDragPosition(payload) {
   var y = payload.y;
   var sourceId = payload.sourceId;
 
+  console.log("localizeDragPosition START:", JSON.stringify(payload));
+
   if (typeof sourceId === 'string' && (sourceId.startsWith('pl') || sourceId.startsWith('op') || sourceId.charAt(0) === 'b')) {
     var localSourceId = mapRemoteRackCellId(sourceId);
     var localSourceCell = el(localSourceId);
     var isBoard = sourceId.charAt(0) === 'b';
 
+    console.log("localizeDragPosition source mapped:", sourceId, "->", localSourceId, "isBoard:", isBoard);
+
     if (localSourceCell && typeof payload.sourceCenterX === 'number' && typeof payload.sourceCenterY === 'number') {
       var localRect = localSourceCell.getBoundingClientRect();
       var offsetX = payload.x - payload.sourceCenterX;
       var offsetY = payload.y - payload.sourceCenterY;
+
+      console.log("localizeDragPosition localCell:", localRect.left, localRect.top, localRect.width, localRect.height);
+      console.log("localizeDragPosition offsets:", offsetX, offsetY);
 
       if (isBoard) {
         x = localRect.left + localRect.width / 2 + offsetX;
@@ -784,6 +791,7 @@ function localizeDragPosition(payload) {
         y = localRect.top + localRect.height / 2 - offsetY;
       }
     } else {
+      console.log("localizeDragPosition fallback (no cell or no sourceCenter)");
       var dragArea = el('drag');
       if (dragArea) {
         var dragRect = dragArea.getBoundingClientRect();
@@ -798,6 +806,7 @@ function localizeDragPosition(payload) {
     }
   }
 
+  console.log("localizeDragPosition END:", x, y);
   return { x: x, y: y };
 }
 
@@ -870,6 +879,7 @@ function renderOpponentBoardTile(cell, letter, points) {
 }
 
 function applyDragPreview(payload) {
+  console.log("applyDragPreview START", JSON.stringify(payload));
   if (!payload || !payload.fromId || !payload.toId) return;
 
   var fromId = mapRemoteRackCellId(payload.fromId);
@@ -899,6 +909,7 @@ function applyDragPreview(payload) {
 
   if (toId && toId.charAt(0) === 'b') {
     renderOpponentRackTileBack(toCell);
+    console.log("applyDragPreview: rendered back tile on board", toId);
     // Explicitly re-initialize REDIPS drag so the newly created innerHTML element is properly recognized by the drag system
     if (g_bui && g_bui.rd && typeof g_bui.rd.init === 'function') {
       // Pass the cell so we don't re-init the whole page
@@ -924,6 +935,12 @@ function handleDragBroadcast(payload) {
   if (typeof payload.seq === 'number') {
     if (payload.seq <= g_lastRemoteDragSeq) return;
     g_lastRemoteDragSeq = payload.seq;
+  }
+
+  if (payload.end) {
+    console.log("handleDragBroadcast END payload received");
+  } else if (payload.action) {
+    console.log("handleDragBroadcast ACTION payload received", payload.action);
   }
 
   if (payload.action === 'preview') {
