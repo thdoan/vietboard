@@ -355,6 +355,13 @@ function RedipsUI() {
       divs.push(cell.firstChild);
       cell.holds = '';
       cell.innerHTML = '';
+
+      if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof sendDragSourceClear === 'function') {
+        sendDragSourceClear(id);
+      }
+    }
+    if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof sendDragEnd === 'function') {
+      sendDragEnd();
     }
     var count = 0;
     for (var i = 0; i < self.racksize; ++i) {
