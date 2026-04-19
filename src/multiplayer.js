@@ -755,6 +755,15 @@ function mapRemoteRackCellId(remoteId) {
 
     if (prefix === 'pl') return 'op' + reversedIndex;
     if (prefix === 'op') return 'pl' + reversedIndex;
+  } else if (remoteId.startsWith('c') && remoteId.indexOf('_') > -1) {
+    var parts = remoteId.slice(1).split('_');
+    var x = parseInt(parts[0], 10);
+    var y = parseInt(parts[1], 10);
+    if (isNaN(x) || isNaN(y)) return remoteId;
+
+    var mirroredX = (g_boardwidth - 1) - x;
+    var mirroredY = (g_boardheight - 1) - y;
+    return 'c' + mirroredX + '_' + mirroredY;
   }
   return remoteId;
 }
@@ -766,7 +775,7 @@ function localizeDragPosition(payload) {
   var y = payload.y;
   var sourceId = payload.sourceId;
 
-  if (typeof sourceId === 'string' && (sourceId.startsWith('pl') || sourceId.startsWith('op') || sourceId.charAt(0) === 'b')) {
+  if (typeof sourceId === 'string' && (sourceId.startsWith('pl') || sourceId.startsWith('op') || sourceId.charAt(0) === 'c')) {
     var localSourceId = mapRemoteRackCellId(sourceId);
     var localSourceCell = el(localSourceId);
     if (localSourceCell && typeof payload.sourceCenterX === 'number' && typeof payload.sourceCenterY === 'number') {
@@ -849,45 +858,34 @@ function renderOpponentBoardTile(cell, letter, points) {
 }
 
 function applyDragPreview(payload) {
-  if (!payload || !payload.fromId || !payload.toId) return;
+  if (!payload || !payload.toId) return;
 
-  var fromId = mapRemoteRackCellId(payload.fromId);
   var toId = mapRemoteRackCellId(payload.toId);
-  if (fromId === toId) return;
-
-  // Phase 3: Prevent stale previews from leaving revealed opponent letters in rack.
-  // If source is board and target is opponent rack, verify the tile is actually being returned
-  // (not a stale preview trying to move it to a wrong location).
-  if (fromId.charAt(0) === 'b' && toId.indexOf('op') === 0) {
-    var fromCell = el(fromId);
-    if (fromCell && fromCell.holds && fromCell.holds.letter) {
-      // Tile is on board: allow the preview to move it back to rack
-    } else {
-      return;
-    }
-  }
-
-  var fromCell = el(fromId);
   var toCell = el(toId);
-
-  if (fromId && fromId.charAt(0) === 'b' && fromCell) {
-    fromCell.innerHTML = '';
-  }
 
   if (!toCell) return;
 
-  if (toId && toId.charAt(0) === 'b') {
-    renderOpponentRackTileBack(toCell);
-  } else if (toId && toId.indexOf('op') === 0) {
+  // Clear source cell if provided (extra safety)
+  if (payload.fromId) {
+    var fromId = mapRemoteRackCellId(payload.fromId);
+    if (fromId !== toId) {
+      var fromCell = el(fromId);
+      if (fromCell) fromCell.innerHTML = '';
+    }
+  }
+
+  if (toId && (toId.charAt(0) === 'c' || toId.startsWith('op'))) {
     renderOpponentRackTileBack(toCell);
   }
 }
 
 function applyDragSourceClear(payload) {
   if (!payload || !payload.sourceId) return;
-  if (payload.sourceId.charAt(0) !== 'b') return;
+  var id = payload.sourceId;
+  if (id.charAt(0) !== 'c' && !id.startsWith('pl') && !id.startsWith('op')) return;
 
-  var sourceCell = el(payload.sourceId);
+  var sourceId = mapRemoteRackCellId(id);
+  var sourceCell = el(sourceId);
   if (sourceCell) sourceCell.innerHTML = '';
 }
 
@@ -1170,18 +1168,20 @@ function handleMoveBroadcast(payload) {
         // Skip the rest of the synchronous updates because they are handled in the callback
         return;
       } else {
-        for (var y = 0; y < g_boardheight; ++y) {
-          var boardRow = g_board[y];
-          var boardTypeRow = g_boardtypes[y];
-          if (!Array.isArray(boardRow) || !Array.isArray(boardTypeRow)) continue;
+        for (var x = 0; x < g_boardwidth; ++x) {
+          var boardColumn = g_board[x];
+          var boardTypeColumn = g_boardtypes[x];
+          if (!Array.isArray(boardColumn) || !Array.isArray(boardTypeColumn)) continue;
 
-          for (var x = 0; x < g_boardwidth; ++x) {
-            var cell = el('b' + y + '_' + x);
-            var char = boardRow[x];
-            if (char !== ' ' && cell && cell.innerHTML === '') {
+          for (var y = 0; y < g_boardheight; ++y) {
+            var cell = el('c' + x + '_' + y);
+            var char = boardColumn[y];
+            if (char && char !== ' ' && cell && cell.innerHTML === '') {
               var ltr = char === char.toLowerCase() ? '*' : char;
-              var tClass = boardTypeRow[x] === 1 ? 't2' : 't1';
-              var html = '<div class="drag ' + tClass + '">' + ltr + '<sub>' + g_letscore[ltr] + '</sub></div>';
+              var displayChar = (ltr === ' ' || ltr === '*') ? '&nbsp;&nbsp;' : ltr.toUpperCase();
+              var tClass = boardTypeColumn[y] === 1 ? 't2' : 't1';
+              var points = g_letscore[ltr] || 0;
+              var html = '<div class="drag ' + tClass + '">' + displayChar + '<sub>' + points + '</sub></div>';
               cell.innerHTML = html;
             }
           }
@@ -1306,18 +1306,20 @@ document.addEventListener('appReady', function() {
           g_bui.setTilesLeft((g_letpool || []).length);
 
           if (Array.isArray(g_board) && Array.isArray(g_boardtypes)) {
-            for (var y = 0; y < g_boardheight; ++y) {
-              var boardRow = g_board[y];
-              var boardTypeRow = g_boardtypes[y];
-              if (!Array.isArray(boardRow) || !Array.isArray(boardTypeRow)) continue;
+            for (var x = 0; x < g_boardwidth; ++x) {
+              var boardColumn = g_board[x];
+              var boardTypeColumn = g_boardtypes[x];
+              if (!Array.isArray(boardColumn) || !Array.isArray(boardTypeColumn)) continue;
 
-              for (var x = 0; x < g_boardwidth; ++x) {
-                var cell = el('b' + y + '_' + x);
-                var char = boardRow[x];
-                if (char !== ' ' && typeof char !== 'undefined' && cell && cell.innerHTML === '') {
+              for (var y = 0; y < g_boardheight; ++y) {
+                var cell = el('c' + x + '_' + y);
+                var char = boardColumn[y];
+                if (char && char !== ' ' && typeof char !== 'undefined' && cell && cell.innerHTML === '') {
                   var ltr = char === char.toLowerCase() ? '*' : char;
-                  var tClass = boardTypeRow[x] === 1 ? 't1' : 't2';
-                  var html = '<div class="drag ' + tClass + '">' + ltr + '<sub>' + g_letscore[ltr] + '</sub></div>';
+                  var displayChar = (ltr === ' ' || ltr === '*') ? '&nbsp;&nbsp;' : ltr.toUpperCase();
+                  var tClass = boardTypeColumn[y] === 1 ? 't1' : 't2';
+                  var points = g_letscore[ltr] || 0;
+                  var html = '<div class="drag ' + tClass + '">' + displayChar + '<sub>' + points + '</sub></div>';
                   cell.innerHTML = html;
                 }
               }
@@ -1401,18 +1403,20 @@ handleGameStateBroadcast = function(payload) {
     g_bui.setOpponentScore(0, g_oscore);
     g_bui.setTilesLeft((g_letpool || []).length);
 
-    for (var y = 0; y < g_boardheight; ++y) {
-      var boardRow = g_board[y];
-      var boardTypeRow = g_boardtypes[y];
-      if (!Array.isArray(boardRow) || !Array.isArray(boardTypeRow)) continue;
+    for (var x = 0; x < g_boardwidth; ++x) {
+      var boardColumn = g_board[x];
+      var boardTypeColumn = g_boardtypes[x];
+      if (!Array.isArray(boardColumn) || !Array.isArray(boardTypeColumn)) continue;
 
-      for (var x = 0; x < g_boardwidth; ++x) {
-        var cell = el('b' + y + '_' + x);
-        var char = boardRow[x];
-        if (char !== ' ' && cell && cell.innerHTML === '') {
+      for (var y = 0; y < g_boardheight; ++y) {
+        var cell = el('c' + x + '_' + y);
+        var char = boardColumn[y];
+        if (char && char !== ' ' && cell && cell.innerHTML === '') {
           var ltr = char === char.toLowerCase() ? '*' : char;
-          var tClass = boardTypeRow[x] === 1 ? 't2' : 't1';
-          var html = '<div class="drag ' + tClass + '">' + ltr + '<sub>' + g_letscore[ltr] + '</sub></div>';
+          var displayChar = (ltr === ' ' || ltr === '*') ? '&nbsp;&nbsp;' : ltr.toUpperCase();
+          var tClass = boardTypeColumn[y] === 1 ? 't2' : 't1';
+          var points = g_letscore[ltr] || 0;
+          var html = '<div class="drag ' + tClass + '">' + displayChar + '<sub>' + points + '</sub></div>';
           cell.innerHTML = html;
         }
       }

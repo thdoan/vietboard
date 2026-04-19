@@ -769,8 +769,6 @@ function RedipsUI() {
       if (typeof g_isMultiplayer === 'undefined' || !g_isMultiplayer) return;
       if (typeof g_isMyTurn === 'undefined' || !g_isMyTurn) return;
 
-      var sourceCell = self.rd.td && self.rd.td.source;
-      var targetCell = self.rd.td && self.rd.td.current;
       var dragObj = self.rd.obj;
 
       if (dragObj && typeof sendDragPosition === 'function') {
@@ -783,10 +781,6 @@ function RedipsUI() {
           dragSource
         );
       }
-
-      if (sourceCell && targetCell && sourceCell.id && targetCell.id && typeof sendDragPreview === 'function') {
-        sendDragPreview(sourceCell.id, targetCell.id, dragObj ? dragObj.holds : sourceCell.holds);
-      }
     };
 
     self.rd.event.notMoved = function() {
@@ -796,7 +790,7 @@ function RedipsUI() {
 
     self.rd.event.moved = function() {
       var id = self.rd.td.source.id;
-      if (typeof sendDragSourceClear === 'function' && id.charAt(0) === self.boardId) {
+      if (typeof sendDragSourceClear === 'function') {
         sendDragSourceClear(id);
       }
 
