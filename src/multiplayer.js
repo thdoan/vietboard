@@ -1159,15 +1159,15 @@ function onMultiplayerMove() {
   var rackAfter = rackBefore;
 
   if (!passed) {
-    var placement = g_bui.getPlayerPlacement();
-    pinfo = checkValidPlacement(placement);
-    pstr = pinfo.played;
-
-    // Keep global board state in sync with current UI state after validation.
+    // Keep global board state in sync with current UI state before validation.
     // checkValidPlacement reads from g_board / g_boardpoints / g_boardtypes.
     g_board = normalizeBoardMatrix(newBoard, '');
     g_boardpoints = normalizeBoardMatrix(newBoardP, 0);
     g_boardtypes = normalizeBoardMatrix(newBoardT, 0);
+
+    var placement = g_bui.getPlayerPlacement();
+    pinfo = checkValidPlacement(placement);
+    pstr = pinfo.played;
 
     if (pstr === '') {
       g_bui.prompt(gErrPrefix() + pinfo.msg);
