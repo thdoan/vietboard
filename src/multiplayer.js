@@ -881,6 +881,15 @@ function mapRemoteRackCellId(remoteId) {
 
     if (prefix === 'pl') return 'op' + reversedIndex;
     if (prefix === 'op') return 'pl' + reversedIndex;
+  } else if (remoteId.startsWith('c') && remoteId.indexOf('_') > -1) {
+    var parts = remoteId.slice(1).split('_');
+    var x = parseInt(parts[0], 10);
+    var y = parseInt(parts[1], 10);
+    if (isNaN(x) || isNaN(y)) return remoteId;
+
+    var mirroredX = (g_boardwidth - 1) - x;
+    var mirroredY = (g_boardheight - 1) - y;
+    return 'c' + mirroredX + '_' + mirroredY;
   }
   return remoteId;
 }
@@ -901,6 +910,13 @@ function localizeDragPosition(payload) {
       var offsetY = payload.y - payload.sourceCenterY;
       x = localRect.left + localRect.width / 2 - offsetX;
       y = localRect.top + localRect.height / 2 - offsetY;
+    } else {
+      var dragArea = el('drag');
+      if (dragArea) {
+        var dragRect = dragArea.getBoundingClientRect();
+        x = dragRect.left + dragRect.width - (payload.x - dragRect.left);
+        y = dragRect.top + dragRect.height - (payload.y - dragRect.top);
+      }
     }
   }
 
@@ -1247,16 +1263,45 @@ function handleMoveBroadcast(payload) {
         }
       }
 
-      g_board = normalizeBoardMatrix(nextBoard, '');
-      g_boardpoints = normalizeBoardMatrix(payload.boardp, 0);
-      g_boardtypes = normalizeBoardMatrix(payload.boardt, 0);
+      var mirroredBoard = [];
+      var mirroredBoardP = [];
+      var mirroredBoardT = [];
+
+      for (var x = 0; x < g_boardwidth; ++x) {
+        mirroredBoard[x] = [];
+        mirroredBoardP[x] = [];
+        mirroredBoardT[x] = [];
+        for (var y = 0; y < g_boardheight; ++y) {
+          var mx = (g_boardwidth - 1) - x;
+          var my = (g_boardheight - 1) - y;
+          mirroredBoard[x][y] = nextBoard[mx][my];
+          mirroredBoardP[x][y] = payload.boardp[mx][my];
+          mirroredBoardT[x][y] = payload.boardt[mx][my];
+        }
+      }
+
+      g_board = normalizeBoardMatrix(mirroredBoard, '');
+      g_boardpoints = normalizeBoardMatrix(mirroredBoardP, 0);
+      g_boardtypes = normalizeBoardMatrix(mirroredBoardT, 0);
       g_board_empty = payload.boardEmpty;
 
       if (diffWord.length > 0) {
+        // Mirrored diffWord for the UI animation
+        var mirroredDiffWord = [];
+        for (var i = 0; i < diffWord.length; i++) {
+          var dw = diffWord[i];
+          mirroredDiffWord.push({
+            'x': (g_boardwidth - 1) - dw.x,
+            'y': (g_boardheight - 1) - dw.y,
+            'ltr': dw.ltr,
+            'lscr': dw.lscr
+          });
+        }
+
         // We need to restore the opponent rack temporarily so placeOnBoard can steal tiles from it
         g_bui.setOpponentRack(payload.rackBefore || '');
 
-        placeOnBoard(diffWord, function() {
+        placeOnBoard(mirroredDiffWord, function() {
           g_bui.setOpponentRack(payload.rackAfter);
           g_oscore += payload.score;
           g_bui.setOpponentScore(payload.score, g_oscore);
@@ -1501,9 +1546,30 @@ handleGameStateBroadcast = function(payload) {
     if (payload.stateVersion && payload.stateVersion < g_stateVersion) return;
 
     // We received a sync from the other player
-    g_board = normalizeBoardMatrix(payload.board, '');
-    g_boardpoints = normalizeBoardMatrix(payload.boardp, 0);
-    g_boardtypes = normalizeBoardMatrix(payload.boardt, 0);
+    var incomingBoard = Array.isArray(payload.board) ? payload.board : [];
+    var incomingBoardP = Array.isArray(payload.boardp) ? payload.boardp : [];
+    var incomingBoardT = Array.isArray(payload.boardt) ? payload.boardt : [];
+
+    var mirroredBoard = [];
+    var mirroredBoardP = [];
+    var mirroredBoardT = [];
+
+    for (var x = 0; x < g_boardwidth; ++x) {
+      mirroredBoard[x] = [];
+      mirroredBoardP[x] = [];
+      mirroredBoardT[x] = [];
+      for (var y = 0; y < g_boardheight; ++y) {
+        var mx = (g_boardwidth - 1) - x;
+        var my = (g_boardheight - 1) - y;
+        mirroredBoard[x][y] = (incomingBoard[mx] && incomingBoard[mx][my]) || '';
+        mirroredBoardP[x][y] = (incomingBoardP[mx] && incomingBoardP[mx][my]) || 0;
+        mirroredBoardT[x][y] = (incomingBoardT[mx] && incomingBoardT[mx][my]) || 0;
+      }
+    }
+
+    g_board = normalizeBoardMatrix(mirroredBoard, '');
+    g_boardpoints = normalizeBoardMatrix(mirroredBoardP, 0);
+    g_boardtypes = normalizeBoardMatrix(mirroredBoardT, 0);
     g_board_empty = payload.boardEmpty;
     g_pscore = payload.pscore;
     g_oscore = payload.oscore;
@@ -1525,12 +1591,14 @@ handleGameStateBroadcast = function(payload) {
 
       for (var y = 0; y < g_boardheight; ++y) {
         var cell = el('c' + x + '_' + y);
+        if (!cell) continue;
+        cell.innerHTML = '';
         var char = boardColumn[y];
-        if (char && char !== ' ' && cell && cell.innerHTML === '') {
+        if (char && char !== ' ' && typeof char !== 'undefined') {
           var ltr = char === char.toLowerCase() ? '*' : char;
           var displayChar = (ltr === ' ' || ltr === '*') ? '&nbsp;&nbsp;' : ltr.toUpperCase();
-          var tClass = boardTypeColumn[y] === 1 ? 't2' : 't1';
-          var points = g_letscore[ltr] || 0;
+          var tClass = boardTypeColumn[y] === 1 ? 't1' : 't2';
+          var points = g_boardpoints[x][y] || 0;
           var html = '<div class="drag ' + tClass + '">' + displayChar + '<sub>' + points + '</sub></div>';
           cell.innerHTML = html;
         }
