@@ -273,14 +273,17 @@ function tabulateCurrentScores() {
   var sHighScoresKey = g_layout + ' ' + g_bui.level;
   var sHighScoresSession = getSession();
   var names = getHighScoreNames();
+  var opponentId = g_isMultiplayer ? (g_opponentId || '') : COMPUTER_PLAYER_ID;
 
   if (!g_highscores[sHighScoresKey]) g_highscores[sHighScoresKey] = [];
   g_highscores[sHighScoresKey].push({
+    'playerId': opponentId,
     'player': names.opponent,
     'score': g_oscore,
     'session': sHighScoresSession
   });
   g_highscores[sHighScoresKey].push({
+    'playerId': g_lobbyUserId || '',
     'player': names.player,
     'score': g_pscore,
     'session': sHighScoresSession

@@ -1163,7 +1163,7 @@ function RedipsUI() {
           playerName = currentUserName ? youLabel + ' (' + currentUserName + ')' : youLabel;
         } else if (playerName === 'Opponent' || playerName === opponentLabel) {
           playerName = opponentLabel;
-        } else if (playerName === 'Computer' || playerName === computerLabel) {
+        } else if (playerName === 'Computer' || playerName === computerLabel || playerId === 'computer') {
           playerName = computerLabel;
         }
         html += '<tr><td>' + playerName +

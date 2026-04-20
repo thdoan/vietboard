@@ -83,18 +83,48 @@ function initSupabase() {
     console.error(t('Supabase library not loaded.'));
   }
 }
+initSupabase();
+
+function normalizeHighScorePlayerName(name) {
+  if (typeof name !== 'string') return '';
+  var match = name.match(/^You \((.+)\)$/);
+  if (match) return match[1];
+  return name;
+}
 
 async function mergeGlobalHighScores(remoteScores) {
-  if (!remoteScores || typeof remoteScores !== 'object') return;
+  if (typeof remoteScores !== 'object') return false;
+  var scoresToMerge = remoteScores || {};
 
+  // Ensure we have a local highscores object to work with
+  if (typeof g_highscores === 'undefined') {
+    window.g_highscores = localStorage['highscores'] ? JSON.parse(localStorage['highscores']) : {};
+  }
+  var localHighScores = g_highscores || {};
   var merged = {};
   var keys = {};
-  for (var key in g_highscores) keys[key] = true;
-  for (var key in remoteScores) keys[key] = true;
+  var hasLocalOnlyScores = false;
+
+  for (var key in localHighScores) keys[key] = true;
+  for (var key in scoresToMerge) keys[key] = true;
 
   for (var key in keys) {
-    var localList = Array.isArray(g_highscores[key]) ? g_highscores[key] : [];
-    var remoteList = Array.isArray(remoteScores[key]) ? remoteScores[key] : [];
+    var localList = Array.isArray(localHighScores[key]) ? localHighScores[key] : [];
+    var remoteList = Array.isArray(scoresToMerge[key]) ? scoresToMerge[key] : [];
+
+    // Track remote scores to detect if we have something new locally
+    var remoteScoresSet = {};
+    for (var j = 0; j < remoteList.length; ++j) {
+      var r = remoteList[j];
+      var rId = r.playerId || '';
+      var rName = normalizeHighScorePlayerName(r.player || '');
+      // Migration: assign 'computer' ID if name matches
+      if (!rId && (rName === 'Computer' || (typeof t === 'function' && rName === t('Computer')))) {
+        rId = 'computer';
+      }
+      remoteScoresSet[(rId || rName) + '|' + Number(r.score)] = true;
+    }
+
     var combined = localList.concat(remoteList);
     var seen = {};
     var unique = [];
@@ -106,9 +136,35 @@ async function mergeGlobalHighScores(remoteScores) {
       if (!(score > 0)) continue;
       var playerId = item.playerId || '';
       var rawName = normalizeHighScorePlayerName(item.player || '');
-      var stableKey = (playerId || rawName) + '|' + score + '|' + (item.session || '');
-      if (seen[stableKey]) continue;
-      seen[stableKey] = true;
+
+      // Migration: assign 'computer' ID if name matches
+      if (!playerId && (rawName === 'Computer' || (typeof t === 'function' && rawName === t('Computer')))) {
+        playerId = 'computer';
+      }
+
+      var dedupeKey = (playerId || rawName) + '|' + score;
+
+      // Check if this local score is missing from remote
+      if (i < localList.length && !remoteScoresSet[dedupeKey]) {
+        hasLocalOnlyScores = true;
+        if (DEBUG) console.log('Detected local-only high score:', dedupeKey, 'in', key);
+      }
+
+      if (seen[dedupeKey]) {
+        // If we already saw this score, but the new one has a session and the old one didn't,
+        // update the existing entry to include the session (allows viewing local matches).
+        if (item.session) {
+          for (var j = 0; j < unique.length; j++) {
+            if (((unique[j].playerId || unique[j].player) + '|' + unique[j].score) === dedupeKey) {
+              if (!unique[j].session) unique[j].session = item.session;
+              break;
+            }
+          }
+        }
+        continue;
+      }
+
+      seen[dedupeKey] = true;
       unique.push({
         player: rawName,
         playerId: playerId,
@@ -117,16 +173,29 @@ async function mergeGlobalHighScores(remoteScores) {
       });
     }
 
-    unique.sort(gCompareScores);
+    unique.sort(typeof gCompareScores === 'function' ? gCompareScores : function(a, b) {
+      var nA = a ? a.score : -99;
+      var nB = b ? b.score : -99;
+      return (nA > nB) ? -1 : ((nA < nB) ? 1 : 0);
+    });
     if (unique.length > 0) merged[key] = unique;
   }
 
-  g_highscores = merged;
+  window.g_highscores = merged;
   localStorage['highscores'] = JSON.stringify(g_highscores);
+  return hasLocalOnlyScores;
 }
 
 async function loadGlobalHighScores() {
-  if (!window.supabaseClient) return;
+  if (DEBUG) console.log('Loading global high scores from Supabase...');
+  if (!window.supabaseClient) {
+    initSupabase();
+    if (!window.supabaseClient) {
+      console.warn('Supabase client not available.');
+      return;
+    }
+  }
+
   try {
     var { data, error } = await window.supabaseClient
       .from(SUPABASE_HIGHSCORES_TABLE)
@@ -135,43 +204,80 @@ async function loadGlobalHighScores() {
       .single();
 
     if (error) {
-      console.warn('Failed to load global high scores:', error.message || error);
+      // If record doesn't exist (PGRST116), trigger initial sync
+      if (error.code === 'PGRST116') {
+        if (DEBUG) console.log('No global high scores record found. Syncing local scores...');
+        await saveGlobalHighScores();
+      } else {
+        console.warn('Failed to load global high scores:', error.message || error, error);
+      }
       return;
     }
 
-    if (data && data.scores && typeof data.scores === 'object') {
-      await mergeGlobalHighScores(data.scores);
+    if (data && typeof data.scores === 'object') {
+      var hasNewLocalData = await mergeGlobalHighScores(data.scores);
+      if (hasNewLocalData) {
+        if (DEBUG) console.log('New local high scores detected. Syncing to global...');
+        await saveGlobalHighScores();
+      } else {
+        if (DEBUG) console.log('No new local high scores to sync.');
+      }
     } else {
+      if (DEBUG) console.log('Global high scores record is empty or invalid. Syncing local scores...');
       await saveGlobalHighScores();
     }
   } catch (err) {
-    console.warn('Failed to load global high scores:', err);
+    console.warn('Unexpected error loading global high scores:', err);
   }
 }
 
 async function saveGlobalHighScores() {
-  if (!window.supabaseClient) return;
+  if (!window.supabaseClient) {
+    if (DEBUG) console.log('Supabase client not available for saving.');
+    return;
+  }
   try {
-    var payload = {
-      id: SUPABASE_HIGHSCORES_ID,
-      scores: g_highscores
-    };
+    var scoresToSave = g_highscores || {};
+    // Clone and strip huge session data before saving to DB
+    var strippedHighScores = JSON.parse(JSON.stringify(scoresToSave));
+    var hasScores = false;
+    for (var key in strippedHighScores) {
+      if (Array.isArray(strippedHighScores[key])) {
+        if (strippedHighScores[key].length > 0) hasScores = true;
+        strippedHighScores[key].forEach(function(item) {
+          delete item.session;
+        });
+      }
+    }
+
+    if (!hasScores && (!scoresToSave || Object.keys(scoresToSave).length === 0)) {
+       if (DEBUG) console.log('No high scores to save.');
+       return;
+    }
+
+    if (DEBUG) console.log('Upserting high scores to Supabase:', strippedHighScores);
     var { error } = await window.supabaseClient
       .from(SUPABASE_HIGHSCORES_TABLE)
-      .upsert(payload, { onConflict: 'id' });
+      .upsert({
+        id: SUPABASE_HIGHSCORES_ID,
+        scores: strippedHighScores
+      }, { onConflict: 'id' });
 
     if (error) {
-      console.warn('Failed to save global high scores:', error.message || error);
+      console.warn('Failed to save global high scores:', error.message || error, error);
+    } else {
+      if (DEBUG) console.log('Global high scores synced successfully.');
     }
   } catch (err) {
-    console.warn('Failed to save global high scores:', err);
+    console.warn('Unexpected error saving global high scores:', err);
   }
 }
 
-// Call init once the script loads, assuming supabase-js is loaded first.
-// We will move this call or ensure script order in index.html.
-window.addEventListener('load', initSupabase);
-window.addEventListener('appReady', loadGlobalHighScores);
+if (document.readyState === 'complete' && document.documentElement.classList.contains('loaded')) {
+  loadGlobalHighScores();
+} else {
+  document.addEventListener('appReady', loadGlobalHighScores);
+}
 
 // -----------------------------------------------------------------------------
 // LOBBY & MATCHMAKING
@@ -220,6 +326,26 @@ window.updatePlayerName = async function(newName) {
   g_myName = newName || (t('Player') + '_' + Math.floor(Math.random() * 10000));
   localStorage.setItem('player_name', g_myName);
   if (DEBUG) console.log('updatePlayerName: setting to', g_myName);
+
+  // Sync name changes to all high score entries with my ID
+  if (g_lobbyUserId) {
+    var changed = false;
+    for (var key in g_highscores) {
+      if (Array.isArray(g_highscores[key])) {
+        g_highscores[key].forEach(function(item) {
+          if (item.playerId === g_lobbyUserId) {
+            item.player = g_myName;
+            changed = true;
+          }
+        });
+      }
+    }
+    if (changed) {
+      localStorage['highscores'] = JSON.stringify(g_highscores);
+      if (typeof saveGlobalHighScores === 'function') saveGlobalHighScores();
+    }
+  }
+
   // Update input field value
   var inp = document.getElementById('lobby-name');
   if (inp) inp.value = g_myName;
@@ -952,17 +1078,17 @@ function handleGameStateBroadcast(payload) {
     });
   } else if (payload.type === 'highscores_sync') {
     if (payload.highscores) {
-      g_highscores = payload.highscores;
-      localStorage['highscores'] = JSON.stringify(g_highscores);
-      var highscoresModal = document.getElementById('modal-container');
-      if (highscoresModal && highscoresModal.classList.contains('highscores') && highscoresModal.style.display !== 'none') {
-        var layoutSelect = document.getElementById('highscores-layout');
-        var levelSelect = document.getElementById('highscores-level');
-        if (layoutSelect && levelSelect) {
-          document.getElementById('highscores-data').innerHTML = g_bui.renderHighScoreRows(layoutSelect.value + ' ' + levelSelect.value);
-          setModalHeight();
+      mergeGlobalHighScores(payload.highscores).then(function() {
+        var highscoresModal = document.getElementById('modal-container');
+        if (highscoresModal && highscoresModal.classList.contains('highscores') && highscoresModal.style.display !== 'none') {
+          var layoutSelect = document.getElementById('highscores-layout');
+          var levelSelect = document.getElementById('highscores-level');
+          if (layoutSelect && levelSelect) {
+            document.getElementById('highscores-data').innerHTML = g_bui.renderHighScoreRows(layoutSelect.value + ' ' + levelSelect.value);
+            setModalHeight();
+          }
         }
-      }
+      });
     }
   }
 }
@@ -1520,8 +1646,19 @@ function updateGameInfoLabels() {
 
 function syncHighScoresMultiplayer() {
   if (!g_isMultiplayer) return;
+
+  // Clone and strip huge session data before broadcasting
+  var strippedHighScores = JSON.parse(JSON.stringify(g_highscores));
+  for (var key in strippedHighScores) {
+    if (Array.isArray(strippedHighScores[key])) {
+      strippedHighScores[key].forEach(function(item) {
+        delete item.session;
+      });
+    }
+  }
+
   broadcastGameState({
     type: 'highscores_sync',
-    highscores: g_highscores
+    highscores: strippedHighScores
   });
 }
