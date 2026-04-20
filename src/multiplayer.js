@@ -881,15 +881,6 @@ function mapRemoteRackCellId(remoteId) {
 
     if (prefix === 'pl') return 'op' + reversedIndex;
     if (prefix === 'op') return 'pl' + reversedIndex;
-  } else if (remoteId.startsWith('c') && remoteId.indexOf('_') > -1) {
-    var parts = remoteId.slice(1).split('_');
-    var x = parseInt(parts[0], 10);
-    var y = parseInt(parts[1], 10);
-    if (isNaN(x) || isNaN(y)) return remoteId;
-
-    var mirroredX = (g_boardwidth - 1) - x;
-    var mirroredY = (g_boardheight - 1) - y;
-    return 'c' + mirroredX + '_' + mirroredY;
   }
   return remoteId;
 }
@@ -910,13 +901,6 @@ function localizeDragPosition(payload) {
       var offsetY = payload.y - payload.sourceCenterY;
       x = localRect.left + localRect.width / 2 - offsetX;
       y = localRect.top + localRect.height / 2 - offsetY;
-    } else {
-      var dragArea = el('drag');
-      if (dragArea) {
-        var dragRect = dragArea.getBoundingClientRect();
-        x = dragRect.left + dragRect.width - (payload.x - dragRect.left);
-        y = dragRect.top + dragRect.height - (payload.y - dragRect.top);
-      }
     }
   }
 
@@ -1152,12 +1136,6 @@ function onMultiplayerMove() {
   var newBoardP = boardinfo.boardp;
   var newBoardT = boardinfo.boardt;
 
-  // Keep global board state in sync with current UI state before validation.
-  // checkValidPlacement reads from g_board / g_boardpoints / g_boardtypes.
-  g_board = normalizeBoardMatrix(newBoard, '');
-  g_boardpoints = normalizeBoardMatrix(newBoardP, 0);
-  g_boardtypes = normalizeBoardMatrix(newBoardT, 0);
-
   var pinfo = null;
   var pstr = '';
   var scoreEarned = 0;
@@ -1165,8 +1143,15 @@ function onMultiplayerMove() {
   var rackAfter = rackBefore;
 
   if (!passed) {
-    pinfo = checkValidPlacement(g_bui.getPlayerPlacement());
+    var placement = g_bui.getPlayerPlacement();
+    pinfo = checkValidPlacement(placement);
     pstr = pinfo.played;
+
+    // Keep global board state in sync with current UI state after validation.
+    // checkValidPlacement reads from g_board / g_boardpoints / g_boardtypes.
+    g_board = normalizeBoardMatrix(newBoard, '');
+    g_boardpoints = normalizeBoardMatrix(newBoardP, 0);
+    g_boardtypes = normalizeBoardMatrix(newBoardT, 0);
 
     if (pstr === '') {
       g_bui.prompt(gErrPrefix() + pinfo.msg);
@@ -1246,15 +1231,18 @@ function handleMoveBroadcast(payload) {
       var nextBoard = Array.isArray(payload.board) ? payload.board : [];
 
       var diffWord = [];
-      for (var y = 0; y < g_boardheight; ++y) {
-        var prevRow = Array.isArray(prevBoard[y]) ? prevBoard[y] : [];
-        var nextRow = Array.isArray(nextBoard[y]) ? nextBoard[y] : [];
-        for (var x = 0; x < g_boardwidth; ++x) {
-          var charBefore = prevRow[x] || ' ';
-          var charAfter = nextRow[x] || ' ';
+      for (var x = 0; x < g_boardwidth; ++x) {
+        for (var y = 0; y < g_boardheight; ++y) {
+          var charBefore = prevBoard[x][y] || ' ';
+          var charAfter = nextBoard[x][y] || ' ';
           if (charAfter !== ' ' && charBefore === ' ') {
-            var ltr = charAfter === charAfter.toLowerCase() ? '*' : charAfter;
-            diffWord.push([y, x, charAfter, g_letscore[ltr]]);
+            var ltr = (charAfter === charAfter.toLowerCase() && charAfter !== ' ') ? '*' : charAfter;
+            diffWord.push({
+              'x': x,
+              'y': y,
+              'ltr': charAfter,
+              'lscr': g_letscore[ltr] || 0
+            });
           }
         }
       }
@@ -1280,6 +1268,7 @@ function handleMoveBroadcast(payload) {
 
           g_isMyTurn = true;
           updateTurnIndicator();
+          updateGameInfoLabels();
 
           if (payload.rackAfter === '' && g_letpool.length === 0) {
             g_isGameOver = true;

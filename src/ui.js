@@ -955,6 +955,7 @@ function RedipsUI() {
     var newrack = orack;
     var dlet = {};
     //if (DEBUG) console.log('Placements:', placements);
+    var usedIndices = new Set();
     for (var i = 0; i < placements.length; ++i) {
       var placement = placements[i];
       var l = placement.ltr;
@@ -964,16 +965,36 @@ function RedipsUI() {
       // the blank tile before it is animating to the board. After the
       // process below, orack will be a string of the original opponent
       // rack with all the letters used in the opponent word converted to _.
-      if (orack.search(l) === -1) {
-        var jpos = orack.search('\\*');
-        // Replace joker symbol with a different symbol
-        orack = orack.replace('*', '_');
-        // Expose joker letter value in new rack
-        newrack = newrack.replace('*', l);
-        l = (l !== ' ') ? l.toUpperCase() : '&nbsp;&nbsp;';
-        el(self.oppRackId + jpos).innerHTML = '<div class="drag t2">' + l + '</div>';
+      var lpos = -1;
+      for (var j = 0; j < orack.length; j++) {
+        if (orack[j] === l && !usedIndices.has(j)) {
+          lpos = j;
+          break;
+        }
+      }
+
+      if (lpos === -1) {
+        var jpos = -1;
+        for (var j = 0; j < orack.length; j++) {
+          if (orack[j] === '*' && !usedIndices.has(j)) {
+            jpos = j;
+            break;
+          }
+        }
+        if (jpos !== -1) {
+          usedIndices.add(jpos);
+          // Replace joker symbol with a different symbol
+          orack = orack.substr(0, jpos) + '_' + orack.substr(jpos + 1);
+          // Expose joker letter value in new rack
+          newrack = newrack.substr(0, jpos) + l + newrack.substr(jpos + 1);
+          var ltrStr = (l !== ' ') ? l.toUpperCase() : '&nbsp;&nbsp;';
+          el(self.oppRackId + jpos).innerHTML = '<div class="drag t2">' + ltrStr + '<sup><small>' + (g_letscore[placement.ltr] || 0) + '</small></sup></div>';
+        }
       } else {
-        orack = orack.replace(l, '_');
+        usedIndices.add(lpos);
+        orack = orack.substr(0, lpos) + '_' + orack.substr(lpos + 1);
+        var ltrStr = (l !== ' ') ? l.toUpperCase() : '&nbsp;&nbsp;';
+        el(self.oppRackId + lpos).innerHTML = '<div class="drag t2">' + ltrStr + '<sup><small>' + (g_letscore[l] || 0) + '</small></sup></div>';
       }
     }
 
@@ -1050,6 +1071,21 @@ function RedipsUI() {
       if (lettermoves[0].x !== lettermoves[1].x) lettermoves.sort(compareByX);
       else lettermoves.sort(compareByY);
     }
+
+    if (totalanims === 0 || (typeof g_animation === 'number' && g_animation === 0)) {
+      // No animations to run or animations are disabled
+      for (var i = 0; i < totalanims; ++i) {
+        var moveinfo = lettermoves[i].info;
+        moveinfo.target.innerHTML = ''; // Clear target
+        moveinfo.target.appendChild(moveinfo.obj);
+        if (typeof moveinfo.obj.redips === 'object' && moveinfo.obj.redips.enabled !== false) {
+           self.rd.registerEvents(moveinfo.obj);
+        }
+      }
+      if (typeof callback === 'function') callback();
+      return;
+    }
+
     var wait;
     for (var i = 0; i < totalanims; ++i) {
       // Set the the time to wait before animating this letter to its
@@ -1206,7 +1242,8 @@ function RedipsUI() {
       if (ltr !== '') {
         cells.push(rcell);
         var html = '<div class="drag t' + player + '">';
-        var hideOpponentLetter = (player === 2 && typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer);
+        var isOpponent = (player === 2);
+        var hideOpponentLetter = (isOpponent && typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer);
         var holds = {
           'letter': ltr,
           'points': self.scores[ltr]

@@ -1553,36 +1553,47 @@ function onPlayerSwapped(keep, swap) {
 //------------------------------------------------------------------------------
 function placeOnBoard(word, animCallback) {
   //console.log('placeOnBoard', word);
-  var lcount = 0;
-  var seqlen = word.seq.length;
-  var dx = 1;
-  var dy = 0;
-  if (word.xy === 'y') {
-    dx = 0;
-    dy = 1;
-  }
-  var x = word.ax;
-  var y = word.ay;
   var placements = [];
-  var ltr, lscr;
-  while (lcount < seqlen) {
-    if (g_board[x][y] === '') {
-      ltr = word.seq.charAt(lcount);
-      lscr = word.lscrs[lcount++];
-      placements.push({
-        'x': x,
-        'y': y,
-        'ltr': ltr,
-        'lscr': lscr
-      });
-      //g_bui.opponentPlay(x, y, ltr, lscr);
-      //console.log('placeOnBoard', ltr, lscr);
-      g_board[x][y] = ltr;
-      g_boardpoints[x][y] = lscr;
-      g_boardtypes[x][y] = 2;
+  if (Array.isArray(word)) {
+    // word is already an array of placement objects
+    placements = word;
+    for (var i = 0; i < placements.length; i++) {
+      var p = placements[i];
+      g_board[p.x][p.y] = p.ltr;
+      g_boardpoints[p.x][p.y] = p.lscr;
+      g_boardtypes[p.x][p.y] = 2;
     }
-    x += dx;
-    y += dy;
+  } else {
+    var lcount = 0;
+    var seqlen = word.seq.length;
+    var dx = 1;
+    var dy = 0;
+    if (word.xy === 'y') {
+      dx = 0;
+      dy = 1;
+    }
+    var x = word.ax;
+    var y = word.ay;
+    var ltr, lscr;
+    while (lcount < seqlen) {
+      if (g_board[x][y] === '') {
+        ltr = word.seq.charAt(lcount);
+        lscr = word.lscrs[lcount++];
+        placements.push({
+          'x': x,
+          'y': y,
+          'ltr': ltr,
+          'lscr': lscr
+        });
+        //g_bui.opponentPlay(x, y, ltr, lscr);
+        //console.log('placeOnBoard', ltr, lscr);
+        g_board[x][y] = ltr;
+        g_boardpoints[x][y] = lscr;
+        g_boardtypes[x][y] = 2;
+      }
+      x += dx;
+      y += dy;
+    }
   }
   hideModal();
   g_bui.playOpponentMove(placements, animCallback);
