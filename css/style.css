@@ -523,11 +523,8 @@ table.board td .drag,
   position: fixed;
   top: 0;
   left: 0;
-  width: 36px;
-  height: 36px;
   opacity: 0.6;
   pointer-events: none;
-  transform: translate(-50%, -50%);
   z-index: 9999;
 }
 

@@ -10,11 +10,11 @@ const SUPABASE_HIGHSCORES_ID = 'vietboard';
 window.supabaseClient = null;
 
 // Multiplayer state variables
-let g_isMultiplayer = false;
-let g_gameId = null;
-let g_isMyTurn = false;
-let g_opponentId = null;
-let g_opponentName = null;
+var g_isMultiplayer = false;
+var g_gameId = null;
+var g_isMyTurn = false;
+var g_opponentId = null;
+var g_opponentName = null;
 let g_lobbyUserId = localStorage.getItem('lobby_user_id');
 if (!g_lobbyUserId) {
   g_lobbyUserId = 'user_' + Math.random().toString(36).substr(2, 9);
@@ -56,7 +56,7 @@ if (!g_myName) {
 
   generateNickname();
 }
-let g_channel = null; // Either lobby or game channel
+var g_channel = null; // Either lobby or game channel
 let g_explicitLeftUsers = new Set();
 let g_opponentPresenceState = false;
 let g_dragThrottleTimer = null;
@@ -425,8 +425,7 @@ function joinLobbyChannel() {
     .on('broadcast', { event: 'invite' }, (payload) => {
       if (payload.payload.to === g_lobbyUserId) {
         if (DEBUG) console.log('Received invite!', payload);
-        g_opponentId = payload.payload.fromId || null;
-        startMultiplayerGame(payload.payload.gameId, payload.payload.fromName, false);
+        startMultiplayerGame(payload.payload.gameId, payload.payload.fromId, payload.payload.fromName, false);
       }
     })
     .subscribe(async (status) => {
@@ -841,6 +840,12 @@ function broadcastGameState(payload) {
   }
 }
 
+var g_dragLastSentX = 0;
+var g_dragLastSentY = 0;
+var g_dragLastSentTime = 0;
+var g_cachedBoardRect = null;
+var g_cachedLocalSourceRect = null;
+
 function sendDragPosition(x, y, sourceId, sourceCenter) {
   if (!g_isMultiplayer || !g_channel || !g_isMyTurn) return;
   if (g_dragThrottleTimer) return;
@@ -849,13 +854,32 @@ function sendDragPosition(x, y, sourceId, sourceCenter) {
     g_dragThrottleTimer = null;
   }, 50);
 
+  // Convert to relative coordinates based on #board for maximum stability
+  if (!g_cachedBoardRect) {
+    var board = el('board');
+    if (board) g_cachedBoardRect = board.getBoundingClientRect();
+  }
+
+  var bx = 0, by = 0;
+  if (g_cachedBoardRect) {
+    bx = (x - g_cachedBoardRect.left) / g_cachedBoardRect.width;
+    by = (y - g_cachedBoardRect.top) / g_cachedBoardRect.height;
+  }
+
   var payload = {
     seq: ++g_dragSeq,
-    x: x,
+    bx: bx, // Board-relative X
+    by: by, // Board-relative Y
+    x: x,   // Fallback
     y: y
   };
   if (sourceId) payload.sourceId = sourceId;
   if (sourceCenter && typeof sourceCenter.sourceCenterX === 'number' && typeof sourceCenter.sourceCenterY === 'number') {
+    // Also relativize source center
+    if (g_cachedBoardRect) {
+        payload.bsX = (sourceCenter.sourceCenterX - g_cachedBoardRect.left) / g_cachedBoardRect.width;
+        payload.bsY = (sourceCenter.sourceCenterY - g_cachedBoardRect.top) / g_cachedBoardRect.height;
+    }
     payload.sourceCenterX = sourceCenter.sourceCenterX;
     payload.sourceCenterY = sourceCenter.sourceCenterY;
   }
@@ -868,30 +892,70 @@ function sendDragPosition(x, y, sourceId, sourceCenter) {
 }
 
 function mapRemoteRackCellId(remoteId) {
-  // No mirroring. In the new "Shared Orientation" model, 
-  // pl for one is op for the other, but they use the same indices.
   if (typeof remoteId !== 'string') return remoteId;
-  if (remoteId.startsWith('pl')) return 'op' + remoteId.slice(2);
-  if (remoteId.startsWith('op')) return 'pl' + remoteId.slice(2);
+  
+  // Scrabble/Vietboard rack indices are 0 to g_racksize - 1.
+  // When players 'face each other', their racks are horizontally mirrored.
+  // Leftmost (0) for one is Rightmost (g_racksize - 1) for the other.
+  if (remoteId.startsWith('pl') || remoteId.startsWith('op')) {
+    var prefix = remoteId.startsWith('pl') ? 'op' : 'pl';
+    var index = parseInt(remoteId.slice(2));
+    if (!isNaN(index)) {
+      var mirroredIndex = (g_racksize - 1) - index;
+      return prefix + mirroredIndex;
+    }
+  }
+  
   return remoteId;
 }
 
 function localizeDragPosition(payload) {
-  if (!payload || typeof payload.x !== 'number' || typeof payload.y !== 'number') return null;
+  if (!payload) return null;
 
-  var x = payload.x;
-  var y = payload.y;
+  if (!g_cachedBoardRect) {
+    var board = el('board');
+    if (board) g_cachedBoardRect = board.getBoundingClientRect();
+  }
+
+  // Use board-relative coordinates for resolution independence
+  var x = (typeof payload.bx === 'number' && g_cachedBoardRect) ? (g_cachedBoardRect.left + payload.bx * g_cachedBoardRect.width) : payload.x;
+  var y = (typeof payload.by === 'number' && g_cachedBoardRect) ? (g_cachedBoardRect.top + payload.by * g_cachedBoardRect.height) : payload.y;
+  var sX = (typeof payload.bsX === 'number' && g_cachedBoardRect) ? (g_cachedBoardRect.left + payload.bsX * g_cachedBoardRect.width) : payload.sourceCenterX;
+  var sY = (typeof payload.bsY === 'number' && g_cachedBoardRect) ? (g_cachedBoardRect.top + payload.bsY * g_cachedBoardRect.height) : payload.sourceCenterY;
+
   var sourceId = payload.sourceId;
 
-  if (typeof sourceId === 'string' && (sourceId.startsWith('pl') || sourceId.startsWith('op') || sourceId.charAt(0) === 'c')) {
-    var localSourceId = mapRemoteRackCellId(sourceId);
-    var localSourceCell = el(localSourceId);
-    if (localSourceCell && typeof payload.sourceCenterX === 'number' && typeof payload.sourceCenterY === 'number') {
-      var localRect = localSourceCell.getBoundingClientRect();
-      var offsetX = payload.x - payload.sourceCenterX;
-      var offsetY = payload.y - payload.sourceCenterY;
-      x = localRect.left + localRect.width / 2 - offsetX;
-      y = localRect.top + localRect.height / 2 - offsetY;
+  if (typeof sourceId === 'string') {
+    if (!g_cachedLocalSourceRect) {
+      // Rack IDs are mirrored for face-to-face; board IDs (absolute) are not.
+      var localSourceId = (sourceId.startsWith('pl') || sourceId.startsWith('op')) ? mapRemoteRackCellId(sourceId) : sourceId;
+      var localSourceCell = el(localSourceId);
+      if (localSourceCell) g_cachedLocalSourceRect = localSourceCell.getBoundingClientRect();
+    }
+
+    if (g_cachedLocalSourceRect && (sourceId.startsWith('pl') || sourceId.startsWith('op')) && typeof sX === 'number' && typeof sY === 'number') {
+      // We want the ghost to start at the LOCAL mapped rack center
+      var startX_local = g_cachedLocalSourceRect.left + g_cachedLocalSourceRect.width / 2;
+      var startY_local = g_cachedLocalSourceRect.top + g_cachedLocalSourceRect.height / 2;
+      
+      // Decay the error as the tile moves away from the source (vertically)
+      // Use a tight transition (1 cell height) to snap to absolute board position
+      var dy_moved = Math.abs(y - sY);
+      var transitionDist = g_cachedLocalSourceRect.height; 
+      var fade = Math.max(0, 1 - dy_moved / transitionDist);
+      
+      if (fade > 0) {
+          // At the rack, we mirror the offset relative to the local mapped cell center.
+          var offsetX = x - sX;
+          var offsetY = y - sY;
+          
+          var x_at_rack = startX_local - offsetX;
+          var y_at_rack = startY_local - offsetY;
+          
+          // Interpolate between mirrored rack position and absolute board position
+          x = x + (x_at_rack - x) * fade;
+          y = y + (y_at_rack - y) * fade;
+      }
     }
   }
 
@@ -909,6 +973,10 @@ function sendDragEnd() {
       end: true
     }
   });
+
+  // Clear local sender-side cache
+  g_cachedBoardRect = null;
+  g_cachedLocalSourceRect = null;
 }
 
 function sendDragPreview(fromId, toId, holds) {
@@ -1013,6 +1081,9 @@ function handleDragBroadcast(payload) {
       g_dragGhost.remove();
       g_dragGhost = null;
     }
+    // Reset receiver-side cache
+    g_cachedBoardRect = null;
+    g_cachedLocalSourceRect = null;
     return;
   }
 
@@ -1020,14 +1091,37 @@ function handleDragBroadcast(payload) {
     g_dragGhost = document.createElement('div');
     g_dragGhost.id = 'mp-drag-ghost';
     g_dragGhost.className = 'drag t2 mp-ghost';
+    
+    // Core styling for translate3d efficiency
+    g_dragGhost.style.position = 'fixed';
+    g_dragGhost.style.left = '0';
+    g_dragGhost.style.top = '0';
+    g_dragGhost.style.zIndex = '10000';
+    g_dragGhost.style.pointerEvents = 'none';
+    g_dragGhost.style.transition = 'none'; // Disable transitions to prevent trailing lag
+
     document.body.appendChild(g_dragGhost);
   }
 
   g_dragGhost.innerHTML = '&nbsp;&nbsp;';
   var localPos = localizeDragPosition(payload);
   if (localPos) {
-    g_dragGhost.style.left = localPos.x + 'px';
-    g_dragGhost.style.top = localPos.y + 'px';
+    var gw = 50;
+    var gh = 50;
+    if (g_cachedLocalSourceRect) {
+        gw = g_cachedLocalSourceRect.width;
+        gh = g_cachedLocalSourceRect.height;
+    } else if (g_cachedBoardRect) {
+        gw = g_cachedBoardRect.width / g_boardwidth;
+        gh = g_cachedBoardRect.height / g_boardheight;
+    }
+    
+    // Set size to match original tile
+    g_dragGhost.style.width = gw + 'px';
+    g_dragGhost.style.height = gh + 'px';
+    
+    // Center using translate(-50%, -50%) combined with absolute position
+    g_dragGhost.style.transform = 'translate3d(' + localPos.x + 'px, ' + localPos.y + 'px, 0) translate(-50%, -50%)';
   }
 }
 
@@ -1113,14 +1207,8 @@ function updateTurnIndicator() {
 // GAMEPLAY SYNC
 // -----------------------------------------------------------------------------
 
-function onMultiplayerMove() {
-  if (!g_isMyTurn) {
-    g_bui.prompt(t('It is not your turn!'));
-    g_bui.cancelPlayerPlacement();
-    return;
-  }
-
-  var passed = self.passed; // self is window here basically, referring to the passed flag in engine.js
+function onMultiplayerMove(passed) {
+  if (!g_isMyTurn || g_isGameOver) return;
 
   var boardinfo = g_bui.getBoard();
   var newBoard = boardinfo.board;

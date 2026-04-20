@@ -696,21 +696,25 @@ function RedipsUI() {
     //self.rd.style.borderDisabled = 'solid'; // Border style for disabled element unchanged
     self.rd.animation.pause = g_animation; // Set animation loop pause
 
+    var g_cachedSenderSourceRect = null;
     function stopMultiplayerDragSync() {
       if (self.dragSyncTimer) {
         clearInterval(self.dragSyncTimer);
         self.dragSyncTimer = null;
       }
+      g_cachedSenderSourceRect = null;
     }
 
     function getMultiplayerDragSource() {
       if (!self.rd.td || !self.rd.td.source) return null;
       var sourceCell = self.rd.td.source;
-      var rect = sourceCell.getBoundingClientRect();
+      if (!g_cachedSenderSourceRect) {
+        g_cachedSenderSourceRect = sourceCell.getBoundingClientRect();
+      }
       return {
         sourceId: sourceCell.id,
-        sourceCenterX: rect.left + rect.width / 2,
-        sourceCenterY: rect.top + rect.height / 2
+        sourceCenterX: g_cachedSenderSourceRect.left + g_cachedSenderSourceRect.width / 2,
+        sourceCenterY: g_cachedSenderSourceRect.top + g_cachedSenderSourceRect.height / 2
       };
     }
 
@@ -749,7 +753,6 @@ function RedipsUI() {
         self.playSound();
         el('clear').textContent = t('Clear');
         el('clear').onclick = onPlayerClear;
-        console.log(holds, self.rd.td.source, self.boardId);
         if (holds && holds.points === 0) { // Joker
           self.showLettersModal(id);
           return;
