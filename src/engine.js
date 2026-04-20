@@ -13,6 +13,7 @@
 const DEBUG = true;
 
 // Configuration
+var g_tiles_in_bag = 20;       // Maximum number of tiles
 var g_boardwidth = 15;          // How many tiles horizontally
 var g_boardheight = 15;         // How many tiles vertically
 var g_racksize = 8;             // Max number of letters on racks
@@ -123,6 +124,12 @@ function init(iddiv) {
     for (var j = 0; j < numlets; ++j) {
       g_letpool.push(whichlt);
     }
+  }
+
+  // Ensure total tiles in the bag is limited to g_tiles_in_bag for testing
+  shufflePool();
+  if (g_letpool.length > g_tiles_in_bag) {
+    g_letpool = g_letpool.slice(0, g_tiles_in_bag);
   }
 
   shufflePool();
