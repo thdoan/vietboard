@@ -54,20 +54,20 @@ body {
   outline: none;
 }
 
-a {
+a[href] {
   cursor: pointer;
 }
 a.link {
   color: #00e;
   color: -webkit-link;
 }
-a:hover,
-a:focus,
+a[href]:hover,
+a[href]:focus,
 a.link:hover,
 a.link:focus {
   color: #b00;
 }
-a:active,
+a[href]:active,
 a.link:active {
   color: #e00;
 }
@@ -238,7 +238,7 @@ picture img {
 }
 
 .buttons {
-  margin-top: 1rem;
+  margin-top: auto;
   text-align: center;
 }
 
@@ -564,18 +564,6 @@ table.board td .drag,
   padding: 6px;
 }
 
-.wordinfo #modal-content {
-  background-color: #fff;
-  padding: 0 0 1rem 0;
-}
-#dict {
-  position: relative;
-  width: 360px;
-  height: 400px;
-  border: 0;
-  z-index: 1;
-}
-
 /*** Game Info ***/
 
 #back {
@@ -798,13 +786,12 @@ footer .social {
   box-shadow: 0 3px 15px rgba(0, 0, 0, 0.4);
   -webkit-box-sizing: border-box;
   box-sizing: border-box;
-  display: inline-block;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
   overflow: hidden;
   padding: 1rem;
   text-align: left;
-}
-:is(.highscores, .lobby-modal) #modal-content {
-  background: url(../pics/highscores_bg.jpg);
 }
 #modal-container.center #modal-content {
   text-align: center;
@@ -859,6 +846,28 @@ footer .social {
   content: 'vs';
   display: inline-block;
   font-weight: bold;
+}
+
+:is(.highscores, .lobby-modal) #modal-content {
+  background: url(../pics/highscores_bg.jpg);
+}
+
+.wordinfo #modal-content {
+  background-color: #fff;
+  padding: 0 0 1rem 0;
+}
+#dict {
+  position: relative;
+  width: 360px;
+  height: 400px;
+  border: 0;
+  z-index: 1;
+}
+
+.bag #modal-content {
+  width: 280px;
+  min-height: 280px;
+  background: url(../pics/bag_bg.jpg);
 }
 
 /* Modal tables */
