@@ -1592,6 +1592,7 @@ function onPlayerSwapped(keep, swap) {
 function placeOnBoard(word, animCallback) {
   //console.log('placeOnBoard', word);
   var placements = [];
+  var isMP = (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer);
   if (Array.isArray(word)) {
     // word is already an array of placement objects
     placements = word;
@@ -1599,7 +1600,9 @@ function placeOnBoard(word, animCallback) {
       var p = placements[i];
       g_board[p.x][p.y] = p.ltr;
       g_boardpoints[p.x][p.y] = p.lscr;
-      g_boardtypes[p.x][p.y] = 2;
+      // In multiplayer the caller has already set the correct perspective-
+      // relative type; don't override it here.
+      if (!isMP) g_boardtypes[p.x][p.y] = 2;
     }
   } else {
     var lcount = 0;
@@ -1627,12 +1630,23 @@ function placeOnBoard(word, animCallback) {
         //console.log('placeOnBoard', ltr, lscr);
         g_board[x][y] = ltr;
         g_boardpoints[x][y] = lscr;
-        g_boardtypes[x][y] = 2;
+        if (!isMP) g_boardtypes[x][y] = 2;
       }
       x += dx;
       y += dy;
     }
   }
+  // Safety: clear any residual preview state from target cells before animation
+  for (var i = 0; i < placements.length; i++) {
+    var p = placements[i];
+    var cellId = 'c' + p.x + '_' + p.y;
+    var cellObj = el(cellId);
+    if (cellObj) {
+      cellObj.innerHTML = '';
+      cellObj.holds = '';
+    }
+  }
+
   hideModal();
   g_bui.playOpponentMove(placements, animCallback);
   if (g_board_empty) {
