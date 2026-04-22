@@ -471,8 +471,9 @@ function RedipsUI() {
       hr +
       '<tr><td><span id="label-loscore">' + t('Computer&rsquo;s last score:') + '</span></td><td id="loscore">0</td></tr>' +
       '<tr class="highlight"><td><span id="label-oscore">' + t('Computer&rsquo;s total score:') + '</span></td><td id="oscore">0</td></tr>' +
+      hr +
+      '<tr><td>' + t('Tiles left:') + '</td><td id="tleft"></td></tr>' +
       hr;
-    if (DEBUG) html += '<tr><td>' + t('Tiles left:') + '</td><td id="tleft"></td></tr>' + hr;
     html +=
       '</table><footer>' +
       '<a href="https://fb.me/vietboardplay" class="social" title="' + t('Visit our Facebook Page to learn more') + '"><img src="pics/fb.svg" width="32" height="32" alt="Facebook"></a>' +
@@ -649,8 +650,11 @@ function RedipsUI() {
     // If visible, sync from DOM
     if (self.showOpRack) {
       var letters = '';
+      var isMP = (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer);
       for (var i = 0; i < self.racksize; ++i) {
-        var cell = document.getElementById(self.oppRackId + i);
+        // In multiplayer racks are mirrored horizontally; read DOM in reverse
+        var domIndex = isMP ? (self.racksize - 1 - i) : i;
+        var cell = document.getElementById(self.oppRackId + domIndex);
         if (cell && cell.holds && cell.holds !== '') {
           letters += (cell.holds.letter || '*');
         } else {
@@ -773,16 +777,17 @@ function RedipsUI() {
       var id = self.rd.td.target.id;
       var sourceId = self.rd.td.source.id;
       var sc = self.rd.td.source.id.charAt(0);
+      var isJokerOnBoard = false;
       if (id.charAt(0) === self.boardId) {
         // Tile dropped on playing board
         self.playSound();
         el('clear').textContent = t('Clear');
         el('clear').onclick = onPlayerClear;
         if (holds && holds.points === 0) { // Joker
-          self.showLettersModal(id);
-          return;
+          isJokerOnBoard = true;
+        } else {
+          self.newplays[id] = self.hcopy(holds);
         }
-        self.newplays[id] = self.hcopy(holds);
       } else if (id.charAt(0) === 'p') {
         // Tile dropped on player rack
         if (holds && holds.points === 0 // Joker
@@ -806,6 +811,11 @@ function RedipsUI() {
 
       if (typeof sendDragEnd === 'function') sendDragEnd();
       stopMultiplayerDragSync();
+      if (typeof cleanupDragGhosts === 'function') cleanupDragGhosts();
+
+      if (isJokerOnBoard) {
+        self.showLettersModal(id);
+      }
     };
 
     self.rd.event.changed = function() {
@@ -829,6 +839,7 @@ function RedipsUI() {
     self.rd.event.notMoved = function() {
       if (typeof sendDragEnd === 'function') sendDragEnd();
       stopMultiplayerDragSync();
+      if (typeof cleanupDragGhosts === 'function') cleanupDragGhosts();
     };
 
     self.rd.event.moved = function() {
@@ -898,6 +909,13 @@ function RedipsUI() {
     var div = cell.firstChild;
     div.holds = self.hcopy(holds);
     div.innerHTML = html;
+
+    // Re-broadcast the resolved joker letter so opponent sees it immediately
+    if (typeof sendDragPreview === 'function') {
+      sendDragPreview(self.bdropCellId, self.bdropCellId, holds);
+    }
+    if (typeof sendDragEnd === 'function') sendDragEnd();
+
     hideModal();
     return self.bdropCellId;
   };
@@ -984,6 +1002,15 @@ function RedipsUI() {
     var dlet = {};
     //if (DEBUG) console.log('Placements:', placements);
     var usedIndices = new Set();
+
+    // Helper: map logical rack index to physical DOM cell id
+    // In multiplayer opponent rack is mirrored horizontally.
+    var isMP = (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer);
+    function getOppCellId(idx) {
+      var domIdx = isMP ? (self.racksize - 1 - idx) : idx;
+      return self.oppRackId + domIdx;
+    }
+
     for (var i = 0; i < placements.length; ++i) {
       var placement = placements[i];
       var l = placement.ltr;
@@ -1017,7 +1044,7 @@ function RedipsUI() {
           newrack = newrack.substr(0, jpos) + l + newrack.substr(jpos + 1);
           var ltrStr = (l !== ' ') ? l.toUpperCase() : '&nbsp;&nbsp;';
           var pVal = placement.lscr;
-          var rcell = el(self.oppRackId + jpos);
+          var rcell = el(getOppCellId(jpos));
           if (rcell.firstChild) {
             rcell.firstChild.innerHTML = ltrStr + '<sup><small>' + (pVal > 0 ? pVal : '&nbsp;') + '</small></sup>';
           }
@@ -1027,7 +1054,7 @@ function RedipsUI() {
         orack = orack.substr(0, lpos) + '_' + orack.substr(lpos + 1);
         var ltrStr = (l !== ' ') ? l.toUpperCase() : '&nbsp;&nbsp;';
         var pVal = placement.lscr;
-        var rcell = el(self.oppRackId + lpos);
+        var rcell = el(getOppCellId(lpos));
         if (rcell.firstChild) {
           rcell.firstChild.innerHTML = ltrStr + '<sup><small>' + (pVal > 0 ? pVal : '&nbsp;') + '</small></sup>';
         }
@@ -1059,7 +1086,7 @@ function RedipsUI() {
         // Get the placement info for this letter
         var move = dlet[rlet][0];
         // And position of the corresponding letter on opponent's rack
-        var opid = self.oppRackId + i;
+        var opid = getOppCellId(i);
         // And the target cell information
         var cellId = self.boardId + move.x + '_' + move.y;
         var orcell = el(opid);
@@ -1076,7 +1103,8 @@ function RedipsUI() {
         var moveinfo = {
           'obj': div,
           'target': cell,
-          'callback': self.animDone
+          'callback': self.animDone,
+          'overwrite': true
         };
         lettermoves.push({
           'info': moveinfo,
@@ -1277,9 +1305,13 @@ function RedipsUI() {
 
     var ifprfx = (player === 1) ? self.plrRackId : self.oppRackId;
     var upper = letters.toUpperCase();
+    var isOpponent = (player === 2);
+    var isMP = (isOpponent && typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer);
 
     for (var i = 0; i < self.racksize; ++i) {
-      var id = ifprfx + i;
+      // In multiplayer, opponent rack is mirrored horizontally
+      var domIdx = isMP ? (self.racksize - 1 - i) : i;
+      var id = ifprfx + domIdx;
       var rcell = el(id);
       // Remove the existing drag div?
       if (rcell.firstChild) rcell.removeChild(rcell.firstChild);
@@ -1287,22 +1319,29 @@ function RedipsUI() {
       if (ltr !== '' && ltr !== '.') {
         cells.push(rcell);
         var html = '<div class="drag t' + player + '">';
-        var isOpponent = (player === 2);
-        var hideOpponentLetter = (isOpponent && typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer);
+        var hideOpponentLetter = isMP;
         var holds = {
           'letter': ltr,
           'points': self.scores[ltr] || 0
         };
         rcell.holds = holds;
-        if (ltr !== '*' && ltr !== ' ') {
+        if (ltr === '*') {
+          // Joker: blank face, no points
+          html += '&nbsp;&nbsp;';
+        } else if (ltr === ' ') {
+          // Space tile: blank face with points (e.g., 10)
+          if (hideOpponentLetter) {
+            html += '&nbsp;&nbsp;';
+          } else {
+            html += '&nbsp;&nbsp;<sup><small>' + self.scores[ltr] + '</small></sup>';
+          }
+        } else {
           if (hideOpponentLetter) {
             html += '&nbsp;&nbsp;';
           } else {
             var char = upper.charAt(i);
             html += (char !== ' ' ? char : '&nbsp;&nbsp;') + '<sup><small>' + self.scores[ltr] + '</small></sup>';
           }
-        } else {
-          html += '&nbsp;&nbsp;';
         }
         html += '</div>';
         rcell.innerHTML = html;
@@ -1348,7 +1387,7 @@ function RedipsUI() {
 
   self.setTilesLeft = function(left) {
     if (!el('tleft')) return;
-    el('tleft').innerHTML = '<a href="javascript:g_bui.showTilesLeft()">' + left + '</a>';
+    el('tleft').innerHTML = '<a' + (DEBUG ? ' href="javascript:g_bui.showTilesLeft()"' : '') + '>' + left + '</a>';
   };
 
   self.showBusy = function() {
@@ -1425,12 +1464,12 @@ function RedipsUI() {
 
   self.showTilesLeft = function() {
     var oTilesLeft = g_letpool.sort().reduce(function(accumulator, currentValue) {
-      if (currentValue === ' ') currentValue = '&lt;space&gt;';
-      else if (currentValue === '*') currentValue = '&lt;blank&gt;';
+      if (currentValue === ' ') currentValue = '&lt;' + t('space') + '&gt;';
+      else if (currentValue === '*') currentValue = '&lt;' + t('blank') + '&gt;';
       accumulator[currentValue] = (accumulator[currentValue] || 0) + 1;
       return accumulator;
     }, {});
-    self.prompt('<div class="debug">' + JSON.stringify(oTilesLeft).replace(/[{}"]/g, '').replace(/([:,])/g, '$1 ') + '</div>');
+    self.prompt('<div class="debug">' + JSON.stringify(oTilesLeft).replace(/[{}"]/g, '').replace(/([:,])/g, '$1 ') + '</div>', '', 'bag');
   };
 
   // Toggle opponent rack visibility
@@ -1475,7 +1514,7 @@ function RedipsUI() {
       html += '</div>';
       self.prompt(html);
     } else {
-      self.prompt('<iframe id="dict" src="https://vdict.com/' + encodeURIComponent(word) + ',2,0,0.html"></iframe>', null, 'wordinfo wide');
+      self.prompt('<iframe id="dict" src="https://vdict.com/' + encodeURIComponent(word) + ',2,0,0.html"></iframe>', '', 'wordinfo wide');
       gtag('event', word, {
         'event_category': 'Definition',
         'event_label': 'Found'

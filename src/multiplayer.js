@@ -1023,6 +1023,18 @@ function sendDragSourceClear(sourceId) {
   });
 }
 
+function cleanupDragGhosts() {
+  if (g_dragGhost) {
+    g_dragGhost.remove();
+    g_dragGhost = null;
+  }
+  // Also sweep for any orphaned ghosts that may have lost their reference
+  var orphans = document.querySelectorAll('.mp-ghost');
+  for (var i = 0; i < orphans.length; ++i) {
+    orphans[i].remove();
+  }
+}
+
 function renderOpponentRackTileBack(cell) {
   if (!cell) return;
   cell.innerHTML = '<div class="drag t2">&nbsp;&nbsp;</div>';
@@ -1031,7 +1043,7 @@ function renderOpponentRackTileBack(cell) {
 function renderOpponentBoardTile(cell, letter, points) {
   if (!cell) return;
   var displayLetter = letter;
-  if (displayLetter === '*') displayLetter = '&nbsp;&nbsp;';
+  if (displayLetter === '*' || displayLetter === ' ') displayLetter = '&nbsp;&nbsp;';
   else displayLetter = String(displayLetter || '').toUpperCase();
   var p = parseInt(points);
   var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
@@ -1055,7 +1067,12 @@ function applyDragPreview(payload) {
     }
   }
 
-  if (toId && (toId.charAt(0) === 'c' || toId.startsWith('op'))) {
+  if (toId && toId.charAt(0) === 'c') {
+    // Board cell: render the real letter so the opponent sees what was placed
+    var p = (typeof payload.points === 'number') ? payload.points : (g_letscore[payload.letter] || 0);
+    renderOpponentBoardTile(toCell, payload.letter || '', p);
+  } else if (toId && toId.startsWith('op')) {
+    // Opponent rack cell: still show blank back
     renderOpponentRackTileBack(toCell);
   }
 }
@@ -1089,10 +1106,7 @@ function handleDragBroadcast(payload) {
   }
 
   if (payload.end) {
-    if (g_dragGhost) {
-      g_dragGhost.remove();
-      g_dragGhost = null;
-    }
+    cleanupDragGhosts();
     // Reset receiver-side cache
     g_cachedBoardRect = null;
     g_cachedLocalSourceRect = null;
@@ -1194,7 +1208,12 @@ function updateTurnIndicator() {
   // disable dragging from your rack to prevent local unsent moves.
   if (g_isMultiplayer && g_bui) {
     if (g_isMyTurn) g_bui.makeTilesFixed();
-    else g_bui.fixPlayerTiles();
+    else {
+      // Disable ALL tiles (board + rack) when it is not our turn.
+      // setPlayerRack()->setLetters()->rd.init() can re-enable dragging
+      // on board tiles, so we must explicitly shut everything down.
+      g_bui.rd.enableDrag(false, '#drag div');
+    }
   }
 
   // High Scores: always enabled during multiplayer
@@ -1341,6 +1360,9 @@ function handleMoveBroadcast(payload) {
     if (payload.stateVersion && payload.stateVersion <= g_stateVersion) return;
     g_stateVersion = Math.max(g_stateVersion, payload.stateVersion || 0);
 
+    // Clean up any stray ghost tiles before applying the move
+    cleanupDragGhosts();
+
     // Apply opponent's move
     if (!payload.passed) {
       // Diff against previous board before applying the new payload board
@@ -1366,9 +1388,18 @@ function handleMoveBroadcast(payload) {
 
       g_board = normalizeBoardMatrix(nextBoard, '');
       g_boardpoints = normalizeBoardMatrix(payload.boardp, 0);
-      g_boardtypes = normalizeBoardMatrix(payload.boardt, 0);
+      // Do NOT apply payload.boardt wholesale — g_boardtypes is perspective-
+      // relative (1 = my tiles, 2 = opponent tiles).  The receiver already
+      // has its own correct perspective for tiles played so far.
       g_board_empty = payload.boardEmpty;
       g_passes = 0; // Reset consecutive passes on valid move
+
+      // Mark every newly-placed tile as belonging to the opponent (type 2)
+      // from the receiver's perspective.
+      for (var i = 0; i < diffWord.length; ++i) {
+        var dp = diffWord[i];
+        g_boardtypes[dp.x][dp.y] = 2;
+      }
 
       // Clear any board cell that currently shows a "preview" tile (no holds data).
       // This handles clearing stray previews and prepares cells for the new move.
@@ -1393,7 +1424,8 @@ function handleMoveBroadcast(payload) {
             var char = boardColumn[y];
             if (char && char !== '' && cell) {
               var displayChar = char.toUpperCase();
-              var tClass = boardTypeColumn[y] === 1 ? 't2' : 't1';
+              // Direct mapping: type 1 → t1 (green, my tiles), type 2 → t2 (red, opponent tiles)
+              var tClass = 't' + (boardTypeColumn[y] || 2);
               var points = (g_boardpoints[x] && g_boardpoints[x][y]) || 0;
               var p = parseInt(points);
               var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
@@ -1411,40 +1443,50 @@ function handleMoveBroadcast(payload) {
         g_bui.makeTilesFixed();
       };
 
+      function onOpponentMoveDone() {
+        g_bui.setOpponentRack(payload.rackAfter);
+        g_oscore += payload.score;
+        g_bui.setOpponentScore(payload.score, g_oscore);
+        g_letpool = payload.letpool;
+        g_bui.setTilesLeft(g_letpool.length);
+
+        if (payload.words && payload.words.length > 0) {
+          g_bui.addToHistory(payload.words, 2);
+        }
+
+        var elStatus = el('status');
+        elStatus.innerHTML = t('Opponent') + ' ' + t('scored ') + payload.score;
+
+        g_isMyTurn = true;
+        updateTurnIndicator();
+        updateGameInfoLabels();
+
+        // Ensure board UI is perfectly in sync
+        syncBoardUI();
+
+        if (payload.rackAfter === '' && g_letpool.length === 0) {
+          g_isGameOver = true;
+          announceWinner();
+          cleanupMultiplayerSession();
+          return;
+        }
+        g_lastMoveAt = Date.now();
+        saveMultiplayerSession();
+      }
+
       if (diffWord.length > 0) {
-        // We need to restore the opponent rack temporarily so placeOnBoard can steal tiles from it
+        if (g_isMultiplayer) {
+          // In multiplayer the opponent already placed tiles on their screen.
+          // Skip the rack-to-board animation (which is SP-only) and render directly.
+          hideModal();
+          onOpponentMoveDone();
+          // Skip the rest of the synchronous updates
+          return;
+        }
+
+        // Single-player: restore opponent rack so placeOnBoard can animate tiles from it
         g_bui.setOpponentRack(payload.rackBefore || '');
-
-        placeOnBoard(diffWord, function() {
-          g_bui.setOpponentRack(payload.rackAfter);
-          g_oscore += payload.score;
-          g_bui.setOpponentScore(payload.score, g_oscore);
-          g_letpool = payload.letpool;
-          g_bui.setTilesLeft(g_letpool.length);
-
-          if (payload.words && payload.words.length > 0) {
-            g_bui.addToHistory(payload.words, 2);
-          }
-
-          var elStatus = el('status');
-          elStatus.innerHTML = t('Opponent') + ' ' + t('scored ') + payload.score;
-
-          g_isMyTurn = true;
-          updateTurnIndicator();
-          updateGameInfoLabels();
-
-          // Ensure board UI is perfectly in sync after animation
-          syncBoardUI();
-
-          if (payload.rackAfter === '' && g_letpool.length === 0) {
-            g_isGameOver = true;
-            announceWinner();
-            cleanupMultiplayerSession();
-            return;
-          }
-          g_lastMoveAt = Date.now();
-          saveMultiplayerSession();
-        });
+        placeOnBoard(diffWord, onOpponentMoveDone);
 
         // Skip the rest of the synchronous updates because they are handled in the callback
         return;
@@ -1455,6 +1497,9 @@ function handleMoveBroadcast(payload) {
         }
       }
     }
+
+    // Extra safety: clear any ghost tiles that survived the move processing
+    cleanupDragGhosts();
 
     g_oscore += payload.score;
     g_bui.setOpponentScore(payload.score, g_oscore);
@@ -1533,6 +1578,7 @@ function saveMultiplayerSession() {
       boardEmpty: g_board_empty,
       stateVersion: g_stateVersion,
       isGameOver: g_isGameOver,
+      history: g_history,
       savedAt: now,
       lastMoveAt: inferredLastMoveAt
     });
@@ -1572,6 +1618,18 @@ document.addEventListener('appReady', function() {
         g_board_empty = mpData.boardEmpty;
         g_stateVersion = mpData.stateVersion || 0;
         g_isGameOver = !!mpData.isGameOver;
+
+        // Restore words-played history
+        g_history = Array.isArray(mpData.history) ? mpData.history : [];
+        var histHtml = '<table>';
+        for (var i = 0; i < g_history.length; ++i) {
+          var entry = g_history[i];
+          histHtml += g_bui.renderWordPlayed(entry[0], entry[1]);
+        }
+        histHtml += '</table>';
+        el('history').innerHTML = histHtml;
+        g_bui.hlines = histHtml;
+        g_bui.hcount = g_history.length;
 
         // Apply restored rack and board state immediately
         if (DEBUG) console.log('Applying restored rack and board state...');
@@ -1803,6 +1861,10 @@ function updateGameInfoLabels() {
     if (lblLast) lblLast.innerHTML = t('Computer&rsquo;s last score:');
     if (lblTotal) lblTotal.innerHTML = t('Computer&rsquo;s total score:');
   }
+
+  // Level is only relevant in single-player; hide the row in multiplayer
+  var levelRow = document.querySelector('tr.level');
+  if (levelRow) levelRow.style.display = g_isMultiplayer ? 'none' : '';
 }
 
 function syncHighScoresMultiplayer() {
