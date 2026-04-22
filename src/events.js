@@ -106,7 +106,7 @@ window.onload = function() {
     var hasSinglePlayerSession = !!localStorage['session'];
 
     if ((sessionMode === 'mp' && hasMultiplayerSession) || (hasMultiplayerSession && !hasSinglePlayerSession)) {
-      init('board');
+      init('board', true);
     } else if (hasSinglePlayerSession) {
       load(localStorage['session']);
     } else {

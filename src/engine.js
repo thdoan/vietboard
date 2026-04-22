@@ -17,7 +17,7 @@ var g_tiles_in_bag = 20;       // Maximum number of tiles
 var g_boardwidth = 15;          // How many tiles horizontally
 var g_boardheight = 15;         // How many tiles vertically
 var g_racksize = 8;             // Max number of letters on racks
-var g_animation = 0;            // Animation speed (lower = faster)
+var g_animation = 2;            // Animation speed (lower = faster)
 var g_wait = 500;               // Wait time in between moves (in ms)
 
 // Don't touch settings below
@@ -32,7 +32,11 @@ var g_pscore;                   // Player score
 var g_oscore;                   // Opponent (computer) score
 var g_passes;                   // Number of consecutive passes
 var g_board_empty;              // First move flag
+var g_isGameOver = false;       // Game over flag
+var g_playerPassed = false;
 var g_opponent_has_joker;       // Optimization flag if computer has joker tile
+var g_isShuffling = false;      // Track rack shuffle animation state
+var g_showThinking = false;     // Whether to show "Computer is thinking..." toast
 
 var g_maxpasses = 3;            // Maximum number of consecutive passes
 var g_lmults = [1, 2, 3, 1, 1]; // Letter multipliers by index
@@ -99,11 +103,21 @@ var gErrPrefix = function() {
 };
 
 //------------------------------------------------------------------------------
-function init(iddiv) {
+function init(iddiv, skipRacks) {
   // Reset
   g_board = [];
   g_boardpoints = [];
   g_boardtypes = [];
+  for (var x = 0; x < g_boardwidth; ++x) {
+    g_board[x] = [];
+    g_boardpoints[x] = [];
+    g_boardtypes[x] = [];
+    for (var y = 0; y < g_boardheight; ++y) {
+      g_board[x][y] = '';
+      g_boardpoints[x][y] = 0;
+      g_boardtypes[x][y] = 0;
+    }
+  }
   g_letpool = [];
   g_letscore = {};
   g_matches_cache = {};
@@ -111,6 +125,7 @@ function init(iddiv) {
   g_oscore = 0;
   g_passes = 0;
   g_board_empty = true;
+  g_isGameOver = false;
   g_history = [];
 
   // Put all the letters in the pool
@@ -126,6 +141,9 @@ function init(iddiv) {
     }
   }
 
+  // Save the full original pool for resetting
+  window.g_origletpool = g_letpool.slice();
+
   // Ensure total tiles in the bag is limited to g_tiles_in_bag for testing
   shufflePool();
   if (g_letpool.length > g_tiles_in_bag) {
@@ -136,10 +154,12 @@ function init(iddiv) {
 
   g_bui.create(iddiv, g_boardwidth, g_boardheight, g_letscore, g_racksize, localStorage['layout']);
 
-  g_bui.setOpponentRack(takeLetters(''));
-  //g_bui.setOpponentRack(takeLetters('bcdghklm'));
-  g_bui.setPlayerRack(takeLetters(''));
-  //g_bui.setPlayerRack(takeLetters('qẵễỗệộỵv'));
+  if (!skipRacks) {
+    g_bui.setOpponentRack(takeLetters(''));
+    //g_bui.setOpponentRack(takeLetters('bcdghklm'));
+    g_bui.setPlayerRack(takeLetters(''));
+    //g_bui.setPlayerRack(takeLetters('qẵễỗệộỵv'));
+  }
   g_bui.setTilesLeft(g_letpool.length);
   setSinglePlayerTurn(true);
 }
@@ -154,12 +174,12 @@ function finalizeGameScores() {
 
   var odeduct = 0;
   for (var i = 0; i < oleft.length; ++i) {
-    odeduct += g_letscore[oleft.charAt(i)];
+    odeduct += g_letscore[oleft.charAt(i)] || 0;
   }
 
   var pdeduct = 0;
   for (var i = 0; i < pleft.length; ++i) {
-    pdeduct += g_letscore[pleft.charAt(i)];
+    pdeduct += g_letscore[pleft.charAt(i)] || 0;
   }
 
   g_oscore -= odeduct;
@@ -1193,13 +1213,11 @@ function setSinglePlayerTurn(isPlayerTurn) {
 
 //------------------------------------------------------------------------------
 function onPlayerMove() {
+  var passed = g_playerPassed;
   if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
-    onMultiplayerMove();
+    onMultiplayerMove(passed);
     return;
   }
-
-  //console.log('onPlayerMove');
-  var passed = self.passed;
   if (passed) {
     ++g_passes; // Increase consecutive opponent passes
     if (g_passes >= g_maxpasses) {
@@ -1207,6 +1225,10 @@ function onPlayerMove() {
       return;
     }
   }
+
+  var prevBoard = JSON.stringify(g_board);
+  var prevBoardP = JSON.stringify(g_boardpoints);
+  var prevBoardT = JSON.stringify(g_boardtypes);
 
   var boardinfo = g_bui.getBoard();
   //console.log('onPlayerMove', boardinfo);
@@ -1219,6 +1241,11 @@ function onPlayerMove() {
     var pstr = pinfo.played;
 
     if (pstr === '') {
+      // Revert board state on invalid move
+      g_board = JSON.parse(prevBoard);
+      g_boardpoints = JSON.parse(prevBoardP);
+      g_boardtypes = JSON.parse(prevBoardT);
+
       setSinglePlayerTurn(true);
       var pendingPlacement = g_bui.getPlayerPlacement();
       for (var i = 0; i < pendingPlacement.length; ++i) {
@@ -1249,19 +1276,16 @@ function onPlayerMove() {
     g_bui.setPlayerScore(pinfo.score, g_pscore);
 
     g_bui.addToHistory(pinfo.words, 1);
-    //console.log('Removing player chars: ' + pstr);
-    g_bui.removeFromPlayerRack(pstr);
     var pletters = g_bui.getPlayerRack();
-    //console.log('Left on player rack: ' + pletters);
     pletters = takeLetters(pletters);
+    //console.log('Setting player rack to: ' + pletters);
+    g_bui.setPlayerRack(pletters);
+    g_bui.setTilesLeft(g_letpool.length);
     if (pletters === '') {
       // All tiles were played and nothing left in the tile pool
       announceWinner();
       return;
     }
-    //console.log('Setting player rack to: ' + pletters);
-    g_bui.setPlayerRack(pletters);
-    g_bui.setTilesLeft(g_letpool.length);
   } else {
     // Put back whatever was placed on the board
     g_bui.cancelPlayerPlacement();
@@ -1272,8 +1296,6 @@ function onPlayerMove() {
   g_opponent_has_joker = ostr.search('\\*') !== -1;
   g_playlevel = g_bui.getPlayLevel();
 
-  if (DEBUG) console.log('Opponent rack has: ' + ostr);
-
   var play_word;
   if (g_board_empty) {
     var start = g_bui.getStartXY();
@@ -1281,8 +1303,6 @@ function onPlayerMove() {
   } else {
     play_word = findBestMove(ostr);
   }
-
-  //console.log('Opponent word is: ' + play_word.word);
 
   var animCallback = function() {
     setSinglePlayerTurn(true);
@@ -1310,16 +1330,14 @@ function onPlayerMove() {
     g_bui.removeFromOpponenentRack(letters_used);
 
     // Get letters from pool as number of missing letters
-    if (DEBUG) console.log('Opponent rack left with: ' + g_bui.getOpponentRack());
     var newLetters = takeLetters(g_bui.getOpponentRack());
+    g_bui.setOpponentRack(newLetters);
+    g_bui.setTilesLeft(g_letpool.length);
     if (newLetters === '') {
       // All tiles taken, nothing left in tile pool
       announceWinner();
       return;
     }
-    if (DEBUG) console.log('After taking letters, opponent rack is: ' + newLetters);
-    g_bui.setOpponentRack(newLetters);
-    g_bui.setTilesLeft(g_letpool.length);
     // Save session
     localStorage['session'] = getSession();
     localStorage['session_mode'] = 'sp';
@@ -1390,7 +1408,6 @@ function onPlayerMove() {
 
 //------------------------------------------------------------------------------
 function onPlayerMoved(passed, swapped) {
-  //console.log('onPlayerMoved', passed, swapped);
   if (typeof g_isMultiplayer === 'undefined' || !g_isMultiplayer) {
     setSinglePlayerTurn(false);
   }
@@ -1402,7 +1419,7 @@ function onPlayerMoved(passed, swapped) {
       g_bui.showBusy();
     }
   }
-  self.passed = passed;
+  g_playerPassed = passed;
   clearTimeout(g_bui.timer); // Clear hideModal() 300ms delay
   setTimeout(onPlayerMove, 100);
 
@@ -1419,6 +1436,7 @@ function onPlayerMoved(passed, swapped) {
 //------------------------------------------------------------------------------
 function animateRackShuffle(prefix, newRack, completeCallback) {
   var elClear = el('clear');
+  g_isShuffling = true;
   if (elClear) elClear.disabled = true;
   document.documentElement.classList.add('shuffling');
 
@@ -1427,8 +1445,15 @@ function animateRackShuffle(prefix, newRack, completeCallback) {
   var expectedAnims = Math.floor(g_racksize / 2);
   var animDone = function() {
     if (++totalAnims === expectedAnims) {
-      if (elClear) elClear.disabled = false;
+      g_isShuffling = false;
+      if (elClear) {
+        elClear.disabled = !!(typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && !g_isMyTurn);
+      }
       document.documentElement.classList.remove('shuffling');
+      if (typeof newRack === 'string') {
+        if (prefix === 'pl') g_bui.setPlayerRack(newRack);
+        else if (prefix === 'op') g_bui.setOpponentRack(newRack);
+      }
       if (typeof completeCallback === 'function') completeCallback();
     }
   };
@@ -1449,14 +1474,8 @@ function animateRackShuffle(prefix, newRack, completeCallback) {
     var cellA = el(prefix + i);
     var cellB = el(prefix + j);
     if (!cellA || !cellB || !cellA.firstChild || !cellB.firstChild) {
-      if (elClear) elClear.disabled = false;
-      document.documentElement.classList.remove('shuffling');
-      if (typeof newRack === 'string') {
-        if (prefix === 'pl') g_bui.setPlayerRack(newRack);
-        else if (prefix === 'op') g_bui.setOpponentRack(newRack);
-      }
-      if (typeof completeCallback === 'function') completeCallback();
-      return;
+      animDone();
+      continue;
     }
 
     g_bui.rd.moveObject({
@@ -1471,7 +1490,10 @@ function animateRackShuffle(prefix, newRack, completeCallback) {
   }
 
   if (expectedAnims === 0) {
-    if (elClear) elClear.disabled = false;
+    g_isShuffling = false;
+    if (elClear) {
+      elClear.disabled = !!(typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && !g_isMyTurn);
+    }
     document.documentElement.classList.remove('shuffling');
     if (typeof newRack === 'string') {
       if (prefix === 'pl') g_bui.setPlayerRack(newRack);
@@ -1482,11 +1504,22 @@ function animateRackShuffle(prefix, newRack, completeCallback) {
 }
 
 function onPlayerShuffle() {
-  animateRackShuffle('pl', null, function() {
+  var rack = g_bui.getPlayerRack();
+  var rackArr = rack.split('');
+  // Fisher-Yates shuffle
+  for (var i = rackArr.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var temp = rackArr[i];
+    rackArr[i] = rackArr[j];
+    rackArr[j] = temp;
+  }
+  var newRack = rackArr.join('');
+
+  animateRackShuffle('pl', newRack, function() {
     if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
       broadcastGameState({
         type: 'shuffle',
-        rack: g_bui.getPlayerRack()
+        rack: newRack
       });
     }
   });
@@ -1516,6 +1549,7 @@ function onPlayerSwapped(keep, swap) {
     shufflePool();
     g_bui.setPlayerRack(takeLetters(keep));
 
+    var boardinfo = g_bui.getBoard();
     var moveData = {
       type: 'move',
       passed: true,
@@ -1523,6 +1557,10 @@ function onPlayerSwapped(keep, swap) {
       rackAfter: g_bui.getPlayerRack(),
       letpool: g_letpool,
       score: 0,
+      board: boardinfo.board,
+      boardp: boardinfo.boardp,
+      boardt: boardinfo.boardt,
+      boardEmpty: g_board_empty,
       stateVersion: (typeof getNextMultiplayerStateVersion === 'function') ? getNextMultiplayerStateVersion() : 0
     };
 
@@ -1620,10 +1658,18 @@ function shufflePool() {
 //------------------------------------------------------------------------------
 function takeLetters(existing) {
   var poolsize = g_letpool.length;
-  if (poolsize === 0) return existing;
-  var needed = Math.min(g_racksize - existing.length, poolsize);
-  var letters = g_letpool.splice(0, needed).join('');
-  return existing + letters;
+  var rack = existing.split('');
+  // Fill in gaps first
+  for (var i = 0; i < rack.length; ++i) {
+    if (rack[i] === '.' && g_letpool.length > 0) {
+      rack[i] = g_letpool.splice(0, 1)[0];
+    }
+  }
+  // Then append if rack is shorter than g_racksize
+  while (rack.length < g_racksize && g_letpool.length > 0) {
+    rack.push(g_letpool.splice(0, 1)[0]);
+  }
+  return rack.join('');
 }
 
 window['init'] = init;

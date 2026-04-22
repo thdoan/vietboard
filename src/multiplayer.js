@@ -64,7 +64,6 @@ let g_dragGhost = null;
 let g_dragSeq = 0;
 let g_lastRemoteDragSeq = -1;
 let g_stateVersion = 0;
-let g_isGameOver = false;
 let g_opponentDisconnectSeconds = 0;
 let g_reconnectTimer = null;
 let g_lastMoveAt = 0;
@@ -750,17 +749,27 @@ function initializeHostGame() {
 
   // Wait a tick for letpool to be built, then sync it
   setTimeout(() => {
-    var rawMyRack = g_bui.getPlayerRack();
-    var rawOppRack = g_bui.getOpponentRack();
+    // Reset pool
+    if (typeof g_origletpool !== 'undefined') {
+      g_letpool = g_origletpool.slice();
+      shufflePool();
+      if (g_letpool.length > g_tiles_in_bag) {
+        g_letpool = g_letpool.slice(0, g_tiles_in_bag);
+      }
+      shufflePool();
+    }
 
-    // Hide opponent rack first, then reshuffle both racks.
-    g_bui.setOpponentRack(rawOppRack);
+    var rawMyRack = takeLetters('');
+    var rawOppRack = takeLetters('');
 
     var myRack = shuffleRackString(rawMyRack);
     var oppRack = shuffleRackString(rawOppRack);
     g_bui.setPlayerRack(myRack);
     g_bui.setOpponentRack(oppRack);
+    g_bui.setTilesLeft(g_letpool.length);
     g_bui.makeTilesFixed();
+    updateTurnIndicator(); // Ensure UI reflects turn state
+    updateGameInfoLabels();
     g_stateVersion = 1;
 
     broadcastGameState({
@@ -780,10 +789,14 @@ function initializeHostGame() {
 
 function sendBroadcastNow(event, payload) {
   if (!g_channel) return;
+  // Supabase send() returns a promise. We don't wait for it here to keep UI responsive,
+  // but we should handle the case where it might fail or fallback.
   g_channel.send({
     type: 'broadcast',
     event: event,
     payload: payload
+  }).catch(err => {
+    if (DEBUG) console.warn('Broadcast send failed:', err);
   });
 }
 
@@ -1020,9 +1033,8 @@ function renderOpponentBoardTile(cell, letter, points) {
   var displayLetter = letter;
   if (displayLetter === '*') displayLetter = '&nbsp;&nbsp;';
   else displayLetter = String(displayLetter || '').toUpperCase();
-  var pointsHtml = (typeof points !== 'undefined' && points !== '' && points !== null)
-    ? '<sub>' + points + '</sub>'
-    : '';
+  var p = parseInt(points);
+  var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
   cell.innerHTML = '<div class="drag t2">' + displayLetter + pointsHtml + '</div>';
 }
 
@@ -1127,19 +1139,25 @@ function handleDragBroadcast(payload) {
 
 function handleGameStateBroadcast(payload) {
   if (payload.type === 'init') {
-    // Apply init state from host
-    g_letpool = payload.letpool;
-    g_bui.setPlayerRack(payload.myRack);
-    g_bui.setOpponentRack(payload.oppRack);
-    g_bui.setTilesLeft(g_letpool.length);
-    g_bui.makeTilesFixed();
-    g_stateVersion = payload.stateVersion || g_stateVersion;
-    g_isGameOver = false;
-    g_isMyTurn = !payload.hostGoesFirst;
-    localStorage['session_mode'] = 'mp';
-    saveMultiplayerSession();
-    updateTurnIndicator();
-    updateGameInfoLabels();
+    // Phase 4: Ensure board is fresh for both players
+    if (g_bui) g_bui.restart();
+    g_isMultiplayer = true; // g_bui.restart() might have cleared it via cleanup
+
+    setTimeout(() => {
+      // Apply init state from host
+      g_letpool = payload.letpool;
+      g_bui.setPlayerRack(payload.myRack);
+      g_bui.setOpponentRack(payload.oppRack);
+      g_bui.setTilesLeft(g_letpool.length);
+      g_bui.makeTilesFixed();
+      g_stateVersion = payload.stateVersion || g_stateVersion;
+      g_isGameOver = false;
+      g_isMyTurn = !payload.hostGoesFirst;
+      localStorage['session_mode'] = 'mp';
+      saveMultiplayerSession();
+      updateTurnIndicator();
+      updateGameInfoLabels();
+    }, 100);
   } else if (payload.type === 'shuffle') {
     // Phase 5: Apply opponent shuffle with visible transition
     animateRackShuffle('op', payload.rack || '', function() {
@@ -1168,7 +1186,8 @@ function updateTurnIndicator() {
   const moveButtons = ['play', 'clear', 'swap', 'pass'];
   const moveButtonIds = moveButtons.map(b => document.getElementById(b)).filter(Boolean);
   moveButtonIds.forEach(btn => {
-    btn.disabled = !g_isMyTurn;
+    // Buttons are disabled if it is NOT our turn OR if we are currently shuffling
+    btn.disabled = !g_isMyTurn || (typeof g_isShuffling !== 'undefined' && g_isShuffling);
   });
 
   // Enforce turn-based tile interaction: when it is not your turn,
@@ -1184,10 +1203,10 @@ function updateTurnIndicator() {
     hsBtn.disabled = false;
   }
 
-  // Restart: disabled once game starts
+  // Restart: always enabled to allow recovery from corrupted sessions
   const restartBtn = document.getElementById('restart');
   if (restartBtn) {
-    restartBtn.disabled = g_isMultiplayer && !g_board_empty;
+    restartBtn.disabled = false;
   }
 
   // Lobby: disabled once game starts
@@ -1224,6 +1243,10 @@ function onMultiplayerMove(passed) {
   if (!passed) {
     // Keep global board state in sync with current UI state before validation.
     // checkValidPlacement reads from g_board / g_boardpoints / g_boardtypes.
+    var prevBoardObj = JSON.parse(JSON.stringify(g_board));
+    var prevBoardP = JSON.stringify(g_boardpoints);
+    var prevBoardT = JSON.stringify(g_boardtypes);
+
     g_board = normalizeBoardMatrix(newBoard, '');
     g_boardpoints = normalizeBoardMatrix(newBoardP, 0);
     g_boardtypes = normalizeBoardMatrix(newBoardT, 0);
@@ -1233,6 +1256,11 @@ function onMultiplayerMove(passed) {
     pstr = pinfo.played;
 
     if (pstr === '') {
+      // Revert board state on invalid move
+      g_board = prevBoardObj;
+      g_boardpoints = JSON.parse(prevBoardP);
+      g_boardtypes = JSON.parse(prevBoardT);
+
       g_bui.prompt(gErrPrefix() + pinfo.msg);
       return;
     }
@@ -1248,16 +1276,25 @@ function onMultiplayerMove(passed) {
       if (elLayout) elLayout.disabled = true;
     }
 
+    // Reset consecutive passes
+    g_passes = 0;
+
     if (pstr.length === g_racksize) scoreEarned += g_allLettersBonus;
     scoreEarned += pinfo.score;
 
-    // Take new letters
-    var pletters = g_bui.getPlayerRack() + takeLetters(pstr.replace(/\*/g, ''));
+    g_bui.addToHistory(pinfo.words, 1);
+    var pletters = g_bui.getPlayerRack();
+    pletters = takeLetters(pletters);
     g_bui.setPlayerRack(pletters);
     rackAfter = pletters;
     g_bui.setTilesLeft(g_letpool.length);
   } else {
     g_bui.cancelPlayerPlacement();
+    ++g_passes;
+    if (g_passes >= g_maxpasses) {
+      finalizeMultiplayerGame('passes');
+      // No return here, we still want to broadcast the move that ended the game
+    }
   }
 
   // We made a valid move. Now broadcast it to the opponent!
@@ -1267,7 +1304,7 @@ function onMultiplayerMove(passed) {
   if (pinfo && pinfo.words && pinfo.words.length > 0) {
     var words = [];
     for (var i = 0; i < pinfo.words.length; ++i) {
-      words.push('<a href="javascript:g_bui.wordInfo(\'' + pinfo.words[i][0] + '\')">' + pinfo.words[i][0] + '</a>');
+      words.push('<a href="javascript:g_bui.wordInfo(\'' + pinfo.words[i] + '\')">' + pinfo.words[i] + '</a>');
     }
     var elStatus = el('status');
     elStatus.innerHTML = t('You') + ' ' + t('scored ') + scoreEarned + ' ' + t(' points for ') + words.join(', ').toUpperCase();
@@ -1278,6 +1315,7 @@ function onMultiplayerMove(passed) {
     passed: passed,
     swapped: false, // Handle swap later
     pstr: pstr,
+    words: pinfo ? pinfo.words : [],
     score: scoreEarned,
     board: newBoard,
     boardp: newBoardP,
@@ -1312,10 +1350,10 @@ function handleMoveBroadcast(payload) {
       var diffWord = [];
       for (var x = 0; x < g_boardwidth; ++x) {
         for (var y = 0; y < g_boardheight; ++y) {
-          var charBefore = prevBoard[x][y] || ' ';
-          var charAfter = nextBoard[x][y] || ' ';
-          if (charAfter !== ' ' && charBefore === ' ') {
-            var ltr = (charAfter === charAfter.toLowerCase() && charAfter !== ' ') ? '*' : charAfter;
+          var charBefore = (prevBoard[x] && prevBoard[x][y]) || '';
+          var charAfter = (nextBoard[x] && nextBoard[x][y]) || '';
+          if (charAfter !== '' && charBefore === '') {
+            var ltr = (charAfter === charAfter.toLowerCase() && charAfter !== '') ? '*' : charAfter;
             diffWord.push({
               'x': x,
               'y': y,
@@ -1330,6 +1368,48 @@ function handleMoveBroadcast(payload) {
       g_boardpoints = normalizeBoardMatrix(payload.boardp, 0);
       g_boardtypes = normalizeBoardMatrix(payload.boardt, 0);
       g_board_empty = payload.boardEmpty;
+      g_passes = 0; // Reset consecutive passes on valid move
+
+      // Clear any board cell that currently shows a "preview" tile (no holds data).
+      // This handles clearing stray previews and prepares cells for the new move.
+      for (var x = 0; x < g_boardwidth; ++x) {
+        for (var y = 0; y < g_boardheight; ++y) {
+          var cellId = 'c' + x + '_' + y;
+          var cellObj = el(cellId);
+          if (cellObj && cellObj.innerHTML !== '' && !cellObj.holds) {
+            cellObj.innerHTML = '';
+          }
+        }
+      }
+
+      var syncBoardUI = function() {
+        for (var x = 0; x < g_boardwidth; ++x) {
+          var boardColumn = g_board[x];
+          var boardTypeColumn = g_boardtypes[x];
+          if (!Array.isArray(boardColumn) || !Array.isArray(boardTypeColumn)) continue;
+
+          for (var y = 0; y < g_boardheight; ++y) {
+            var cell = el('c' + x + '_' + y);
+            var char = boardColumn[y];
+            if (char && char !== '' && cell) {
+              var displayChar = char.toUpperCase();
+              var tClass = boardTypeColumn[y] === 1 ? 't2' : 't1';
+              var points = (g_boardpoints[x] && g_boardpoints[x][y]) || 0;
+              var p = parseInt(points);
+              var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
+              var html = '<div class="drag ' + tClass + '">' + (char !== ' ' ? displayChar : '&nbsp;&nbsp;') + pointsHtml + '</div>';
+              cell.innerHTML = html;
+              var holdsObj = { 'letter': char, 'points': p };
+              cell.holds = holdsObj;
+              if (cell.firstChild) cell.firstChild.holds = holdsObj;
+            } else if (cell && (!char || char === '')) {
+              cell.holds = '';
+              cell.innerHTML = '';
+            }
+          }
+        }
+        g_bui.makeTilesFixed();
+      };
 
       if (diffWord.length > 0) {
         // We need to restore the opponent rack temporarily so placeOnBoard can steal tiles from it
@@ -1342,12 +1422,19 @@ function handleMoveBroadcast(payload) {
           g_letpool = payload.letpool;
           g_bui.setTilesLeft(g_letpool.length);
 
+          if (payload.words && payload.words.length > 0) {
+            g_bui.addToHistory(payload.words, 2);
+          }
+
           var elStatus = el('status');
           elStatus.innerHTML = t('Opponent') + ' ' + t('scored ') + payload.score;
 
           g_isMyTurn = true;
           updateTurnIndicator();
           updateGameInfoLabels();
+
+          // Ensure board UI is perfectly in sync after animation
+          syncBoardUI();
 
           if (payload.rackAfter === '' && g_letpool.length === 0) {
             g_isGameOver = true;
@@ -1362,27 +1449,11 @@ function handleMoveBroadcast(payload) {
         // Skip the rest of the synchronous updates because they are handled in the callback
         return;
       } else {
-        for (var x = 0; x < g_boardwidth; ++x) {
-          var boardColumn = g_board[x];
-          var boardTypeColumn = g_boardtypes[x];
-          if (!Array.isArray(boardColumn) || !Array.isArray(boardTypeColumn)) continue;
-
-          for (var y = 0; y < g_boardheight; ++y) {
-            var cell = el('c' + x + '_' + y);
-            var char = boardColumn[y];
-            if (char && char !== ' ' && cell && cell.innerHTML === '') {
-              var ltr = char === char.toLowerCase() ? '*' : char;
-              var displayChar = (ltr === ' ' || ltr === '*') ? '&nbsp;&nbsp;' : ltr.toUpperCase();
-              var tClass = boardTypeColumn[y] === 1 ? 't2' : 't1';
-              var points = g_letscore[ltr] || 0;
-              var html = '<div class="drag ' + tClass + '">' + displayChar + '<sub>' + points + '</sub></div>';
-              cell.innerHTML = html;
-            }
-          }
+        syncBoardUI();
+        if (payload.words && payload.words.length > 0) {
+          g_bui.addToHistory(payload.words, 2);
         }
-        g_bui.makeTilesFixed();
       }
-
     }
 
     g_oscore += payload.score;
@@ -1402,6 +1473,17 @@ function handleMoveBroadcast(payload) {
 
     if (payload.passed) {
       g_bui.toast(payload.swapped ? t('Opponent swapped') : t('Opponent passed'));
+      if (!payload.swapped) {
+        ++g_passes;
+        if (g_passes >= g_maxpasses) {
+          g_isGameOver = true;
+          announceWinner();
+          cleanupMultiplayerSession();
+          return;
+        }
+      } else {
+        g_passes = 0; // Reset if they swapped (some rules vary, but usually swap resets it)
+      }
     }
 
     // Check if game over
@@ -1475,7 +1557,7 @@ document.addEventListener('appReady', function() {
 
       // Resume only with a recent, valid in-game snapshot.
       if (hasUsableState && (hasRecentSnapshot || hasRecentMove)) {
-        if (DEBUG) console.log('Resuming multiplayer session...');
+        if (DEBUG) console.log('Resuming multiplayer session for game:', mpData.gameId);
 
         g_gameId = mpData.gameId;
         g_opponentName = mpData.opponentName;
@@ -1491,46 +1573,49 @@ document.addEventListener('appReady', function() {
         g_stateVersion = mpData.stateVersion || 0;
         g_isGameOver = !!mpData.isGameOver;
 
-        // Apply board
-        setTimeout(() => {
-          g_bui.setPlayerRack(String(mpData.myRack || ''));
-          g_bui.setOpponentRack(String(mpData.oppRack || ''));
-          g_bui.setPlayerScore(0, g_pscore);
-          g_bui.setOpponentScore(0, g_oscore);
-          g_bui.setTilesLeft((g_letpool || []).length);
+        // Apply restored rack and board state immediately
+        if (DEBUG) console.log('Applying restored rack and board state...');
+        g_bui.setPlayerRack(String(mpData.myRack || ''));
+        g_bui.setOpponentRack(String(mpData.oppRack || ''));
+        g_bui.setPlayerScore(0, g_pscore);
+        g_bui.setOpponentScore(0, g_oscore);
+        g_bui.setTilesLeft((g_letpool || []).length);
 
-          if (Array.isArray(g_board) && Array.isArray(g_boardtypes)) {
-            for (var x = 0; x < g_boardwidth; ++x) {
-              var boardColumn = g_board[x];
-              var boardTypeColumn = g_boardtypes[x];
-              if (!Array.isArray(boardColumn) || !Array.isArray(boardTypeColumn)) continue;
+        if (Array.isArray(g_board) && Array.isArray(g_boardtypes)) {
+          for (var x = 0; x < g_boardwidth; ++x) {
+            var boardColumn = g_board[x];
+            var boardTypeColumn = g_boardtypes[x];
+            if (!Array.isArray(boardColumn) || !Array.isArray(boardTypeColumn)) continue;
 
-              for (var y = 0; y < g_boardheight; ++y) {
-                var cell = el('c' + x + '_' + y);
-                var char = boardColumn[y];
-                if (char && char !== ' ' && typeof char !== 'undefined' && cell && cell.innerHTML === '') {
-                  var ltr = char === char.toLowerCase() ? '*' : char;
-                  var displayChar = (ltr === ' ' || ltr === '*') ? '&nbsp;&nbsp;' : ltr.toUpperCase();
-                  var tClass = boardTypeColumn[y] === 1 ? 't1' : 't2';
-                  var points = g_letscore[ltr] || 0;
-                  var html = '<div class="drag ' + tClass + '">' + displayChar + '<sub>' + points + '</sub></div>';
-                  cell.innerHTML = html;
-                }
+            for (var y = 0; y < g_boardheight; ++y) {
+              var cell = el('c' + x + '_' + y);
+              var char = boardColumn[y];
+              if (char && char !== '' && typeof char !== 'undefined' && cell && cell.innerHTML === '') {
+                var displayChar = char.toUpperCase();
+                var tClass = boardTypeColumn[y] === 1 ? 't1' : 't2';
+                var points = (g_boardpoints[x] && g_boardpoints[x][y]) || 0;
+                var p = parseInt(points);
+                var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
+                var html = '<div class="drag ' + tClass + '">' + (char !== ' ' ? displayChar : '&nbsp;&nbsp;') + pointsHtml + '</div>';
+                cell.innerHTML = html;
+                var holdsObj = { 'letter': char, 'points': p };
+                cell.holds = holdsObj;
+                if (cell.firstChild) cell.firstChild.holds = holdsObj;
+              } else if (cell && (!char || char === '')) {
+                cell.holds = '';
               }
             }
           }
-          g_bui.makeTilesFixed();
-          updateTurnIndicator();
-          updateGameInfoLabels();
+        }
+        g_bui.makeTilesFixed();
+        updateTurnIndicator();
+        updateGameInfoLabels();
 
-          // Rejoin channel
-          joinGameChannel(g_gameId, false);
+        // Rejoin channel
+        joinGameChannel(g_gameId, false);
 
-          // Request latest state just in case we missed a move while refreshing
-          setTimeout(() => {
-            broadcastGameState({ type: 'request_state' });
-          }, 1000);
-        }, 500);
+        // Request latest state just in case we missed a move while refreshing
+        broadcastGameState({ type: 'request_state' });
       } else {
         // Prevent stale/incomplete snapshots from forcing broken reconnect attempts.
         localStorage.removeItem('session_mp');
@@ -1569,8 +1654,8 @@ handleGameStateBroadcast = function(payload) {
       boardEmpty: g_board_empty,
       pscore: g_oscore, // Our oscore is their pscore
       oscore: g_pscore, // Our pscore is their oscore
-      myRack: g_bui.getOpponentRack(),
-      oppRack: g_bui.getPlayerRack(),
+      myRack: g_bui.racks[2] || '', // Use committed opponent rack (which is their player rack)
+      oppRack: g_bui.racks[1] || '', // Use committed player rack (which is their opponent rack)
       letpool: g_letpool,
       isMyTurn: !g_isMyTurn,
       stateVersion: g_stateVersion,
@@ -1607,13 +1692,19 @@ handleGameStateBroadcast = function(payload) {
         if (!cell) continue;
         cell.innerHTML = '';
         var char = boardColumn[y];
-        if (char && char !== ' ' && typeof char !== 'undefined') {
-          var ltr = char === char.toLowerCase() ? '*' : char;
-          var displayChar = (ltr === ' ' || ltr === '*') ? '&nbsp;&nbsp;' : ltr.toUpperCase();
+        if (char && char !== '' && typeof char !== 'undefined') {
+          var displayChar = char.toUpperCase();
           var tClass = boardTypeColumn[y] === 1 ? 't2' : 't1';
-          var points = g_boardpoints[x][y] || 0;
-          var html = '<div class="drag ' + tClass + '">' + displayChar + '<sub>' + points + '</sub></div>';
+          var points = (g_boardpoints[x] && g_boardpoints[x][y]) || 0;
+          var p = parseInt(points);
+          var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
+          var html = '<div class="drag ' + tClass + '">' + (char !== ' ' ? displayChar : '&nbsp;&nbsp;') + pointsHtml + '</div>';
           cell.innerHTML = html;
+          var holdsObj = { 'letter': char, 'points': p };
+          cell.holds = holdsObj;
+          if (cell.firstChild) cell.firstChild.holds = holdsObj;
+        } else {
+          cell.holds = '';
         }
       }
     }

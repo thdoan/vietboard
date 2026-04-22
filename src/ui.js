@@ -133,6 +133,7 @@ function hideGameInfo() {
 
 // Modal functions
 function showModal(sHtml, sClass) {
+  if (g_bui && g_bui.hideBusy) g_bui.hideBusy();
   if (sClass) g_cache['modalContainer'].className = sClass;
   g_cache['modalContent'].innerHTML = sHtml;
   g_cache['modalMask'].style.display = 'block';
@@ -151,6 +152,7 @@ function showModal(sHtml, sClass) {
   });
 }
 function hideModal() {
+  if (g_bui && g_bui.hideBusy) g_bui.hideBusy();
   g_cache['modalContainer'].classList.remove('on');
   g_cache['modalMask'].classList.remove('on');
   g_bui.timer = setTimeout(function() {
@@ -644,6 +646,19 @@ function RedipsUI() {
   };
 
   self.getOpponentRack = function() {
+    // If visible, sync from DOM
+    if (self.showOpRack) {
+      var letters = '';
+      for (var i = 0; i < self.racksize; ++i) {
+        var cell = document.getElementById(self.oppRackId + i);
+        if (cell && cell.holds && cell.holds !== '') {
+          letters += (cell.holds.letter || '*');
+        } else {
+          letters += '.';
+        }
+      }
+      self.racks[2] = letters;
+    }
     return self.racks[2];
   };
 
@@ -665,7 +680,17 @@ function RedipsUI() {
   };
 
   self.getPlayerRack = function() {
-    return self.racks[1];
+    var letters = '';
+    for (var i = 0; i < self.racksize; ++i) {
+      var cell = document.getElementById(self.plrRackId + i);
+      if (cell && cell.holds && cell.holds !== '') {
+        letters += (cell.holds.letter || '*');
+      } else {
+        letters += '.';
+      }
+    }
+    self.racks[1] = letters;
+    return letters;
   };
 
   self.getPlayLevel = function() {
@@ -765,7 +790,7 @@ function RedipsUI() {
           // Remove selected letter from joker tile
           self.rd.obj.innerHTML = '';
           self.rd.obj.holds = {
-            'letter': '',
+            'letter': '*',
             'points': 0
           };
         }
@@ -991,13 +1016,21 @@ function RedipsUI() {
           // Expose joker letter value in new rack
           newrack = newrack.substr(0, jpos) + l + newrack.substr(jpos + 1);
           var ltrStr = (l !== ' ') ? l.toUpperCase() : '&nbsp;&nbsp;';
-          el(self.oppRackId + jpos).innerHTML = '<div class="drag t2">' + ltrStr + '<sup><small>' + (g_letscore[placement.ltr] || 0) + '</small></sup></div>';
+          var pVal = placement.lscr;
+          var rcell = el(self.oppRackId + jpos);
+          if (rcell.firstChild) {
+            rcell.firstChild.innerHTML = ltrStr + '<sup><small>' + (pVal > 0 ? pVal : '&nbsp;') + '</small></sup>';
+          }
         }
       } else {
         usedIndices.add(lpos);
         orack = orack.substr(0, lpos) + '_' + orack.substr(lpos + 1);
         var ltrStr = (l !== ' ') ? l.toUpperCase() : '&nbsp;&nbsp;';
-        el(self.oppRackId + lpos).innerHTML = '<div class="drag t2">' + ltrStr + '<sup><small>' + (g_letscore[l] || 0) + '</small></sup></div>';
+        var pVal = placement.lscr;
+        var rcell = el(self.oppRackId + lpos);
+        if (rcell.firstChild) {
+          rcell.firstChild.innerHTML = ltrStr + '<sup><small>' + (pVal > 0 ? pVal : '&nbsp;') + '</small></sup>';
+        }
       }
     }
 
@@ -1017,6 +1050,9 @@ function RedipsUI() {
 
     self.fixPlayerTiles();
     var lettermoves = [];
+    self.animTiles = 0;
+    self.animCallback = callback;
+
     for (var i = 0; i < rack.length; ++i) {
       var rlet = rack[i];
       if (rlet in dlet && dlet[rlet].length > 0) {
@@ -1037,8 +1073,6 @@ function RedipsUI() {
         };
         //cell.innerHTML = "<div class='drag'></div>";
         // Update what the target cell will contain
-        self.animTiles = placements.length;
-        self.animCallback = callback;
         var moveinfo = {
           'obj': div,
           'target': cell,
@@ -1058,6 +1092,9 @@ function RedipsUI() {
       }
     }
 
+    var totalanims = lettermoves.length;
+    self.animTiles = totalanims;
+
     // Now animate the letters to their correct position in the board by the
     // order in which they appear in the word. For this we need to sort the
     // letters to animate according to their position in the word.
@@ -1069,7 +1106,6 @@ function RedipsUI() {
       return a.y - b.y;
     }
 
-    var totalanims = lettermoves.length;
     if (totalanims > 1) {
       if (lettermoves[0].x !== lettermoves[1].x) lettermoves.sort(compareByX);
       else lettermoves.sort(compareByY);
@@ -1129,18 +1165,23 @@ function RedipsUI() {
       toast.classList.add('show');
     });
 
-    var timeout = setTimeout(function() {
-      toast.classList.remove('show');
-      toast.classList.add('hide');
-    }, duration || 4000);
+    var timeout;
+    if (duration !== 0) {
+      timeout = setTimeout(function() {
+        toast.classList.remove('show');
+        toast.classList.add('hide');
+      }, duration || 4000);
+    }
 
     toast.addEventListener('transitionend', function(e) {
       if (e.propertyName !== 'opacity') return;
       if (toast.classList.contains('hide') && toast.parentNode) {
         toast.parentNode.removeChild(toast);
-        clearTimeout(timeout);
+        if (timeout) clearTimeout(timeout);
       }
     });
+
+    return toast;
   };
 
   self.removeFromOpponenentRack = function(letters) {
@@ -1167,13 +1208,14 @@ function RedipsUI() {
     for (var i = 0; i < rack.length; ++i) {
       var rlet = rack[i];
       if (rlet in dlet && dlet[rlet] > 0) {
-        delete rack[i];
+        rack[i] = '.'; // Placeholder for empty slot
         --dlet[rlet];
       }
     }
 
     //if (pl === 1) console.log('removeFromRack leaves: ' + rack);
     self.racks[pl] = rack.join('');
+    self.setLetters(pl, self.racks[pl]);
   };
 
   self.renderHighScoreRows = function(sKey) {
@@ -1242,17 +1284,17 @@ function RedipsUI() {
       // Remove the existing drag div?
       if (rcell.firstChild) rcell.removeChild(rcell.firstChild);
       var ltr = i < letters.length ? letters.charAt(i) : '';
-      if (ltr !== '') {
+      if (ltr !== '' && ltr !== '.') {
         cells.push(rcell);
         var html = '<div class="drag t' + player + '">';
         var isOpponent = (player === 2);
         var hideOpponentLetter = (isOpponent && typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer);
         var holds = {
           'letter': ltr,
-          'points': self.scores[ltr]
+          'points': self.scores[ltr] || 0
         };
         rcell.holds = holds;
-        if (ltr !== '*') {
+        if (ltr !== '*' && ltr !== ' ') {
           if (hideOpponentLetter) {
             html += '&nbsp;&nbsp;';
           } else {
@@ -1273,6 +1315,10 @@ function RedipsUI() {
       var div = cells[i].firstChild;
       div.holds = self.hcopy(cells[i].holds);
       //if (player===2) self.rd.enableDrag(false, div);
+    }
+
+    if (!self.firstrack && self.rd && typeof self.rd.init === 'function') {
+      self.rd.init();
     }
   };
 
@@ -1306,7 +1352,20 @@ function RedipsUI() {
   };
 
   self.showBusy = function() {
-    showModal(t('Computer thinking, please wait...'));
+    if (typeof g_showThinking !== 'undefined' && g_showThinking) {
+      self.busyToast = self.toast(t('Computer thinking, please wait...'), 0);
+    }
+    if (typeof DEBUG !== 'undefined' && DEBUG) {
+      console.log(t('Computer thinking, please wait...'));
+    }
+  };
+
+  self.hideBusy = function() {
+    if (self.busyToast && self.busyToast.parentNode) {
+      self.busyToast.classList.remove('show');
+      self.busyToast.classList.add('hide');
+      self.busyToast = null;
+    }
   };
 
   self.showHighScores = async function() {
@@ -1349,7 +1408,7 @@ function RedipsUI() {
       var rcell = el(self.plrRackId + i);
       if (rcell.holds === '') continue;
       divs.push(rcell.firstChild);
-      html += '<td id="swap-candidate' + i + '" class="tile" onclick="g_bui.onSwapToggle(this)"></td>';
+      html += '<td id="swap-candidate' + (divs.length - 1) + '" class="tile" onclick="g_bui.onSwapToggle(this)"></td>';
     }
     html += '</tr></table>';
 
