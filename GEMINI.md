@@ -24,7 +24,7 @@ The codebase is structured to separate game logic from the user interface:
 ## Building and Running
 
 ### Development
-The project can be run by opening `index.html` directly in a modern web browser.
+The project can be run by opening `index.html` directly in a modern web browser. It can also be served via `http-server --cors -c-1` in WSL.
 
 ### Testing
 End-to-end tests are implemented using Puppeteer.
