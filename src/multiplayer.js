@@ -6,6 +6,15 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Oju2rh1kaNFcvlPfnssF7A_4YpvQKCH'; // N
 const SUPABASE_HIGHSCORES_TABLE = 'highscores';
 const SUPABASE_HIGHSCORES_ID = 'vietboard';
 
+// Obfuscated app key for Supabase RLS (xor 0xAB)
+const _hk = '\xdd\xc9\xf4\xca\xdb\xdb\xc0\xce\xd2\xf4\x9c\xc0\x92\xc6\x99\xdb\xf3\xda\xe7\x9f\xc5\xf9\x93\xdc\xff\x9e\xc1\xf2\x98\xdd\xe9\x9d\xc8\xe3\x9a\xca\xed\x9b\xcf\xee';
+function _dk(s) {
+  var k = 0xAB;
+  var r = '';
+  for (var i = 0; i < s.length; i++) r += String.fromCharCode(s.charCodeAt(i) ^ k);
+  return r;
+}
+
 // We will load the Supabase client via unpkg in index.html
 window.supabaseClient = null;
 
@@ -22,7 +31,10 @@ if (!g_lobbyUserId) {
 }
 let g_myName = localStorage.getItem('player_name');
 if (!g_myName) {
-  g_myName = t('Generating...'); // Set temporary state
+  // Real fallback stored immediately — never expose "Generating..." to high scores
+  var fallback = t('Player') + '_' + Math.floor(Math.random() * 10000);
+  g_myName = fallback.substring(0, 32);
+  localStorage.setItem('player_name', g_myName);
 
   // Custom Google Apps Script Random Username Generator
   async function generateNickname() {
@@ -46,8 +58,22 @@ if (!g_myName) {
       sNickname = t('Player') + '_' + sRandInt;
     }
 
-    g_myName = sNickname;
+    var oldName = g_myName;
+    g_myName = sNickname.substring(0, 32);
     localStorage.setItem('player_name', g_myName);
+
+    // Rename any local high scores that used the old fallback name and re-sync
+    if (oldName !== g_myName) {
+      for (var key in g_highscores) {
+        if (Array.isArray(g_highscores[key])) {
+          g_highscores[key].forEach(function(item) {
+            if (item.player === oldName) item.player = g_myName;
+          });
+        }
+      }
+      localStorage['highscores'] = JSON.stringify(g_highscores);
+      if (typeof saveGlobalHighScores === 'function') saveGlobalHighScores();
+    }
 
     // Update input field if it's already rendered
     var nameInput = document.getElementById('lobby-name');
@@ -152,10 +178,11 @@ async function mergeGlobalHighScores(remoteScores) {
       if (seen[dedupeKey]) {
         // If we already saw this score, but the new one has a session and the old one didn't,
         // update the existing entry to include the session (allows viewing local matches).
-        if (item.session) {
+        if (item.session || item.date) {
           for (var j = 0; j < unique.length; j++) {
             if (((unique[j].playerId || unique[j].player) + '|' + unique[j].score) === dedupeKey) {
-              if (!unique[j].session) unique[j].session = item.session;
+              if (!unique[j].session && item.session) unique[j].session = item.session;
+              if (!unique[j].date && item.date) unique[j].date = item.date;
               break;
             }
           }
@@ -168,7 +195,8 @@ async function mergeGlobalHighScores(remoteScores) {
         player: rawName,
         playerId: playerId,
         score: score,
-        session: item.session || ''
+        session: item.session || '',
+        date: item.date || ''
       });
     }
 
@@ -177,6 +205,7 @@ async function mergeGlobalHighScores(remoteScores) {
       var nB = b ? b.score : -99;
       return (nA > nB) ? -1 : ((nA < nB) ? 1 : 0);
     });
+    if (unique.length > 100) unique = unique.slice(0, 100);
     if (unique.length > 0) merged[key] = unique;
   }
 
@@ -259,7 +288,8 @@ async function saveGlobalHighScores() {
       .from(SUPABASE_HIGHSCORES_TABLE)
       .upsert({
         id: SUPABASE_HIGHSCORES_ID,
-        scores: strippedHighScores
+        scores: strippedHighScores,
+        app_key: _dk(_hk)
       }, { onConflict: 'id' });
 
     if (error) {
@@ -291,7 +321,7 @@ window.showLobby = function() {
 <table>
   <tr class="header">
     <td><label for="lobby-name">${t('Your name')}</label></td>
-    <td class="input"><input id="lobby-name" value="${g_myName}"></td>
+    <td class="input"><input id="lobby-name" value="${g_myName}" maxlength="32"></td>
   </tr>
 </table>
 <p><strong>${t('Click a player to start a game:')}</strong></p>
@@ -322,7 +352,8 @@ window.showLobby = function() {
 }
 
 window.updatePlayerName = async function(newName) {
-  g_myName = newName || (t('Player') + '_' + Math.floor(Math.random() * 10000));
+  var trimmed = (newName || (t('Player') + '_' + Math.floor(Math.random() * 10000))).substring(0, 32);
+  g_myName = trimmed;
   localStorage.setItem('player_name', g_myName);
   if (DEBUG) console.log('updatePlayerName: setting to', g_myName);
 

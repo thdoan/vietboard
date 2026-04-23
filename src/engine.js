@@ -203,7 +203,8 @@ function finalizeGameScores() {
       'playerId': opponentId,
       'player': names.opponent,
       'score': g_oscore,
-      'session': sHighScoresSession
+      'session': sHighScoresSession,
+      'date': new Date().toISOString()
     });
   }
   if (typeof g_pscore === 'number' && g_pscore > 0) {
@@ -211,13 +212,15 @@ function finalizeGameScores() {
       'playerId': g_lobbyUserId || '',
       'player': names.player,
       'score': g_pscore,
-      'session': sHighScoresSession
+      'session': sHighScoresSession,
+      'date': new Date().toISOString()
     });
   }
   if (scoreEntries.length) {
     g_highscores[sHighScoresKey].push.apply(g_highscores[sHighScoresKey], scoreEntries);
   }
   g_highscores[sHighScoresKey].sort(gCompareScores);
+  g_highscores[sHighScoresKey] = g_highscores[sHighScoresKey].slice(0, 100);
   localStorage['highscores'] = JSON.stringify(g_highscores);
   if (typeof saveGlobalHighScores === 'function') saveGlobalHighScores();
 
@@ -307,15 +310,18 @@ function tabulateCurrentScores() {
     'playerId': opponentId,
     'player': names.opponent,
     'score': g_oscore,
-    'session': sHighScoresSession
+    'session': sHighScoresSession,
+    'date': new Date().toISOString()
   });
   g_highscores[sHighScoresKey].push({
     'playerId': g_lobbyUserId || '',
     'player': names.player,
     'score': g_pscore,
-    'session': sHighScoresSession
+    'session': sHighScoresSession,
+    'date': new Date().toISOString()
   });
   g_highscores[sHighScoresKey].sort(gCompareScores);
+  g_highscores[sHighScoresKey] = g_highscores[sHighScoresKey].slice(0, 100);
   localStorage['highscores'] = JSON.stringify(g_highscores);
 
   if (typeof syncHighScoresMultiplayer === 'function') {

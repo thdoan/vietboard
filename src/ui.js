@@ -312,8 +312,10 @@ function RedipsUI() {
             'value': +el('lpscore').textContent
           });
         } else {
-          elStatus.textContent = t('Computer') + ' ' + t('scored ') + el('loscore').textContent + ' ' + t(' points for ') + words.join(', ').toUpperCase();
-          gtag('event', 'Computer Move', {
+          var isMP = (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer);
+          var opponentNoun = isMP ? t('Opponent') : t('Computer');
+          elStatus.textContent = opponentNoun + ' ' + t('scored ') + el('loscore').textContent + ' ' + t(' points for ') + words.join(', ').toUpperCase();
+          gtag('event', (isMP ? 'Opponent' : 'Computer') + ' Move', {
             'event_category': 'Gameplay - Lvl ' + (g_playlevel + 1),
             'event_label': words.join(', '),
             'value': +el('loscore').textContent
@@ -1275,9 +1277,15 @@ function RedipsUI() {
         } else if (playerName === 'Computer' || playerName === computerLabel || playerId === 'computer') {
           playerName = computerLabel;
         }
-        html += '<tr><td>' + playerName +
+        var dateStr = '';
+        if (g_highscores[sKey][i]['date']) {
+          var d = new Date(g_highscores[sKey][i]['date']);
+          dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+        html += '<tr><td>' + (i + 1) +
+          '</td><td>' + playerName +
           '</td><td><a class="link" title="' + t('View this match') + '" onclick="loadHighScore(\'' + sKey + '\',' + i + ')" tabindex="1">' +
-          g_highscores[sKey][i]['score'] + '</a></td></tr>';
+          g_highscores[sKey][i]['score'] + '</a></td><td>' + dateStr + '</td></tr>';
       }
     }
     return html;
@@ -1418,8 +1426,8 @@ function RedipsUI() {
     var elBonusesLayout = el('#bonuseslayout').cloneNode(true);
     var html = '<div class="table-container"><table><tr class="header">' +
       '<td><select id="highscores-level" title="' + t('Select level') + '" onchange="el(\'highscores-data\').innerHTML=g_bui.renderHighScoreRows(el(\'highscores-layout\').value+\' \'+value);setModalHeight()">' + sLevels + '</select></td>' +
-      '<td><select id="highscores-layout" title="' + t('Select bonuses layout') + '" onchange="el(\'highscores-data\').innerHTML=g_bui.renderHighScoreRows(value+\' \'+el(\'highscores-level\').value);setModalHeight()">' + elBonusesLayout.innerHTML + '</select></td></tr>' +
-      '<tr class="highlight"><th>' + t('Player') + '</th><th>' + t('Score') + '</th></tr><tbody id="highscores-data">' +
+      '<td colspan="3"><select id="highscores-layout" title="' + t('Select bonuses layout') + '" onchange="el(\'highscores-data\').innerHTML=g_bui.renderHighScoreRows(value+\' \'+el(\'highscores-level\').value);setModalHeight()">' + elBonusesLayout.innerHTML + '</select></td></tr>' +
+      '<tr class="highlight"><th>' + t('Rank') + '</th><th>' + t('Player') + '</th><th>' + t('Score') + '</th><th>' + t('Date') + '</th></tr><tbody id="highscores-data">' +
       self.renderHighScoreRows(g_layout + ' ' + g_bui.level) + '</tbody></table></div>';
     self.prompt(html, '', 'highscores wide');
   };
