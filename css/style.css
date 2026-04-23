@@ -888,8 +888,11 @@ footer .social {
   top: 0;
   background: inherit;
 }
+.highscores :is(td:first-child, td:nth-child(3)) {
+  text-align: center;
+}
 .highscores :is(td, th):last-child {
-  text-align: right;
+  white-space: nowrap;
 }
 :is(.highscores, .lobby-modal) table td.input {
   background: #fff;
