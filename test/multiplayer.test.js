@@ -145,7 +145,7 @@ async function runTests() {
     });
 
     const nameA = `PlayerA_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
-    const newNameA = `${nameA}_changed`;
+    const newNameA = `${nameA}_ch`;
     const nameB = `PlayerB_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
     const idA = `user_test_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
     const idB = `user_test_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;

@@ -35,6 +35,7 @@ if (!g_myName) {
   var fallback = t('Player') + '_' + Math.floor(Math.random() * 10000);
   g_myName = fallback.substring(0, 32);
   localStorage.setItem('player_name', g_myName);
+  if (DEBUG) console.log('Generated fallback player_name:', g_myName);
 
   // Custom Google Apps Script Random Username Generator
   async function generateNickname() {
