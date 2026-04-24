@@ -50,3 +50,24 @@ The build output is placed in the `play/` directory.
 - **Debug Mode:** Can be toggled via `const DEBUG = true;` in `src/engine.js` (automatically disabled during build).
 - **Localization:** The system is designed to be easily localized by adding new files to the `lang/` directory.
 - **Storage:** Uses `localStorage` for persisting sessions, high scores, and user preferences.
+
+## Supabase Schema
+
+The app uses two tables in Supabase:
+
+- **`highscores`** — single row (`id='vietboard'`) storing all scores as a JSON blob. Schema: `{ id text PK, scores jsonb, app_key text }`.
+- **`sessions`** — stores full game state for replay. Schema: `{ id text PK, session_data text, app_key text, created_at timestamptz }`.
+
+An RPC function `sync_highscores_and_sessions` atomically upserts both tables and prunes orphaned sessions in a single call:
+
+```sql
+sync_highscores_and_sessions(p_id text, p_scores jsonb, p_sessions jsonb, p_active_session_ids text[], p_app_key text)
+```
+
+The `app_key` field uses a simple XOR obfuscation (`_dk`/`_hk` in `multiplayer.js`) for RLS policy validation.
+
+### Session Replay
+- Every session gets a unique `id` generated at game end via `getSession()` (`src/ui.js`).
+- High score entries store both `session` (full JSON, local-only) and `sessionId` (lightweight key, synced globally).
+- When a user clicks a high score from another device, `loadHighScore()` falls back to `loadSessionFromCloud()` if no local session exists.
+- Fetched sessions are cached in `localStorage['cloud_sessions']` for instant replay on subsequent clicks.
