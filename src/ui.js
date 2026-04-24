@@ -189,6 +189,7 @@ function setModalHeight() {
 // Session functions
 function getSession() {
   var oSession = {
+    'id': 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
     'board': g_board,
     'boardp': g_boardpoints,
     'boardt': g_boardtypes,
@@ -248,10 +249,50 @@ function load(sSession, isHighScore) {
     if (g_isMobile) hideGameInfo();
   }
 }
-function loadHighScore(sKey, nIndex) {
+async function loadHighScore(sKey, nIndex) {
   if (!localStorage['session']) localStorage['session'] = getSession();
-  g_bui.created = false;
-  load(g_highscores[sKey][nIndex]['session'], true);
+  var entry = g_highscores[sKey] && g_highscores[sKey][nIndex];
+  if (!entry) return;
+
+  // Local session available
+  if (entry.session) {
+    g_bui.created = false;
+    load(entry.session, true);
+    return;
+  }
+
+  var sessionId = entry.sessionId;
+  if (!sessionId) {
+    g_bui.toast(t('Session not available'), 3000);
+    return;
+  }
+
+  // Check local cloud cache
+  var cache = localStorage['cloud_sessions'] ? JSON.parse(localStorage['cloud_sessions']) : {};
+  if (cache[sessionId]) {
+    entry.session = cache[sessionId];
+    localStorage['highscores'] = JSON.stringify(g_highscores);
+    g_bui.created = false;
+    load(cache[sessionId], true);
+    return;
+  }
+
+  // Fetch from Supabase
+  var toast = g_bui.toast(t('Loading...'), 0);
+  var sessionData = await loadSessionFromCloud(sessionId);
+  toast.classList.remove('show');
+  toast.classList.add('hide');
+
+  if (sessionData) {
+    cache[sessionId] = sessionData;
+    localStorage['cloud_sessions'] = JSON.stringify(cache);
+    entry.session = sessionData;
+    localStorage['highscores'] = JSON.stringify(g_highscores);
+    g_bui.created = false;
+    load(sessionData, true);
+  } else {
+    g_bui.toast(t('Unable to load session'), 3000);
+  }
 }
 
 // Main UI logic

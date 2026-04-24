@@ -179,10 +179,11 @@ async function mergeGlobalHighScores(remoteScores) {
       if (seen[dedupeKey]) {
         // If we already saw this score, but the new one has a session and the old one didn't,
         // update the existing entry to include the session (allows viewing local matches).
-        if (item.session || item.date) {
+        if (item.session || item.sessionId || item.date) {
           for (var j = 0; j < unique.length; j++) {
             if (((unique[j].playerId || unique[j].player) + '|' + unique[j].score) === dedupeKey) {
               if (!unique[j].session && item.session) unique[j].session = item.session;
+              if (!unique[j].sessionId && item.sessionId) unique[j].sessionId = item.sessionId;
               if (!unique[j].date && item.date) unique[j].date = item.date;
               break;
             }
@@ -197,6 +198,7 @@ async function mergeGlobalHighScores(remoteScores) {
         playerId: playerId,
         score: score,
         session: item.session || '',
+        sessionId: item.sessionId || '',
         date: item.date || ''
       });
     }
@@ -260,6 +262,22 @@ async function loadGlobalHighScores() {
   }
 }
 
+async function loadSessionFromCloud(sessionId) {
+  if (!window.supabaseClient || !sessionId) return null;
+  try {
+    var { data, error } = await window.supabaseClient
+      .from('sessions')
+      .select('session_data')
+      .eq('id', sessionId)
+      .single();
+    if (error) throw error;
+    return data ? data.session_data : null;
+  } catch (err) {
+    console.warn('Failed to load session from cloud:', err);
+    return null;
+  }
+}
+
 async function saveGlobalHighScores() {
   if (!window.supabaseClient) {
     if (DEBUG) console.log('Supabase client not available for saving.');
@@ -267,6 +285,27 @@ async function saveGlobalHighScores() {
   }
   try {
     var scoresToSave = g_highscores || {};
+    var sessionsPayload = [];
+    var activeSessionIds = [];
+    var seenSessionIds = {};
+
+    for (var key in scoresToSave) {
+      if (Array.isArray(scoresToSave[key])) {
+        scoresToSave[key].forEach(function(item) {
+          if (item.sessionId && item.session && !seenSessionIds[item.sessionId]) {
+            seenSessionIds[item.sessionId] = true;
+            sessionsPayload.push({
+              id: item.sessionId,
+              session_data: item.session
+            });
+          }
+          if (item.sessionId) {
+            activeSessionIds.push(item.sessionId);
+          }
+        });
+      }
+    }
+
     // Clone and strip huge session data before saving to DB
     var strippedHighScores = JSON.parse(JSON.stringify(scoresToSave));
     var hasScores = false;
@@ -284,19 +323,20 @@ async function saveGlobalHighScores() {
        return;
     }
 
-    if (DEBUG) console.log('Upserting high scores to Supabase:', strippedHighScores);
+    if (DEBUG) console.log('Syncing high scores and sessions to Supabase...');
     var { error } = await window.supabaseClient
-      .from(SUPABASE_HIGHSCORES_TABLE)
-      .upsert({
-        id: SUPABASE_HIGHSCORES_ID,
-        scores: strippedHighScores,
-        app_key: _dk(_hk)
-      }, { onConflict: 'id' });
+      .rpc('sync_highscores_and_sessions', {
+        p_id: SUPABASE_HIGHSCORES_ID,
+        p_scores: strippedHighScores,
+        p_sessions: sessionsPayload,
+        p_active_session_ids: activeSessionIds,
+        p_app_key: _dk(_hk)
+      });
 
     if (error) {
       console.warn('Failed to save global high scores:', error.message || error, error);
     } else {
-      if (DEBUG) console.log('Global high scores synced successfully.');
+      if (DEBUG) console.log('Global high scores and sessions synced successfully.');
     }
   } catch (err) {
     console.warn('Unexpected error saving global high scores:', err);

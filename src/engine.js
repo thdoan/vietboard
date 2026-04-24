@@ -194,6 +194,8 @@ function finalizeGameScores() {
   // Update high scores table if applicable
   var sHighScoresKey = g_layout + ' ' + g_bui.level;
   var sHighScoresSession = getSession();
+  var sessionObj = JSON.parse(sHighScoresSession);
+  var sessionId = sessionObj.id;
   var names = getHighScoreNames();
   var opponentId = g_isMultiplayer ? (g_opponentId || '') : COMPUTER_PLAYER_ID;
   if (!g_highscores[sHighScoresKey]) g_highscores[sHighScoresKey] = [];
@@ -204,6 +206,7 @@ function finalizeGameScores() {
       'player': names.opponent,
       'score': g_oscore,
       'session': sHighScoresSession,
+      'sessionId': sessionId,
       'date': new Date().toISOString()
     });
   }
@@ -213,6 +216,7 @@ function finalizeGameScores() {
       'player': names.player,
       'score': g_pscore,
       'session': sHighScoresSession,
+      'sessionId': sessionId,
       'date': new Date().toISOString()
     });
   }
