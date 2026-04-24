@@ -326,7 +326,7 @@ window.showLobby = function() {
   </tr>
 </table>
 <p><strong>${t('Click a player to start a game:')}</strong></p>
-<div id="lobby-players">
+<div id="lobby-players" class="table-container">
   <em>${t('Loading...')}</em>
 </div>
 `;
@@ -677,7 +677,7 @@ function applyNonGameButtonPolicy() {
   var lobbyBtn = document.getElementById('lobby');
   if (lobbyBtn) {
     lobbyBtn.disabled = false;
-    lobbyBtn.title = t('Lobby');
+    lobbyBtn.title = t('Multiplayer Lobby');
   }
 
   var restartBtn = document.getElementById('restart');
@@ -938,7 +938,7 @@ function sendDragPosition(x, y, sourceId, sourceCenter) {
 
 function mapRemoteRackCellId(remoteId) {
   if (typeof remoteId !== 'string') return remoteId;
-  
+
   // Scrabble/Vietboard rack indices are 0 to g_racksize - 1.
   // When players 'face each other', their racks are horizontally mirrored.
   // Leftmost (0) for one is Rightmost (g_racksize - 1) for the other.
@@ -950,7 +950,7 @@ function mapRemoteRackCellId(remoteId) {
       return prefix + mirroredIndex;
     }
   }
-  
+
   return remoteId;
 }
 
@@ -982,21 +982,21 @@ function localizeDragPosition(payload) {
       // We want the ghost to start at the LOCAL mapped rack center
       var startX_local = g_cachedLocalSourceRect.left + g_cachedLocalSourceRect.width / 2;
       var startY_local = g_cachedLocalSourceRect.top + g_cachedLocalSourceRect.height / 2;
-      
+
       // Decay the error as the tile moves away from the source (vertically)
       // Use a tight transition (1 cell height) to snap to absolute board position
       var dy_moved = Math.abs(y - sY);
-      var transitionDist = g_cachedLocalSourceRect.height; 
+      var transitionDist = g_cachedLocalSourceRect.height;
       var fade = Math.max(0, 1 - dy_moved / transitionDist);
-      
+
       if (fade > 0) {
           // At the rack, we mirror the offset relative to the local mapped cell center.
           var offsetX = x - sX;
           var offsetY = y - sY;
-          
+
           var x_at_rack = startX_local - offsetX;
           var y_at_rack = startY_local - offsetY;
-          
+
           // Interpolate between mirrored rack position and absolute board position
           x = x + (x_at_rack - x) * fade;
           y = y + (y_at_rack - y) * fade;
@@ -1149,7 +1149,7 @@ function handleDragBroadcast(payload) {
     g_dragGhost = document.createElement('div');
     g_dragGhost.id = 'mp-drag-ghost';
     g_dragGhost.className = 'drag t2 mp-ghost';
-    
+
     // Core styling for translate3d efficiency
     g_dragGhost.style.position = 'fixed';
     g_dragGhost.style.left = '0';
@@ -1173,11 +1173,11 @@ function handleDragBroadcast(payload) {
         gw = g_cachedBoardRect.width / g_boardwidth;
         gh = g_cachedBoardRect.height / g_boardheight;
     }
-    
+
     // Set size to match original tile
     g_dragGhost.style.width = gw + 'px';
     g_dragGhost.style.height = gh + 'px';
-    
+
     // Center using translate(-50%, -50%) combined with absolute position
     g_dragGhost.style.transform = 'translate3d(' + localPos.x + 'px, ' + localPos.y + 'px, 0) translate(-50%, -50%)';
   }
@@ -1268,7 +1268,7 @@ function updateTurnIndicator() {
       lobbyBtn.title = t('Finish the current game before joining the lobby');
     } else {
       lobbyBtn.disabled = false;
-      lobbyBtn.title = t('Lobby');
+      lobbyBtn.title = t('Multiplayer Lobby');
     }
   }
 }

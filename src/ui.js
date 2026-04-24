@@ -403,9 +403,11 @@ function RedipsUI() {
     var hr = '<tr class="ruler"><td colspan="2"></td></tr>';
 
     g_cache['html'].miscBtns =
-      '<button id="lobby" class="button secondary" title="' + t('Lobby') + '" onclick="window.showLobby()">🌐</button>' +
-      '<button id="highscores" class="button secondary" title="' + t('High Scores') + '" onclick="g_bui.showHighScores()">🎖</button>' +
-      '<button id="restart" class="button secondary" title="' + t('Restart') + '" onclick="confirmRestartIfNeeded()">⟳</button>';
+      '<div class="button-container">' +
+      '<button id="lobby" class="button secondary" title="' + t('Multiplayer Lobby') + '" onclick="window.showLobby()">🌐</button>' +
+      '<button id="highscores" class="button secondary" title="' + t('High Scores') + '" onclick="g_bui.showHighScores()">🏆</button>' +
+      '<button id="restart" class="button secondary" title="' + t('Restart') + '" onclick="confirmRestartIfNeeded()">⟳</button>' +
+      '</div>';
 
     window.confirmRestartIfNeeded = function() {
       if (!g_isGameOver) {
@@ -469,10 +471,10 @@ function RedipsUI() {
       '<tr><td>' + t('Bonuses layout:') + '</td><td>' + sSelLayout + '</td></tr>' +
       hr +
       '<tr><td>' + t('Your last score:') + '</td><td id="lpscore">0</td></tr>' +
-      '<tr class="highlight"><td>' + t('Your total score:') + '</td><td id="pscore">0</td></tr>' +
+      '<tr class="highlight player"><td>' + t('Your total score:') + '</td><td id="pscore">0</td></tr>' +
       hr +
       '<tr><td><span id="label-loscore">' + t('Computer&rsquo;s last score:') + '</span></td><td id="loscore">0</td></tr>' +
-      '<tr class="highlight"><td><span id="label-oscore">' + t('Computer&rsquo;s total score:') + '</span></td><td id="oscore">0</td></tr>' +
+      '<tr class="highlight opponent"><td><span id="label-oscore">' + t('Computer&rsquo;s total score:') + '</span></td><td id="oscore">0</td></tr>' +
       hr +
       '<tr><td>' + t('Tiles left:') + '</td><td id="tleft"></td></tr>' +
       hr;
@@ -557,13 +559,13 @@ function RedipsUI() {
     //---------------------------
 
     if (g_isMobile) html += '</tr><tr>';
-    html += '<td class="mark"' + (g_isMobile ? ' colspan="8"' : '') + '>' +
+    html += '<td class="mark"' + (g_isMobile ? ' colspan="8"' : '') + '><div class="button-container">' +
       (isHighScore ? '<button class="button secondary wide" onclick="g_bui.created=false;load(localStorage[\'session\'])">' + t('Return to Game') + '</button>' :
       '<button id="play" class="button" onclick="onPlayerMoved()">' + t('Play') + '</button>' +
       '<button id="clear" class="button secondary" onclick="onPlayerShuffle()">' + t('Shuffle') + '</button>' +
       '<button id="swap" class="button secondary" onclick="onPlayerSwap()">' + t('Swap') + '</button>' +
       '<button id="pass" class="button secondary" onclick="onPlayerMoved(true)">' + t('Pass') + '</button>') +
-      '</td></tr></table></div>';
+      '</div></td></tr></table></div>';
 
     el(iddiv).innerHTML = html;
 
@@ -1424,7 +1426,7 @@ function RedipsUI() {
       sLevels += '<option' + (i == g_bui.level ? ' selected' : '') + '>' + i + '</option>';
     }
     var elBonusesLayout = el('#bonuseslayout').cloneNode(true);
-    var html = '<div class="table-container"><table><tr class="header">' +
+    var html = '<h2>⭐ ' + t('High Scores') + ' ⭐</h2><div class="table-container"><table><tr class="header">' +
       '<td><select id="highscores-level" title="' + t('Select level') + '" onchange="el(\'highscores-data\').innerHTML=g_bui.renderHighScoreRows(el(\'highscores-layout\').value+\' \'+value);setModalHeight()">' + sLevels + '</select></td>' +
       '<td colspan="3"><select id="highscores-layout" title="' + t('Select bonuses layout') + '" onchange="el(\'highscores-data\').innerHTML=g_bui.renderHighScoreRows(value+\' \'+el(\'highscores-level\').value);setModalHeight()">' + elBonusesLayout.innerHTML + '</select></td></tr>' +
       '<tr class="highlight"><th>' + t('Rank') + '</th><th>' + t('Player') + '</th><th>' + t('Score') + '</th><th>' + t('Date') + '</th></tr><tbody id="highscores-data">' +

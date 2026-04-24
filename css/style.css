@@ -1,5 +1,27 @@
 /*** General ***/
 
+:root {
+  /* Colors */
+  --rgb-black: 0 0 0;
+  --rgb-btn-primary-hover: 92 184 17; /* #5cb811 */
+  --rgb-btn-primary: 119 212 42; /* #77d42a */
+  --rgb-btn-secondary-hover: 255 171 35; /* #ffab23 */
+  --rgb-btn-secondary: 255 236 100; /* #ffec64 */
+  --rgb-gray-dark: 58 58 58; /* #3a3a3a */
+  --rgb-gray: 173 173 173; /* #adadad */
+  --rgb-highlight: 254 254 186; /* #fefeba */
+  --rgb-tile-opponent: 205 92 92; /* #cd5c5c (indianred) */
+  --rgb-tile-player: 73 155 51; /* #499b33 */
+  --rgb-white: 255 255 255;
+  /* Borders */
+  --border-color: rgb(var(--rgb-gray) / 0.5);
+  --border-radius: 8px;
+  /* Buttons */
+  --btn-height: 40px;
+  /* Tiles */
+  --tile-size: 32px;
+}
+
 html {
   width: 100%;
   height: 100%;
@@ -29,7 +51,7 @@ html.loaded {
   animation: reveal 0.3s forwards;
 }
 @keyframes reveal {
-  from { background-color: #fff; }
+  from { background-color: rgb(var(--rgb-white)); }
   to { background-color: #d8be7f; }
 }
 html.shuffling {
@@ -54,7 +76,8 @@ body {
   outline: none;
 }
 
-a[href] {
+a[href],
+a[onclick] {
   cursor: pointer;
 }
 a.link {
@@ -62,12 +85,15 @@ a.link {
   color: -webkit-link;
 }
 a[href]:hover,
+a[onclick]:hover,
 a[href]:focus,
+a[onclick]:focus,
 a.link:hover,
 a.link:focus {
   color: #b00;
 }
 a[href]:active,
+a[onclick]:active,
 a.link:active {
   color: #e00;
 }
@@ -93,10 +119,14 @@ select[disabled] {
 }
 
 h3.opponent {
-  color: #cd5c5c;
+  color: rgb(var(--rgb-tile-opponent));
 }
 h3.player {
-  color: #499b33;
+  color: rgb(var(--rgb-tile-player));
+}
+
+img {
+  pointer-events: none;
 }
 
 select {
@@ -107,17 +137,23 @@ select {
 }
 
 tr.header {
-  background: #3a3a3a;
+  background: rgb(var(--rgb-gray-dark));
 }
 tr.header option {
-  color: #000;
+  color: rgb(var(--rgb-black));
 }
 tr.header select:not(:checked) {
-  color: #fff;
+  color: rgb(var(--rgb-white));
 }
 tr.highlight {
-  background: #fefeba;
+  background: rgb(var(--rgb-highlight));
   font-weight: bold;
+}
+tr.highlight.opponent {
+  background: rgb(var(--rgb-tile-opponent) / 0.15);
+}
+tr.highlight.player {
+  background: rgb(var(--rgb-tile-player) / 0.15);
 }
 
 .centered {
@@ -129,8 +165,8 @@ tr.highlight {
 }
 
 .table-container {
-  max-height: calc(100% - 2.5rem);
-  border: 1px solid #adadad;
+  border: calc(var(--border-radius) * 0.75) solid var(--border-color);
+  border-radius: var(--border-radius);
   overflow: auto;
 }
 
@@ -148,8 +184,8 @@ tr.highlight {
   left: 0;
   width: 100%;
   height: 100%;
-  background: #3a3a3a;
-  border-radius: 8px;
+  background: rgb(var(--rgb-gray-dark));
+  border-radius: var(--border-radius);
   content: '';
   -webkit-filter: drop-shadow(2px 4px 6px #8d702a);
   filter: drop-shadow(2px 4px 6px #8d702a);
@@ -191,25 +227,25 @@ picture img {
 .button {
   -webkit-box-shadow: inset 0 1px 0 0 #caefab;
   box-shadow: inset 0 1px 0 0 #caefab;
-  background: -webkit-gradient(linear, left top, left bottom, color-stop(0.05, #77d42a), color-stop(1, #5cb811));
-  background: linear-gradient(to bottom, #77d42a 5%, #5cb811 100%);
-  background-color: #77d42a;
-  border: 1px solid #268a16;
+  background: -webkit-gradient(linear, left top, left bottom, color-stop(0.05, rgb(var(--rgb-btn-primary))), color-stop(1, rgb(var(--rgb-btn-primary-hover))));
+  background: linear-gradient(to bottom, rgb(var(--rgb-btn-primary)) 5%, rgb(var(--rgb-btn-primary-hover)) 100%);
+  background-color: rgb(var(--rgb-btn-primary));
+  border: 1px solid color-mix(in srgb, rgb(var(--rgb-btn-primary)) 60%, rgb(var(--rgb-black)));
   border-radius: 6px;
-  color: #303108;
+  color: rgb(var(--rgb-black));
   cursor: pointer;
   display: inline-block;
   font: bold 12px/1 'Trebuchet MS', Arial, sans-serif;
   padding: 6px 10px;
   text-decoration: none;
-  text-shadow: 1px 1px 0 #aade7c;
+  text-shadow: 1px 1px 0 color-mix(in srgb, rgb(var(--rgb-btn-primary)) 60%, rgb(var(--rgb-white)));
   vertical-align: middle;
 }
 .button:not([disabled]):hover,
 .button:not([disabled]):focus {
-  background: -webkit-gradient(linear, left top, left bottom, color-stop(0.05, #5cb811), color-stop(1, #77d42a));
-  background: linear-gradient(to bottom, #5cb811 5%, #77d42a 100%);
-  background-color: #5cb811;
+  background: -webkit-gradient(linear, left top, left bottom, color-stop(0.05, rgb(var(--rgb-btn-primary-hover))), color-stop(1, rgb(var(--rgb-btn-primary))));
+  background: linear-gradient(to bottom, rgb(var(--rgb-btn-primary-hover)) 5%, rgb(var(--rgb-btn-primary)) 100%);
+  background-color: rgb(var(--rgb-btn-primary-hover));
 }
 .button:active {
   position: relative;
@@ -219,18 +255,17 @@ picture img {
 .button.secondary {
   -webkit-box-shadow: inset 0 1px 0 -2px #fff6af;
   box-shadow: inset 0 1px 0 -2px #fff6af;
-  background: -webkit-gradient(linear, left top, left bottom, color-stop(0.05, #ffec64), color-stop(1, #ffab23));
-  background: linear-gradient(to bottom, #ffec64 5%, #ffab23 100%);
-  background-color: #ffec64;
-  border: 1px solid #ffaa22;
-  color: #333;
-  text-shadow: 1px 1px 0 #ffee66;
+  background: -webkit-gradient(linear, left top, left bottom, color-stop(0.05, rgb(var(--rgb-btn-secondary))), color-stop(1, rgb(var(--rgb-btn-secondary-hover))));
+  background: linear-gradient(to bottom, rgb(var(--rgb-btn-secondary)) 5%, rgb(var(--rgb-btn-secondary-hover)) 100%);
+  background-color: rgb(var(--rgb-btn-secondary));
+  border: 1px solid color-mix(in srgb, rgb(var(--rgb-btn-secondary)) 60%, rgb(var(--rgb-black)));
+  text-shadow: 1px 1px 0 color-mix(in srgb, rgb(var(--rgb-btn-secondary)) 60%, rgb(var(--rgb-white)));
 }
 .button.secondary:not([disabled]):hover,
 .button.secondary:not([disabled]):focus {
-  background: -webkit-gradient(linear, left top, left bottom, color-stop(0.05, #ffab23), color-stop(1, #ffec64));
-  background: linear-gradient(to bottom, #ffab23 5%, #ffec64 100%);
-  background-color: #ffab23;
+  background: -webkit-gradient(linear, left top, left bottom, color-stop(0.05, rgb(var(--rgb-btn-secondary-hover))), color-stop(1, rgb(var(--rgb-btn-secondary))));
+  background: linear-gradient(to bottom, rgb(var(--rgb-btn-secondary-hover)) 5%, rgb(var(--rgb-btn-secondary)) 100%);
+  background-color: rgb(var(--rgb-btn-secondary-hover));
 }
 
 .button.wide {
@@ -264,7 +299,7 @@ picture img {
   position: relative;
   width: 100%;
   max-height: 50px;
-  background: #3a3a3a;
+  background: rgb(var(--rgb-gray-dark));
   z-index: 1;
 }
 #scoreboard .spacer {
@@ -275,20 +310,20 @@ picture img {
 #score-player {
   width: 24%;
   border-radius: 6px;
-  color: #fff;
+  color: rgb(var(--rgb-white));
   font: normal 180%/1.1 'Maven Pro', Arial, sans-serif;
 }
 #score-opponent {
   background: #303a3b linear-gradient(-80deg, #8c2b2b, #001e22); /* #cd5c5c luminosity * 0.625 */
-  -webkit-box-shadow: 1px -1px 1px 0 #555 inset, 0 0 1em 0 rgba(0, 0, 0, 0.6) inset;
-  box-shadow: 1px -1px 1px 0 #555 inset, 0 0 1em 0 rgba(0, 0, 0, 0.6) inset;
-  text-shadow: 0 0 0.5em #cd5c5c;
+  -webkit-box-shadow: 1px -1px 1px 0 #555 inset, 0 0 1em 0 rgb(var(--rgb-black) / 0.6) inset;
+  box-shadow: 1px -1px 1px 0 #555 inset, 0 0 1em 0 rgb(var(--rgb-black) / 0.6) inset;
+  text-shadow: 0 0 0.5em rgb(var(--rgb-tile-opponent));
 }
 #score-player {
   background: #303a3b linear-gradient(80deg, #2e6020, #001e22); /* #499b33 luminosity * 0.625 */
-  -webkit-box-shadow: -1px -1px 1px 0 #555 inset, 0 0 1em 0 rgba(0, 0, 0, 0.6) inset;
-  box-shadow: -1px -1px 1px 0 #555 inset, 0 0 1em 0 rgba(0, 0, 0, 0.6) inset;
-  text-shadow: 0 0 0.5em #499b33;
+  -webkit-box-shadow: -1px -1px 1px 0 #555 inset, 0 0 1em 0 rgb(var(--rgb-black) / 0.6) inset;
+  box-shadow: -1px -1px 1px 0 #555 inset, 0 0 1em 0 rgb(var(--rgb-black) / 0.6) inset;
+  text-shadow: 0 0 0.5em rgb(var(--rgb-tile-player));
 }
 
 #status {
@@ -329,8 +364,8 @@ picture img {
 #board {
   width: calc(100vh - 12vw);
   min-width: 480px;
-  background: #3a3a3a;
-  border-radius: 8px 0 0 8px;
+  background: rgb(var(--rgb-gray-dark));
+  border-radius: var(--border-radius) 0 0 var(--border-radius);
   display: table-cell;
   padding: 0 4px;
 }
@@ -376,49 +411,57 @@ table.board td:after,
   border-collapse: collapse;
 }
 #drag td {
-  border: 1px solid #fff;
+  border: 1px solid rgb(var(--rgb-white));
 }
 
-#drag .opponent td.mark {
-  position: relative;
-  text-align: right;
-}
 #drag td.mark h1 {
   position: absolute;
   top: 50%;
-  left: 4px;
-  width: 51%;
+  left: 0.5vmin;
+  width: 50%;
   margin: 0;
   transform: translateY(-50%);
 }
 #drag td.mark h1 img {
   display: block;
 }
-#drag .opponent .button {
-  width: 13.5%;
-  height: 32px;
-  font-size: 18px;
+
+/* Game buttons */
+#drag td.mark {
+  position: relative;
+}
+#drag td.mark .button-container {
+  --btn-spacing: 1vmin;
+  position: absolute;
+  top: calc(var(--btn-spacing) / 2);
+  left: calc(var(--btn-spacing) / 2);
+  width: calc(100% - var(--btn-spacing));
+  height: calc(100% - var(--btn-spacing));
+  container-type: inline-size;
+  display: inline-flex;
+  gap: calc(var(--btn-spacing) * 0.75);
+}
+#drag .opponent td.mark .button-container {
+  left: auto;
+  right: calc(var(--btn-spacing) / 2);
+  width: calc(50% - var(--btn-spacing) * 2);
+}
+#drag td.mark .button-container .button {
+  flex: 1;
+  font-size: calc(12px + 0.25vmin);
+  font-size: clamp(11px, 5cqi, 20px);
+  padding: 0.3vmin 0.5vmin;
+}
+#drag .opponent td.mark .button-container .button {
+  font-size: clamp(11px, 12cqi, 20px);
 }
 
-#restart {
-  margin-right: 6px;
-}
-
-#drag .button {
-  width: 23%;
-  min-height: 30px;
-  font-size: calc(10px + 0.25vw);
-  margin: 0 1%;
-  padding: 3px 5px;
-}
-html[lang="vi"]:not(.mobile) #drag .button {
-  letter-spacing: normal;
-  line-height: 0.9;
-}
+/* Unused (see toggleORV())
 #drag #toggle {
   width: 98%;
   min-width: 138px;
 }
+*/
 
 /* Racks */
 #drag .opponent,
@@ -441,8 +484,8 @@ html[lang="vi"]:not(.mobile) #drag .button {
 }
 #drag .opponent td.on .drag,
 #drag .opponent td .drag[style] {
-  background-color: #fff;
-  color: #000;
+  background-color: rgb(var(--rgb-white));
+  color: rgb(var(--rgb-black));
 }
 
 /* Drag objects (tiles) */
@@ -450,7 +493,7 @@ html[lang="vi"]:not(.mobile) #drag .button {
   -ms-flex-align: center;
   -webkit-box-align: center;
   align-items: center;
-  background: #fff;
+  background: rgb(var(--rgb-white));
   border-radius: 4px;
   -webkit-box-sizing: border-box;
   box-sizing: border-box;
@@ -479,14 +522,14 @@ table.board td .drag,
   height: calc(100% - 4px);
 }
 
-/* Tile border for opponent */
+/* Tile border for player */
 .t1 {
-  border: 2px solid #499b33;
+  border: 2px solid rgb(var(--rgb-tile-player));
 }
 
-/* Tile border for player */
+/* Tile border for opponent */
 .t2 {
-  border: 2px solid #cd5c5c; /* indianred */
+  border: 2px solid rgb(var(--rgb-tile-opponent));
 }
 
 .human-computer .drag.t1:not(.off) {
@@ -573,8 +616,9 @@ table.board td .drag,
   height: 48px;
   background: none;
   border: none;
-  color: #fff;
+  color: rgb(var(--rgb-white));
   line-height: 48px;
+  margin: 4px 0;
   padding: 0;
 }
 #back svg {
@@ -587,7 +631,7 @@ table.board td .drag,
   background: #fafafa;
   background: -webkit-gradient(linear, left top, left bottom, from(#f7fef7), to(#fafafa));
   background: linear-gradient(#f7fef7, #fafafa);
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 var(--border-radius) var(--border-radius) 0;
   display: table-cell;
   vertical-align: top;
 }
@@ -608,25 +652,26 @@ table.board td .drag,
 }
 #score header {
   position: relative;
-  height: 48px;
-  background: #3a3a3a;
+  background: rgb(var(--rgb-gray-dark));
   display: none;
 }
 #score header > img {
   position: absolute;
   top: 8px;
   right: 8px;
+  width: var(--btn-height);
+  height: var(--btn-height);
 }
 #score header .button {
   width: 15%;
-  height: 32px;
-  font-size: 18px;
-  margin: 8px;
+  height: var(--btn-height);
+  font-size: 20px;
+  margin: 8px 1.25vmin;
 }
 #score h2 {
   height: 26px;
   background: #f5f5dc; /* beige */
-  border-top-right-radius: 8px;
+  border-top-right-radius: var(--border-radius);
   color: #c39b3c; /* page bg color luminosity 50% */
   font-size: 16px;
   line-height: 25px;
@@ -655,7 +700,7 @@ table.board td .drag,
 }
 #score tr.ruler {
   height: 2px;
-  background: #adadad;
+  background: rgb(var(--rgb-gray));
 }
 
 #history {
@@ -674,10 +719,10 @@ table.board td .drag,
   border-collapse: collapse;
 }
 #history tr.player-0 {
-  color: #499b33;
+  color: rgb(var(--rgb-tile-player));
 }
 #history tr.player-1 {
-  color: #cd5c5c;
+  color: rgb(var(--rgb-tile-opponent));
 }
 #history td:first-child {
   width: 99%;
@@ -739,7 +784,7 @@ footer .social {
   left: 0;
   width: 100%;
   height: 100%;
-  background: #000;
+  background: rgb(var(--rgb-black));
   z-index: 200;
 }
 #modal-mask.on {
@@ -760,6 +805,9 @@ footer .social {
 #modal-container.on {
   opacity: 1;
 }
+html:not(.mobile) #modal-container.wide {
+  min-width: 350px;
+}
 #modal-inner:before {
   position: absolute;
   top: -12px;
@@ -769,7 +817,7 @@ footer .social {
   background: #99b;
   border-top: 1px solid #78a3f2;
   border-left: 1px solid #78a3f2;
-  border-bottom: 2px solid #000;
+  border-bottom: 2px solid rgb(var(--rgb-black));
   border-right: 1px solid #204095;
   -webkit-box-sizing: border-box;
   box-sizing: border-box;
@@ -778,12 +826,12 @@ footer .social {
 #modal-content {
   position: relative;
   width: 100%;
-  background: #fff;
-  border-left: 1px solid rgba(0, 0, 0, 0.9);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.9);
-  border-right: 1px solid rgba(0, 0, 0, 0.8);
-  -webkit-box-shadow: 0 3px 15px rgba(0, 0, 0, 0.4);
-  box-shadow: 0 3px 15px rgba(0, 0, 0, 0.4);
+  background: rgb(var(--rgb-white));
+  border-left: 1px solid rgb(var(--rgb-black) / 0.9);
+  border-bottom: 1px solid rgb(var(--rgb-black) / 0.9);
+  border-right: 1px solid rgb(var(--rgb-black) / 0.8);
+  -webkit-box-shadow: 0 3px 15px rgb(var(--rgb-black) / 0.4);
+  box-shadow: 0 3px 15px rgb(var(--rgb-black) / 0.4);
   -webkit-box-sizing: border-box;
   box-sizing: border-box;
   display: flex;
@@ -794,6 +842,11 @@ footer .social {
   text-align: left;
 }
 #modal-container.center #modal-content {
+  text-align: center;
+}
+#modal-content > h2 {
+  margin-bottom: 0.5rem;
+  margin-top: 0;
   text-align: center;
 }
 #modal-content h3 {
@@ -815,7 +868,7 @@ footer .social {
 #swaptable td.to-swap .drag {
   background: #1a1a1a;
   border-color: #be74d2;
-  color: #fff;
+  color: rgb(var(--rgb-white));
 }
 
 #gameover td {
@@ -853,12 +906,12 @@ footer .social {
 }
 
 .wordinfo #modal-content {
-  background-color: #fff;
+  background-color: rgb(var(--rgb-white));
   padding: 0 0 1rem 0;
 }
 #dict {
   position: relative;
-  width: 360px;
+  width: 100%;
   height: 400px;
   border: 0;
   z-index: 1;
@@ -880,8 +933,13 @@ footer .social {
   width: 100%;
 }
 :is(.highscores, .lobby-modal) table :is(td, th) {
-  border: 1px solid #adadad;
+  border: 1px solid var(--border-color);
   padding: 4px;
+}
+.highscores table {
+  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(5px);
+  background: rgba(255, 255, 255, 0.2);
 }
 .highscores th {
   position: sticky;
@@ -895,30 +953,29 @@ footer .social {
   white-space: nowrap;
 }
 :is(.highscores, .lobby-modal) table td.input {
-  background: #fff;
+  background: rgb(var(--rgb-white));
 }
 
 /*** Lobby ***/
 
-.lobby-modal h2 {
-  margin-top: 0;
-  text-align: center;
-}
 .lobby-modal input {
   border: 0;
 }
 .lobby-modal label {
-  color: #fff;
+  color: rgb(var(--rgb-white));
   line-height: 1.2;
   padding: 0 4px;
 }
+.lobby-modal p {
+  margin: 0.25rem 0 0 0;
+}
 #lobby-players {
   height: 150px;
-  background: #fefeba;
-  border: 1px solid #adadad;
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  background: rgb(var(--rgb-highlight) / 0.8);
   box-sizing: border-box;
   opacity: 0.9;
-  overflow: auto;
   padding: 4px 8px;
 }
 #lobby-players em {
@@ -926,15 +983,15 @@ footer .social {
   padding: 5px;
 }
 .lobby-player {
-  background: rgba(0, 0, 0, 0.8);
+  background: rgb(var(--rgb-black) / 0.8);
   border-radius: 4px;
-  color: #fff;
+  color: rgb(var(--rgb-white));
   cursor: pointer;
   margin: 4px 0;
   padding: 5px 10px;
 }
 .lobby-player:hover {
-  background: #5cb811;
+  background: rgb(var(--rgb-btn-primary-hover));
 }
 
 /*** Toast ***/
@@ -943,29 +1000,29 @@ footer .social {
   position: fixed;
   top: 0;
   left: 50%;
-  transform: translateX(-50%);
   width: calc(100% - 32px);
   max-width: 420px;
-  z-index: 10000;
-  pointer-events: none;
+  align-items: stretch;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
   padding: 8px;
+  pointer-events: none;
+  transform: translateX(-50%);
+  z-index: 10000;
 }
 .toast-message {
-  margin: 4px 0;
-  background: rgba(0, 0, 0, 0.88);
-  color: #fff;
+  background: rgb(var(--rgb-black) / 0.8);
   border-radius: 10px;
-  padding: 10px 14px;
+  box-shadow: 0 12px 30px rgb(var(--rgb-black) / 0.25);
+  color: rgb(var(--rgb-white));
   font-size: 0.95rem;
   line-height: 1.3;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
+  margin: 4px 0;
   opacity: 0;
-  transform: translateY(-100%);
-  transition: opacity 0.28s ease, transform 0.28s ease;
+  padding: 10px 14px;
   pointer-events: auto;
+  transform: translateY(-100%);
+  transition: opacity 0.3s ease, transform 0.3s ease;
 }
 .toast-message.show {
   opacity: 1;
@@ -983,15 +1040,15 @@ html.mobile body {
 }
 html.mobile #app {
   position: static;
-  -webkit-box-shadow: 0 3px 15px rgba(0, 0, 0, 0.5);
-  box-shadow: 0 3px 15px rgba(0, 0, 0, 0.5);
+  -webkit-box-shadow: 0 3px 15px rgb(var(--rgb-black) / 0.5);
+  box-shadow: 0 3px 15px rgb(var(--rgb-black) / 0.5);
 }
 html.mobile #app:after,
 html.error #app:after {
   content: none;
 }
 html.mobile #drag .button {
-  font-size: calc(12px + 0.25vw);
+  font-size: calc(16px + 0.25vw);
   line-height: 1.5;
 }
 html.mobile #scoreboard {
@@ -1032,8 +1089,12 @@ html.mobile table.board td .drag {
 html.mobile table.board td .drag sup > small {
   font-size: calc(6px + 0.3vw);
 }
-html.mobile #drag .player td.mark {
+html.mobile #drag td.mark {
   padding: 2px 0 4px 0;
+}
+html.mobile #drag td.mark .button-container {
+  position: revert;
+  gap: calc(var(--btn-spacing) * 1);
 }
 html.mobile .tile {
   width: 12.5%; /* 100 / 8 */
@@ -1083,15 +1144,4 @@ html.mobile #modal-container.wide {
 }
 html.mobile #modal-content {
   padding: 4%;
-}
-
-@media (max-height: 649px) {
-  #drag .button {
-    font-size: calc(8px + 0.25vw);
-    letter-spacing: -0.5px;
-  }
-  #drag .opponent td:first-child,
-  #drag .player td:last-child {
-    padding: 2px 0;
-  }
 }
