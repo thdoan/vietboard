@@ -72,6 +72,18 @@ The `app_key` field uses a simple XOR obfuscation (`_dk`/`_hk` in `multiplayer.j
 - When a user clicks a high score from another device, `loadHighScore()` falls back to `loadSessionFromCloud()` if no local session exists.
 - Fetched sessions are cached in `localStorage['cloud_sessions']` for instant replay on subsequent clicks.
 
+### Multiplayer Rematch
+- After a natural game-over (empty rack or max passes), the game enters a **post-game state** for `g_mp_timeout` ms (default 60s).
+- In post-game state, the game channel stays alive and `cleanupMultiplayerSession()` is deferred.
+- Clicking **Play Again** calls `initiateRematch()` which:
+  1. Generates a new `gameId`.
+  2. Broadcasts a `rematch` event with the new `gameId` on the current game channel.
+  3. Calls `startMultiplayerGame()` as host.
+- The opponent receives the `rematch` broadcast and joins the same new game.
+- If both click simultaneously, the lexicographically smaller `gameId` wins (deterministic tie-breaking via `g_myRematchGameId < payload.gameId`).
+- Forfeit / disconnect / inactivity still call `cleanupMultiplayerSession()` immediately (no rematch offered).
+- Key state variables: `g_postGameTimer`, `g_myRematchGameId`, `enterPostGameState()`, `leavePostGameState()`, `initiateRematch()`.
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
 ## Beads Issue Tracker
 
