@@ -73,7 +73,7 @@ The `app_key` field uses a simple XOR obfuscation (`_dk`/`_hk` in `multiplayer.j
 - Fetched sessions are cached in `localStorage['cloud_sessions']` for instant replay on subsequent clicks.
 
 ### Multiplayer Rematch
-- After a natural game-over (empty rack or max passes), the game enters a **post-game state** for `g_mp_timeout` ms (default 60s).
+- After a natural game-over (empty rack or max passes), the game enters a **post-game state** for `g_wait_mp_rematch` ms (default 60s).
 - In post-game state, the game channel stays alive and `cleanupMultiplayerSession()` is deferred.
 - Clicking **Play Again** calls `initiateRematch()` which:
   1. Generates a new `gameId`.

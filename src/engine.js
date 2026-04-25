@@ -19,7 +19,8 @@ var g_boardheight = 15;         // How many tiles vertically
 var g_racksize = 8;             // Max number of letters on racks
 var g_animation = 2;            // Animation speed (lower = faster)
 var g_wait = 500;               // Wait time in between moves (in ms)
-var g_mp_timeout = 60000;       // Wait time for multiplayer rematch (in ms)
+var g_wait_mp_idle = 3600000;   // Wait time for multiplayer idling (in ms)
+var g_wait_mp_rematch = 60000;  // Wait time for multiplayer rematch (in ms)
 
 // Don't touch settings below
 var g_board;                    // Letters on board
