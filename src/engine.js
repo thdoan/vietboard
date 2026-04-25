@@ -19,6 +19,7 @@ var g_boardheight = 15;         // How many tiles vertically
 var g_racksize = 8;             // Max number of letters on racks
 var g_animation = 2;            // Animation speed (lower = faster)
 var g_wait = 500;               // Wait time in between moves (in ms)
+var g_mp_timeout = 60000;       // Wait time for multiplayer rematch (in ms)
 
 // Don't touch settings below
 var g_board;                    // Letters on board
@@ -262,7 +263,10 @@ function announceWinner() {
   if (g_oscore > g_pscore) msg = '<h3 class="opponent">' + opponentWinsText;
   else if (g_oscore < g_pscore) msg = '<h3 class="player">' + t('You win!');
   html += msg + '</h3>';
-  g_bui.prompt(html, '<button class="button" onclick="hideModal();g_bui.restart()">' + t('Play Again') + '</button>', 'gameover wide');
+  var playAgainBtn = (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer)
+    ? '<button class="button" onclick="hideModal();initiateRematch()">' + t('Play Again') + '</button>'
+    : '<button class="button" onclick="hideModal();g_bui.restart()">' + t('Play Again') + '</button>';
+  g_bui.prompt(html, playAgainBtn, 'gameover wide');
   var timer = setInterval(function() {
     var tile = el('#gameover td:not(.on)');
     if (tile) el('#gameover td:not(.on)').classList.add('on');

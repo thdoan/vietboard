@@ -458,7 +458,11 @@ function RedipsUI() {
         return confirmRestartLocal();
       }
 
-      g_bui.restart();
+      if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
+        initiateRematch();
+      } else {
+        g_bui.restart();
+      }
       if (g_isMobile) hideGameInfo();
     };
 

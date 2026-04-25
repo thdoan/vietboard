@@ -101,6 +101,8 @@ const BROADCAST_PIPELINE_DEBOUNCE_MS = 100;
 // Timer state
 let g_idleTimer = null;
 let g_idleSeconds = 0;
+let g_postGameTimer = null;
+let g_myRematchGameId = null;
 
 function initSupabase() {
   if (window.supabase) {
@@ -663,6 +665,7 @@ async function startMultiplayerGame(gameId, opponentId, opponentName, isHost) {
   g_opponentId = opponentId || null;
   g_opponentName = opponentName;
   g_isMultiplayer = true;
+  g_myRematchGameId = null;
   localStorage['session_mode'] = 'mp';
 
   await leaveLobby();
@@ -721,6 +724,14 @@ function joinGameChannel(gameId, isHost) {
     .on('broadcast', { event: 'drag' }, (payload) => {
       handleDragBroadcast(payload.payload);
     })
+    .on('broadcast', { event: 'rematch' }, ({ payload }) => {
+      if (!payload || payload.fromId === g_lobbyUserId) return;
+      leavePostGameState();
+      if (g_myRematchGameId && g_myRematchGameId < payload.gameId) {
+        return;
+      }
+      startMultiplayerGame(payload.gameId, g_opponentId, g_opponentName, false);
+    })
     .subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
         if (g_reconnectTimer) {
@@ -766,6 +777,28 @@ function applyNonGameButtonPolicy() {
   if (restartBtn) restartBtn.disabled = false;
 }
 
+function enterPostGameState() {
+  if (g_idleTimer) {
+    clearInterval(g_idleTimer);
+    g_idleTimer = null;
+  }
+  if (g_reconnectTimer) {
+    clearTimeout(g_reconnectTimer);
+    g_reconnectTimer = null;
+  }
+  if (g_postGameTimer) clearTimeout(g_postGameTimer);
+  g_postGameTimer = setTimeout(function() {
+    cleanupMultiplayerSession();
+  }, typeof g_mp_timeout !== 'undefined' ? g_mp_timeout : 60000);
+}
+
+function leavePostGameState() {
+  if (g_postGameTimer) {
+    clearTimeout(g_postGameTimer);
+    g_postGameTimer = null;
+  }
+}
+
 function cleanupMultiplayerSession() {
   if (g_idleTimer) {
     clearInterval(g_idleTimer);
@@ -774,6 +807,10 @@ function cleanupMultiplayerSession() {
   if (g_reconnectTimer) {
     clearTimeout(g_reconnectTimer);
     g_reconnectTimer = null;
+  }
+  if (g_postGameTimer) {
+    clearTimeout(g_postGameTimer);
+    g_postGameTimer = null;
   }
   if (g_channel) {
     g_channel.unsubscribe();
@@ -793,6 +830,7 @@ function cleanupMultiplayerSession() {
   g_lastMoveAt = 0;
   g_lastRemoteDragSeq = -1;
   g_dragSeq = 0;
+  g_myRematchGameId = null;
 
   applyNonGameButtonPolicy();
   updateGameInfoLabels();
@@ -804,6 +842,19 @@ window.confirmRestartMultiplayer = function() {
     '<button class="button secondary" onclick="hideModal()">' + t('Cancel') + '</button>'
       + '&nbsp;&nbsp;<button class="button" onclick="hideModal();finalizeMultiplayerGame(\'forfeit\', true);g_bui.restart();if (g_isMobile) hideGameInfo()">' + t('Forfeit &amp; Restart') + '</button>'
   );
+};
+
+window.initiateRematch = function() {
+  if (!g_isMultiplayer || !g_isGameOver) return;
+  var newGameId = 'game_' + Math.random().toString(36).substr(2, 9);
+  g_myRematchGameId = newGameId;
+  leavePostGameState();
+  sendBroadcastNow('rematch', {
+    gameId: newGameId,
+    fromId: g_lobbyUserId,
+    fromName: g_myName
+  });
+  startMultiplayerGame(newGameId, g_opponentId, g_opponentName, true);
 };
 
 function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
@@ -821,7 +872,12 @@ function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
   } else if (typeof finalizeGameScores === 'function') {
     finalizeGameScores();
   }
-  cleanupMultiplayerSession();
+
+  if (reason === 'passes' || reason === 'ended') {
+    enterPostGameState();
+  } else {
+    cleanupMultiplayerSession();
+  }
 }
 
 function shuffleRackString(rack) {
@@ -1469,9 +1525,17 @@ function onMultiplayerMove(passed) {
 
   g_lastMoveAt = Date.now();
   saveMultiplayerSession();
+
+  if (!passed && rackAfter === '' && g_letpool.length === 0) {
+    g_isGameOver = true;
+    announceWinner();
+    enterPostGameState();
+    return;
+  }
 }
 
 function handleMoveBroadcast(payload) {
+  if (g_isGameOver) return;
   if (payload.type === 'move') {
     if (payload.stateVersion && payload.stateVersion <= g_stateVersion) return;
     g_stateVersion = Math.max(g_stateVersion, payload.stateVersion || 0);
@@ -1583,7 +1647,7 @@ function handleMoveBroadcast(payload) {
         if (payload.rackAfter === '' && g_letpool.length === 0) {
           g_isGameOver = true;
           announceWinner();
-          cleanupMultiplayerSession();
+          enterPostGameState();
           return;
         }
         g_lastMoveAt = Date.now();
@@ -1639,7 +1703,7 @@ function handleMoveBroadcast(payload) {
         if (g_passes >= g_maxpasses) {
           g_isGameOver = true;
           announceWinner();
-          cleanupMultiplayerSession();
+          enterPostGameState();
           return;
         }
       } else {
@@ -1651,7 +1715,7 @@ function handleMoveBroadcast(payload) {
     if (payload.rackAfter === '' && g_letpool.length === 0) {
       g_isGameOver = true;
       announceWinner();
-      cleanupMultiplayerSession();
+      enterPostGameState();
       return;
     }
 
@@ -1719,6 +1783,11 @@ document.addEventListener('appReady', function() {
 
       // Resume only with a recent, valid in-game snapshot.
       if (hasUsableState && (hasRecentSnapshot || hasRecentMove)) {
+        if (mpData.isGameOver) {
+          localStorage.removeItem('session_mp');
+          cleanupMultiplayerSession();
+          return;
+        }
         if (DEBUG) console.log('Resuming multiplayer session for game:', mpData.gameId);
 
         g_gameId = mpData.gameId;
@@ -1813,7 +1882,11 @@ handleGameStateBroadcast = function(payload) {
       g_bui.prompt(t('Opponent has left the game.'));
     }
     announceWinner();
-    cleanupMultiplayerSession();
+    if (payload.reason === 'passes' || payload.reason === 'ended') {
+      enterPostGameState();
+    } else {
+      cleanupMultiplayerSession();
+    }
     return;
   }
 
