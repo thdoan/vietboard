@@ -789,7 +789,7 @@ function enterPostGameState() {
   if (g_postGameTimer) clearTimeout(g_postGameTimer);
   g_postGameTimer = setTimeout(function() {
     cleanupMultiplayerSession();
-  }, typeof g_mp_timeout !== 'undefined' ? g_mp_timeout : 60000);
+  }, typeof g_wait_mp_rematch !== 'undefined' ? g_wait_mp_rematch : 60000);
 }
 
 function leavePostGameState() {
@@ -1204,6 +1204,15 @@ function cleanupDragGhosts() {
   for (var i = 0; i < orphans.length; ++i) {
     orphans[i].remove();
   }
+  // Clear any stuck drop-target highlights on the board
+  var stuckCells = document.querySelectorAll('#board td');
+  for (var j = 0; j < stuckCells.length; ++j) {
+    var s = stuckCells[j].style;
+    if (s.backgroundColor === 'rgb(131, 191, 231)' || s.backgroundColor === '#83bfe7') {
+      s.backgroundColor = '';
+      s.border = '';
+    }
+  }
 }
 
 function renderOpponentRackTileBack(cell) {
@@ -1572,6 +1581,14 @@ function handleMoveBroadcast(payload) {
       // relative (1 = my tiles, 2 = opponent tiles).  The receiver already
       // has its own correct perspective for tiles played so far.
       g_board_empty = payload.boardEmpty;
+      if (!g_board_empty) {
+        var elUp = el('a.link.up');
+        var elDown = el('a.link.down');
+        if (elUp) elUp.classList.add('disabled');
+        if (elDown) elDown.classList.add('disabled');
+        var elLayout = el('bonuseslayout');
+        if (elLayout) elLayout.disabled = true;
+      }
       g_passes = 0; // Reset consecutive passes on valid move
 
       // Mark every newly-placed tile as belonging to the opponent (type 2)
@@ -1916,6 +1933,14 @@ handleGameStateBroadcast = function(payload) {
     g_boardpoints = normalizeBoardMatrix(payload.boardp, 0);
     g_boardtypes = normalizeBoardMatrix(payload.boardt, 0);
     g_board_empty = payload.boardEmpty;
+    if (!g_board_empty) {
+      var elUp = el('a.link.up');
+      var elDown = el('a.link.down');
+      if (elUp) elUp.classList.add('disabled');
+      if (elDown) elDown.classList.add('disabled');
+      var elLayout = el('bonuseslayout');
+      if (elLayout) elLayout.disabled = true;
+    }
     g_pscore = payload.pscore;
     g_oscore = payload.oscore;
     g_letpool = Array.isArray(payload.letpool) ? payload.letpool : (Array.isArray(g_letpool) ? g_letpool : []);
@@ -2000,19 +2025,20 @@ function startIdleTimer() {
     }
 
     // Original idle logic
+    var idleLimit = Math.floor((typeof g_wait_mp_idle !== 'undefined' ? g_wait_mp_idle : 3600000) / 1000);
     g_idleSeconds++;
 
-    if (g_idleSeconds === 240) {
+    if (g_idleSeconds === idleLimit - 60) {
       g_bui.prompt(t('WARNING: Game will end in 1 minute due to inactivity.'));
     }
 
-    if (g_idleSeconds >= 290 && g_idleSeconds <= 300) {
-      var timeLeft = 300 - g_idleSeconds;
+    if (g_idleSeconds >= idleLimit - 10 && g_idleSeconds <= idleLimit) {
+      var timeLeft = idleLimit - g_idleSeconds;
       var statusEl = document.getElementById('status');
       if (statusEl) statusEl.innerHTML = '<span style="color:red">' + t('Game ends in ') + timeLeft + t('s...') + '</span>';
     }
 
-    if (g_idleSeconds >= 300) {
+    if (g_idleSeconds >= idleLimit) {
       clearInterval(g_idleTimer);
       finalizeMultiplayerGame('inactivity_timeout');
       g_bui.prompt(t('Game over due to inactivity.'));
