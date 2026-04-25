@@ -1,3 +1,10 @@
+-- This script does the following:
+-- - Iterates every key in p_scores
+-- - For each array, keeps only entries with a score field, orders by score descending, and limits to 100
+-- - Rebuilds the JSONB object with trimmed arrays
+-- - Upserts the trimmed highscores row
+-- - Upserts all active sessions
+-- - Prunes orphaned sessions after trimming (so sessions dropped from the top 100 are deleted)
 create or replace function sync_highscores_and_sessions(
   p_id text,
   p_scores jsonb,
@@ -15,7 +22,7 @@ declare
   v_arr jsonb;
   v_trimmed_arr jsonb;
 begin
-  if p_app_key != 'THE_DECRYPTED_APP_KEY_VALUE' then
+  if p_app_key != 'DECRYPTED_APP_KEY' then
     raise exception 'Invalid app_key';
   end if;
 
