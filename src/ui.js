@@ -250,20 +250,28 @@ function load(sSession, isHighScore) {
   }
 }
 async function loadHighScore(sKey, nIndex) {
+  if (typeof g_loadingHighScore !== 'undefined' && g_loadingHighScore) return;
+  g_loadingHighScore = true;
+
   if (!localStorage['session']) localStorage['session'] = getSession();
   var entry = g_highscores[sKey] && g_highscores[sKey][nIndex];
-  if (!entry) return;
+  if (!entry) {
+    g_loadingHighScore = false;
+    return;
+  }
 
   // Local session available
   if (entry.session) {
     g_bui.created = false;
     load(entry.session, true);
+    g_loadingHighScore = false;
     return;
   }
 
   var sessionId = entry.sessionId;
   if (!sessionId) {
     g_bui.toast(t('Session not available'), 3000);
+    g_loadingHighScore = false;
     return;
   }
 
@@ -274,6 +282,7 @@ async function loadHighScore(sKey, nIndex) {
     localStorage['highscores'] = JSON.stringify(g_highscores);
     g_bui.created = false;
     load(cache[sessionId], true);
+    g_loadingHighScore = false;
     return;
   }
 
@@ -293,6 +302,7 @@ async function loadHighScore(sKey, nIndex) {
   } else {
     g_bui.toast(t('Unable to load session'), 3000);
   }
+  g_loadingHighScore = false;
 }
 
 // Main UI logic
