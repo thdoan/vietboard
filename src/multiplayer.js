@@ -284,6 +284,47 @@ async function saveGlobalHighScores() {
     return;
   }
   try {
+    // Backfill missing sessionId for legacy scores (one-time migration)
+    var needsLocalSave = false;
+    for (var key in g_highscores) {
+      if (Array.isArray(g_highscores[key])) {
+        g_highscores[key].forEach(function(item) {
+          if (item.session && !item.sessionId) {
+            try {
+              var sessionObj = JSON.parse(item.session);
+              var newId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+              sessionObj.id = newId;
+              item.session = JSON.stringify(sessionObj);
+              item.sessionId = newId;
+              needsLocalSave = true;
+            } catch (e) {
+              // Skip malformed session JSON
+            }
+          }
+        });
+      }
+    }
+    if (needsLocalSave) {
+      localStorage['highscores'] = JSON.stringify(g_highscores);
+    }
+
+    // Enforce max 100 scored entries per Layout-Level combo
+    var needsTrimSave = false;
+    for (var key in g_highscores) {
+      if (Array.isArray(g_highscores[key]) && g_highscores[key].length > 100) {
+        g_highscores[key].sort(typeof gCompareScores === 'function' ? gCompareScores : function(a, b) {
+          var nA = a ? a.score : -99;
+          var nB = b ? b.score : -99;
+          return (nA > nB) ? -1 : ((nA < nB) ? 1 : 0);
+        });
+        g_highscores[key] = g_highscores[key].slice(0, 100);
+        needsTrimSave = true;
+      }
+    }
+    if (needsTrimSave) {
+      localStorage['highscores'] = JSON.stringify(g_highscores);
+    }
+
     var scoresToSave = g_highscores || {};
     var sessionsPayload = [];
     var activeSessionIds = [];
