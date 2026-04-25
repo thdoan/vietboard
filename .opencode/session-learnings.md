@@ -36,6 +36,9 @@
 1. **Perspective-relative state transmitted as absolute**: Always check if a state variable is perspective-dependent before broadcasting.
 2. **Ghost tiles from dropped broadcasts**: Always clean up in multiple places (drop, move, end).
 3. **Single-player logic leaking into multiplayer**: Gate changes on `g_isMultiplayer`.
+4. **Disable logic only on local move, not remote**: The layout dropdown (`bonuseslayout`) and level links were disabled after the local player's move (`onPlayerMove`/`onMultiplayerMove`) but NOT when receiving an opponent's move via `handleMoveBroadcast` or `handleGameStateBroadcast`. Always mirror disable/enable UI state in both local-action and remote-payload handlers.
+5. **CSS rgb() vs hex for inline style comparison**: `element.style.backgroundColor` returns computed rgb() format (e.g. `rgb(131, 191, 231)`), not hex. When checking for stuck hover colors, compare against both forms.
+6. **Async UI handlers need re-entrancy guards**: `loadHighScore()` is async and triggered from an `<a tabindex="1">` onclick. Firefox mobile synthesizes a click after touch, causing double invocation. Guard with a flag (`g_loadingHighScore`) at function entry.
 
 ## Testing Notes
 
