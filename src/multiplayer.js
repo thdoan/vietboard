@@ -626,6 +626,7 @@ async function startMultiplayerGame(gameId, opponentId, opponentName, isHost) {
 
   await leaveLobby();
   hideModal();
+  if (g_isMobile) hideGameInfo();
 
   // Connect to game channel
   joinGameChannel(gameId, isHost);
@@ -760,7 +761,7 @@ window.confirmRestartMultiplayer = function() {
   g_bui.prompt(
     t('Restarting will forfeit this game.'),
     '<button class="button secondary" onclick="hideModal()">' + t('Cancel') + '</button>'
-      + '&nbsp;&nbsp;<button class="button" onclick="hideModal();finalizeMultiplayerGame(\'forfeit\', true);g_bui.restart()">' + t('Forfeit &amp; Restart') + '</button>'
+      + '&nbsp;&nbsp;<button class="button" onclick="hideModal();finalizeMultiplayerGame(\'forfeit\', true);g_bui.restart();if (g_isMobile) hideGameInfo()">' + t('Forfeit &amp; Restart') + '</button>'
   );
 };
 
@@ -817,6 +818,7 @@ function initializeHostGame() {
 
   // Call restart without prompting
   g_bui.restart(true);
+  if (g_isMobile) hideGameInfo();
   g_isMultiplayer = true;
 
   // Wait a tick for letpool to be built, then sync it
@@ -1227,6 +1229,7 @@ function handleGameStateBroadcast(payload) {
   if (payload.type === 'init') {
     // Phase 4: Ensure board is fresh for both players
     if (g_bui) g_bui.restart();
+    if (g_isMobile) hideGameInfo();
     g_isMultiplayer = true; // g_bui.restart() might have cleared it via cleanup
 
     setTimeout(() => {
