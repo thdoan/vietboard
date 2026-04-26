@@ -224,6 +224,36 @@ async function mergeGlobalHighScores(remoteScores) {
   return hasLocalOnlyScores;
 }
 
+async function repairMissingSessions() {
+  if (!window.supabaseClient) return;
+  var repaired = localStorage['repaired_sessions'] ? JSON.parse(localStorage['repaired_sessions']) : {};
+  var needsSave = false;
+  for (var key in g_highscores) {
+    if (Array.isArray(g_highscores[key])) {
+      for (var i = 0; i < g_highscores[key].length; ++i) {
+        var item = g_highscores[key][i];
+        if (item.session && item.sessionId && !repaired[item.sessionId]) {
+          try {
+            await window.supabaseClient.from('sessions').upsert({
+              id: item.sessionId,
+              session_data: item.session,
+              app_key: _dk(_hk)
+            });
+            repaired[item.sessionId] = true;
+            needsSave = true;
+            if (DEBUG) console.log('Repaired session to Supabase:', item.sessionId);
+          } catch (e) {
+            console.warn('Failed to repair session:', item.sessionId, e);
+          }
+        }
+      }
+    }
+  }
+  if (needsSave) {
+    localStorage['repaired_sessions'] = JSON.stringify(repaired);
+  }
+}
+
 async function loadGlobalHighScores() {
   if (DEBUG) console.log('Loading global high scores from Supabase...');
   if (!window.supabaseClient) {
@@ -264,6 +294,9 @@ async function loadGlobalHighScores() {
       if (DEBUG) console.log('Global high scores record is empty or invalid. Syncing local scores...');
       await saveGlobalHighScores();
     }
+
+    // Always run repair in case previous syncs missed sessions
+    await repairMissingSessions();
   } catch (err) {
     console.warn('Unexpected error loading global high scores:', err);
   }
@@ -325,19 +358,7 @@ async function saveGlobalHighScores() {
     }
 
     // One-time repair: ensure all local sessions with sessionId exist in Supabase
-    for (var key in g_highscores) {
-      if (Array.isArray(g_highscores[key])) {
-        g_highscores[key].forEach(function(item) {
-          if (item.session && item.sessionId && window.supabaseClient) {
-            window.supabaseClient.from('sessions').upsert({
-              id: item.sessionId,
-              session_data: item.session,
-              app_key: _dk(_hk)
-            }).catch(function() { /* silently ignore */ });
-          }
-        });
-      }
-    }
+    await repairMissingSessions();
 
     // Enforce max 100 scored entries per Layout-Level combo
     var needsTrimSave = false;
