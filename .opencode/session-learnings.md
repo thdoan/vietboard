@@ -39,6 +39,9 @@
 4. **Disable logic only on local move, not remote**: The layout dropdown (`bonuseslayout`) and level links were disabled after the local player's move (`onPlayerMove`/`onMultiplayerMove`) but NOT when receiving an opponent's move via `handleMoveBroadcast` or `handleGameStateBroadcast`. Always mirror disable/enable UI state in both local-action and remote-payload handlers.
 5. **CSS rgb() vs hex for inline style comparison**: `element.style.backgroundColor` returns computed rgb() format (e.g. `rgb(131, 191, 231)`), not hex. When checking for stuck hover colors, compare against both forms.
 6. **Async UI handlers need re-entrancy guards**: `loadHighScore()` is async and triggered from an `<a tabindex="1">` onclick. Firefox mobile synthesizes a click after touch, causing double invocation. Guard with a flag (`g_loadingHighScore`) at function entry.
+7. **Supabase `.single()` throws PGRST116 for 0 rows**: Use `.maybeSingle()` when querying sessions that may not exist (e.g., backfilled IDs never upserted to Supabase). Returns `null` gracefully instead of HTTP 406.
+8. **Backfill migrations must sync to both localStorage AND Supabase**: The original backfill generated `sessionId` locally but never wrote to the `sessions` table. This caused cloud replay to fail on any device/browser that lost the full `entry.session` JSON (Firefox Android is stricter with localStorage eviction). Always upsert backfilled data to Supabase.
+9. **Toast deduplication prevents visual stacking**: When showing sequential toasts (e.g., "Loading..." → "Unable to load session"), reuse the visible toast `<div>` instead of creating a new one. Check `container.querySelector('.toast-message.show')`, update `textContent`, clear the old timeout, and set a new one.
 
 ## Testing Notes
 
