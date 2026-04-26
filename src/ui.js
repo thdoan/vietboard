@@ -289,10 +289,10 @@ async function loadHighScore(sKey, nIndex) {
   // Fetch from Supabase
   var toast = g_bui.toast(t('Loading...'), 0);
   var sessionData = await loadSessionFromCloud(sessionId);
-  toast.classList.remove('show');
-  toast.classList.add('hide');
 
   if (sessionData) {
+    toast.classList.remove('show');
+    toast.classList.add('hide');
     cache[sessionId] = sessionData;
     localStorage['cloud_sessions'] = JSON.stringify(cache);
     entry.session = sessionData;
@@ -300,7 +300,13 @@ async function loadHighScore(sKey, nIndex) {
     g_bui.created = false;
     load(sessionData, true);
   } else {
-    g_bui.toast(t('Unable to load session'), 3000);
+    // Reuse the same toast div to avoid stacking
+    toast.textContent = t('Unable to load session');
+    if (toast._toastTimeout) clearTimeout(toast._toastTimeout);
+    toast._toastTimeout = setTimeout(function() {
+      toast.classList.remove('show');
+      toast.classList.add('hide');
+    }, 3000);
   }
   g_loadingHighScore = false;
 }
