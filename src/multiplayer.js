@@ -15,6 +15,11 @@ function _dk(s) {
   return r;
 }
 
+// Defensive fallback: ensure t() exists before translation script loads
+if (typeof t !== 'function') {
+  window.t = function(str) { return str; };
+}
+
 // We will load the Supabase client via unpkg in index.html
 window.supabaseClient = null;
 
