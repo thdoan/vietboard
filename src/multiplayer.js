@@ -204,7 +204,7 @@ async function mergeGlobalHighScores(remoteScores) {
         player: rawName,
         playerId: playerId,
         score: score,
-        session: item.session || '',
+        session: item.session || undefined,
         sessionId: item.sessionId || '',
         date: item.date || ''
       });
