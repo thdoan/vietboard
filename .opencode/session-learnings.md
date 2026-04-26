@@ -42,6 +42,7 @@
 7. **Supabase `.single()` throws PGRST116 for 0 rows**: Use `.maybeSingle()` when querying sessions that may not exist (e.g., backfilled IDs never upserted to Supabase). Returns `null` gracefully instead of HTTP 406.
 8. **Backfill migrations must sync to both localStorage AND Supabase**: The original backfill generated `sessionId` locally but never wrote to the `sessions` table. This caused cloud replay to fail on any device/browser that lost the full `entry.session` JSON (Firefox Android is stricter with localStorage eviction). Always upsert backfilled data to Supabase.
 9. **Toast deduplication prevents visual stacking**: When showing sequential toasts (e.g., "Loading..." → "Unable to load session"), reuse the visible toast `<div>` instead of creating a new one. Check `container.querySelector('.toast-message.show')`, update `textContent`, clear the old timeout, and set a new one.
+10. **Beware `|| ''` on optional data that controls sync logic**: In `mergeGlobalHighScores()`, `session: item.session || ''` turned `undefined` (no session from Supabase) into `''` (empty string). Later, `saveGlobalHighScores()` checks `if (item.session)` to decide whether to sync to the `sessions` table. An empty string is falsy, so once merged, the session was permanently blocked from syncing. **Fix**: Use `|| undefined` to preserve the distinction between "no data" and "empty data".
 
 ## Testing Notes
 
