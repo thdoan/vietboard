@@ -29,6 +29,7 @@ window.g_isSupported = Array.prototype.indexOf
   var sLang = localStorage['lang']==='vi' ? 'vi' : 'en';
   var script = document.createElement('script');
   script.src = 'lang/' + sLang + '_translate.js';
+  script.async = false;
   document.head.appendChild(script);
   document.documentElement.lang = sLang; // HTML5 compliance
   if (!g_isSupported) return;
