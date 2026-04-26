@@ -271,7 +271,7 @@ async function loadSessionFromCloud(sessionId) {
       .from('sessions')
       .select('session_data')
       .eq('id', sessionId)
-      .single();
+      .maybeSingle();
     if (error) throw error;
     return data ? data.session_data : null;
   } catch (err) {
@@ -299,6 +299,15 @@ async function saveGlobalHighScores() {
               item.session = JSON.stringify(sessionObj);
               item.sessionId = newId;
               needsLocalSave = true;
+              if (window.supabaseClient) {
+                window.supabaseClient.from('sessions').upsert({
+                  id: newId,
+                  session_data: item.session,
+                  app_key: _dk(_hk)
+                }).catch(function(e) {
+                  console.warn('Failed to backfill session to Supabase:', e);
+                });
+              }
             } catch (e) {
               // Skip malformed session JSON
             }
@@ -308,6 +317,21 @@ async function saveGlobalHighScores() {
     }
     if (needsLocalSave) {
       localStorage['highscores'] = JSON.stringify(g_highscores);
+    }
+
+    // One-time repair: ensure all local sessions with sessionId exist in Supabase
+    for (var key in g_highscores) {
+      if (Array.isArray(g_highscores[key])) {
+        g_highscores[key].forEach(function(item) {
+          if (item.session && item.sessionId && window.supabaseClient) {
+            window.supabaseClient.from('sessions').upsert({
+              id: item.sessionId,
+              session_data: item.session,
+              app_key: _dk(_hk)
+            }).catch(function() { /* silently ignore */ });
+          }
+        });
+      }
     }
 
     // Enforce max 100 scored entries per Layout-Level combo

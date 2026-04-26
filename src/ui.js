@@ -1243,6 +1243,21 @@ function RedipsUI() {
     var container = getToastContainer();
     if (!container) return;
 
+    // Check for existing visible toast to reuse instead of stacking
+    var existing = container.querySelector('.toast-message.show');
+    if (existing) {
+      existing.textContent = msg;
+      existing.classList.remove('hide');
+      if (existing._toastTimeout) clearTimeout(existing._toastTimeout);
+      if (duration !== 0) {
+        existing._toastTimeout = setTimeout(function() {
+          existing.classList.remove('show');
+          existing.classList.add('hide');
+        }, duration || 4000);
+      }
+      return existing;
+    }
+
     var toast = document.createElement('div');
     toast.className = 'toast-message';
     toast.textContent = msg;
