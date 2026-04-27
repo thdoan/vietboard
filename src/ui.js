@@ -1563,7 +1563,23 @@ function RedipsUI() {
         btn.textContent = emojis[i];
         btn.onclick = (function(emoji) {
           return function() {
-            if (typeof sendEmojiReaction === 'function') sendEmojiReaction(emoji);
+            if (typeof g_isMobile !== 'undefined' && g_isMobile) {
+              if (!document.documentElement.classList.contains('gameinfo')) {
+                if (typeof sendEmojiReaction === 'function') sendEmojiReaction(emoji);
+              } else {
+                var board = document.getElementById('board');
+                if (board) {
+                  var onTransitionEnd = function(e) {
+                    board.removeEventListener('transitionend', onTransitionEnd);
+                    if (typeof sendEmojiReaction === 'function') sendEmojiReaction(emoji);
+                  };
+                  board.addEventListener('transitionend', onTransitionEnd);
+                }
+                hideGameInfo();
+              }
+            } else {
+              if (typeof sendEmojiReaction === 'function') sendEmojiReaction(emoji);
+            }
           };
         })(emojis[i]);
         grid.appendChild(btn);
