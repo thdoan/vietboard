@@ -108,6 +108,8 @@ let g_idleTimer = null;
 let g_idleSeconds = 0;
 let g_postGameTimer = null;
 let g_myRematchGameId = null;
+let g_mpGameEndReason = null;
+let g_lastEmojiSentAt = 0;
 
 function initSupabase() {
   if (window.supabase) {
@@ -485,6 +487,8 @@ window.showLobby = function() {
   leaveLobby().then(() => joinLobbyChannel());
 }
 
+if (typeof g_bui !== 'undefined') g_bui.showLobby = window.showLobby;
+
 window.updatePlayerName = async function(newName) {
   var trimmed = (newName || (t('Player') + '_' + Math.floor(Math.random() * 10000))).substring(0, 32);
   g_myName = trimmed;
@@ -782,6 +786,9 @@ function joinGameChannel(gameId, isHost) {
       }
       startMultiplayerGame(payload.gameId, g_opponentId, g_opponentName, false);
     })
+    .on('broadcast', { event: 'reaction' }, ({ payload }) => {
+      handleReactionBroadcast(payload);
+    })
     .subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
         if (g_reconnectTimer) {
@@ -840,6 +847,8 @@ function enterPostGameState() {
   g_postGameTimer = setTimeout(function() {
     cleanupMultiplayerSession();
   }, typeof g_wait_mp_rematch !== 'undefined' ? g_wait_mp_rematch : 60000);
+  if (typeof g_bui !== 'undefined' && g_bui.hideEmojiPicker) g_bui.hideEmojiPicker();
+  g_lastEmojiSentAt = 0;
 }
 
 function leavePostGameState() {
@@ -881,21 +890,56 @@ function cleanupMultiplayerSession() {
   g_lastRemoteDragSeq = -1;
   g_dragSeq = 0;
   g_myRematchGameId = null;
+  g_mpGameEndReason = null;
+  g_lastEmojiSentAt = 0;
+
+  if (typeof g_bui !== 'undefined' && g_bui.hideEmojiPicker) g_bui.hideEmojiPicker();
 
   applyNonGameButtonPolicy();
   updateGameInfoLabels();
+}
+
+function sendEmojiReaction(emoji) {
+  if (!g_isMultiplayer || g_isGameOver) return;
+  var now = Date.now();
+  if (now - g_lastEmojiSentAt < 5000) {
+    g_bui.prompt(t('Please wait'));
+    return;
+  }
+  g_lastEmojiSentAt = now;
+  if (typeof g_bui !== 'undefined' && g_bui.displayEmojiReaction) {
+    g_bui.displayEmojiReaction(emoji, true);
+  }
+  broadcastGameState({
+    type: 'reaction',
+    emoji: emoji,
+    fromId: g_lobbyUserId
+  });
+}
+
+function handleReactionBroadcast(payload) {
+  if (!payload || payload.fromId === g_lobbyUserId) return;
+  if (typeof g_bui !== 'undefined' && g_bui.displayEmojiReaction) {
+    g_bui.displayEmojiReaction(payload.emoji, false);
+  }
 }
 
 window.confirmRestartMultiplayer = function() {
   g_bui.prompt(
     t('Restarting will forfeit this game.'),
     '<button class="button secondary" onclick="hideModal()">' + t('Cancel') + '</button>'
-      + '&nbsp;&nbsp;<button class="button" onclick="hideModal();finalizeMultiplayerGame(\'forfeit\', true);g_bui.restart();if (g_isMobile) hideGameInfo()">' + t('Forfeit &amp; Restart') + '</button>'
+      + '&nbsp;&nbsp;<button class="button" onclick="hideModal();finalizeMultiplayerGame(\'forfeit\', true);if (g_isMobile) hideGameInfo()">' + t('Forfeit &amp; Restart') + '</button>'
   );
 };
 
 window.initiateRematch = function() {
   if (!g_isMultiplayer || !g_isGameOver) return;
+  if (!g_opponentPresenceState) {
+    cleanupMultiplayerSession();
+    g_bui.restart();
+    if (g_isMobile) hideGameInfo();
+    return;
+  }
   var newGameId = 'game_' + Math.random().toString(36).substr(2, 9);
   g_myRematchGameId = newGameId;
   leavePostGameState();
@@ -910,6 +954,7 @@ window.initiateRematch = function() {
 function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
   if (!g_isMultiplayer || g_isGameOver) return;
   g_isGameOver = true;
+  g_mpGameEndReason = reason || 'ended';
 
   broadcastGameState({
     type: 'game_ended',
@@ -1422,6 +1467,8 @@ function handleGameStateBroadcast(payload) {
         }
       });
     }
+  } else if (payload.type === 'game_ended') {
+    g_mpGameEndReason = payload.reason || 'ended';
   }
 }
 
@@ -2127,9 +2174,25 @@ function updateGameInfoLabels() {
     if (lblTotal) lblTotal.innerHTML = t('Computer&rsquo;s total score:');
   }
 
-  // Level is only relevant in single-player; hide the row in multiplayer
+  // Level is only relevant in single-player; disable the row in multiplayer
   var levelRow = document.querySelector('tr.level');
-  if (levelRow) levelRow.style.display = g_isMultiplayer ? 'none' : '';
+  if (levelRow) {
+    if (g_isMultiplayer) {
+      levelRow.setAttribute('aria-disabled', 'true');
+      levelRow.style.opacity = '0.4';
+      levelRow.style.pointerEvents = 'none';
+    } else {
+      levelRow.removeAttribute('aria-disabled');
+      levelRow.style.opacity = '';
+      levelRow.style.pointerEvents = '';
+    }
+  }
+
+  // Emoji reaction button: enabled only during active multiplayer game
+  var reactBtn = document.getElementById('react');
+  if (reactBtn) {
+    reactBtn.disabled = !(g_isMultiplayer && !g_isGameOver && g_opponentName);
+  }
 }
 
 function syncHighScoresMultiplayer() {

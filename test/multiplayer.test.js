@@ -164,8 +164,8 @@ async function runTests() {
     await Promise.all([
       pageA.waitForSelector('#lobby'),
       pageB.waitForSelector('#lobby'),
-      pageA.waitForFunction(() => typeof window.showLobby === 'function', { timeout: 20000 }),
-      pageB.waitForFunction(() => typeof window.showLobby === 'function', { timeout: 20000 })
+      pageA.waitForFunction(() => typeof g_bui.showLobby === 'function', { timeout: 20000 }),
+      pageB.waitForFunction(() => typeof g_bui.showLobby === 'function', { timeout: 20000 })
     ]);
 
     const pageAName = await pageA.evaluate(() => localStorage.getItem('player_name'));
@@ -173,8 +173,8 @@ async function runTests() {
     console.log('TEST: pageAName', pageAName, 'expected', nameA);
     console.log('TEST: pageBName', pageBName, 'expected', nameB);
 
-    await pageA.evaluate(() => window.showLobby());
-    await pageB.evaluate(() => window.showLobby());
+    await pageA.evaluate(() => g_bui.showLobby());
+    await pageB.evaluate(() => g_bui.showLobby());
 
     const pageAStatePre = await pageA.evaluate(() => (g_channel && typeof g_channel.presenceState === 'function') ? JSON.stringify(g_channel.presenceState()) : null);
     const pageBStatePre = await pageB.evaluate(() => (g_channel && typeof g_channel.presenceState === 'function') ? JSON.stringify(g_channel.presenceState()) : null);
@@ -219,7 +219,7 @@ async function runTests() {
     const pageANamesAfterLeave = await pageA.evaluate(() => Array.from(document.querySelectorAll('#lobby-players .lobby-player strong')).map(el => el.innerText.trim()));
     if (pageANamesAfterLeave.includes(nameB)) throw new Error('Player A still sees player B after leave');
 
-    await pageB.evaluate(() => window.showLobby());
+    await pageB.evaluate(() => g_bui.showLobby());
     await waitForLobbyNames(pageA, [nameB]);
     await waitForLobbyNames(pageB, [newNameA]);
 

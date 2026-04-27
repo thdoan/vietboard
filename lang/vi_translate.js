@@ -59,6 +59,7 @@ var translation_map = {
   'Opponent&rsquo;s turn': 'Lượt đối thủ',
   'Pass': 'Bỏ Lượt',
   'Play Again': 'Chơi Lại',
+  'Play Computer': 'Chơi với Máy tính',
   'Play': 'Chơi',
   'Player': 'Người chơi',
   'Please wait': 'Vui lòng đợi',

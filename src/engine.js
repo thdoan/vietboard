@@ -128,6 +128,7 @@ function init(iddiv, skipRacks) {
   g_passes = 0;
   g_board_empty = true;
   g_isGameOver = false;
+  if (typeof g_mpGameEndReason !== 'undefined') g_mpGameEndReason = null;
   g_history = [];
 
   // Put all the letters in the pool
@@ -264,9 +265,18 @@ function announceWinner() {
   if (g_oscore > g_pscore) msg = '<h3 class="opponent">' + opponentWinsText;
   else if (g_oscore < g_pscore) msg = '<h3 class="player">' + t('You win!');
   html += msg + '</h3>';
-  var playAgainBtn = (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer)
-    ? '<button class="button" onclick="hideModal();initiateRematch()">' + t('Play Again') + '</button>'
-    : '<button class="button" onclick="hideModal();g_bui.restart()">' + t('Play Again') + '</button>';
+  var playAgainBtn;
+  if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
+    var isForfeit = (typeof g_mpGameEndReason !== 'undefined') &&
+      (g_mpGameEndReason === 'forfeit' || g_mpGameEndReason === 'disconnect_forfeit' || g_mpGameEndReason === 'inactivity_timeout');
+    if (isForfeit) {
+      playAgainBtn = '<button class="button" onclick="hideModal();cleanupMultiplayerSession();g_bui.restart();">' + t('Play Computer') + '</button>';
+    } else {
+      playAgainBtn = '<button class="button" onclick="hideModal();initiateRematch()">' + t('Play Again') + '</button>';
+    }
+  } else {
+    playAgainBtn = '<button class="button" onclick="hideModal();g_bui.restart()">' + t('Play Again') + '</button>';
+  }
   g_bui.prompt(html, playAgainBtn, 'gameover wide');
   var timer = setInterval(function() {
     var tile = el('#gameover td:not(.on)');

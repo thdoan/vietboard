@@ -1235,3 +1235,60 @@ html.mobile #modal-container.wide {
 html.mobile #modal-content {
   padding: 4%;
 }
+
+#react:disabled {
+  opacity: 0.4;
+}
+
+#emoji-picker {
+  position: absolute;
+  z-index: 100;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  box-shadow: 0 4px 12px rgb(var(--rgb-black) / 0.15);
+  padding: 8px;
+  width: 240px;
+}
+
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.emoji-choice {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 22px;
+  padding: 4px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.emoji-choice:hover {
+  background: rgb(var(--rgb-highlight));
+}
+
+.emoji-reaction {
+  position: fixed;
+  pointer-events: none;
+  font-size: 32px;
+  z-index: 200;
+  opacity: 1;
+  animation: emojiFloat 4.5s ease-out forwards;
+}
+
+@keyframes emojiFloat {
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-120px) scale(1.4);
+    opacity: 0;
+  }
+}

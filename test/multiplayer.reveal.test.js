@@ -107,8 +107,8 @@ async function runTests() {
     await pageB.evaluate(() => window.alert = (msg) => console.log('ALERT B:', msg));
 
     // Join lobby
-    await pageA.evaluate(() => window.showLobby());
-    await pageB.evaluate(() => window.showLobby());
+    await pageA.evaluate(() => g_bui.showLobby());
+    await pageB.evaluate(() => g_bui.showLobby());
 
     // Wait for B to appear in A's lobby
     await pageA.waitForFunction(() => {

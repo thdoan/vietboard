@@ -98,13 +98,13 @@ async function run() {
   ]);
 
   await Promise.all([
-    pageA.waitForFunction(() => typeof window.showLobby === 'function', { timeout: 20000 }),
-    pageB.waitForFunction(() => typeof window.showLobby === 'function', { timeout: 20000 })
+    pageA.waitForFunction(() => typeof g_bui.showLobby === 'function', { timeout: 20000 }),
+    pageB.waitForFunction(() => typeof g_bui.showLobby === 'function', { timeout: 20000 })
   ]);
 
   await Promise.all([
-    pageA.evaluate(() => window.showLobby()),
-    pageB.evaluate(() => window.showLobby())
+    pageA.evaluate(() => g_bui.showLobby()),
+    pageB.evaluate(() => g_bui.showLobby())
   ]);
 
   await pageA.waitForSelector('#lobby-name', { timeout: 20000 });

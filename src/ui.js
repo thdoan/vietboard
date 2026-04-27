@@ -462,7 +462,7 @@ function RedipsUI() {
     g_cache['html'].miscBtns = `
 <div class="button-container icons">
   <!-- Icons source: https://www.streamlinehq.com/ -->
-  <button id="lobby" class="icon" title="${t('Multiplayer Lobby')}" onclick="window.showLobby()">
+  <button id="lobby" class="icon" title="${t('Multiplayer Lobby')}" onclick="g_bui.showLobby()">
     <svg fill="none" viewBox="0 0 24 24">
       <path fill="#c2f3ff" d="M18.2181 7.19451c0.0004 0.81911 -0.1606 1.63028 -0.4737 2.38719 -0.3131 0.7569 -0.7723 1.4447 -1.3511 2.0242 -0.579 0.5794 -1.2664 1.0392 -2.023 1.3531 -0.7566 0.3137 -1.5676 0.4755 -2.3868 0.4758 -1.6623 -0.0277 -3.24635 -0.7107 -4.40752 -1.9006 -1.16116 -1.1898 -1.80543 -2.79008 -1.79259 -4.45256 0.00064 -1.58962 0.62386 -3.11578 1.73613 -4.25147 1.11226 -1.13568 2.62508 -1.79056 4.21438 -1.82432 0.0899 -0.00574 0.1788 -0.00574 0.2668 -0.00574 0.816 -0.004803 1.6247 0.15198 2.3797 0.46129 0.7549 0.30932 1.4412 0.76504 2.0193 1.3409 0.578 0.57586 1.0363 1.26045 1.3484 2.0143 0.312 0.75384 0.4718 1.56201 0.47 2.37791Z" stroke-width="1"></path>
       <path fill="#66e1ff" d="M11.9835 9.97699c-1.3592 -0.01698 -2.67587 -0.47651 -3.75048 -1.30896 -1.07462 -0.83246 -1.84863 -1.99248 -2.20479 -3.30432 -0.16254 0.55947 -0.24498 1.13913 -0.24487 1.72173 -0.01182 1.66182 0.63289 3.26116 1.79395 4.45006 1.16106 1.1891 2.74449 1.8716 4.40619 1.8993 0.9672 0.0007 1.9213 -0.2239 2.7867 -0.6559 0.8654 -0.432 1.6183 -1.0595 2.1992 -1.8329 0.5808 -0.7733 0.9738 -1.67129 1.1475 -2.62277 0.1737 -0.95149 0.1236 -1.93035 -0.1466 -2.85909 -0.3731 1.29991 -1.159 2.44317 -2.239 3.25724 -1.0799 0.81407 -2.3954 1.25478 -3.7478 1.25561Z" stroke-width="1"></path>
@@ -1629,13 +1629,8 @@ function RedipsUI() {
   */
 
   self.wordInfo = function(word) {
-    if (!window.g_defs) {
-      alert(t('Word definitions not enabled.'));
-      return;
-    }
-    if (word in g_defs) {
-      // Try to get definition locally first
-      var html = '<div id="wordresult"><div style="text-align:center"><h1>' + word + '</h1></div>';
+    if (typeof g_defs !== 'undefined' && g_defs[word]) {
+      var html = '<div id="word-definition">';
       if (typeof g_defs[word] === 'string') {
         html += '<div class="phanloai">&nbsp;</div>' + g_defs[word];
       } else {
@@ -1664,6 +1659,79 @@ function RedipsUI() {
         'event_label': 'Found'
       });
     }
+  };
+
+  self.showLobby = function() {
+    if (typeof window.showLobby === 'function') window.showLobby();
+  };
+
+  self.showEmojiPicker = function() {
+    var picker = document.getElementById('emoji-picker');
+    if (picker) {
+      picker.remove();
+      return;
+    }
+
+    fetch('lang/emojis.json')
+      .then(function(res) { return res.json(); })
+      .then(function(emojis) {
+        picker = document.createElement('div');
+        picker.id = 'emoji-picker';
+        var grid = document.createElement('div');
+        grid.className = 'emoji-grid';
+        emojis.forEach(function(emoji) {
+          var btn = document.createElement('button');
+          btn.className = 'emoji-choice';
+          btn.textContent = emoji;
+          btn.onclick = function(e) {
+            e.stopPropagation();
+            if (typeof sendEmojiReaction === 'function') sendEmojiReaction(emoji);
+            self.hideEmojiPicker();
+          };
+          grid.appendChild(btn);
+        });
+        picker.appendChild(grid);
+
+        var reactBtn = document.getElementById('react');
+        var rect = reactBtn.getBoundingClientRect();
+        picker.style.left = rect.left + 'px';
+        picker.style.top = (rect.bottom + 4) + 'px';
+        document.body.appendChild(picker);
+
+        var outsideClick = function(e) {
+          if (!picker.contains(e.target) && !reactBtn.contains(e.target)) {
+            self.hideEmojiPicker();
+            document.removeEventListener('click', outsideClick);
+          }
+        };
+        setTimeout(function() {
+          document.addEventListener('click', outsideClick);
+        }, 0);
+      })
+      .catch(function(err) {
+        if (DEBUG) console.warn('Failed to load emojis:', err);
+      });
+  };
+
+  self.hideEmojiPicker = function() {
+    var picker = document.getElementById('emoji-picker');
+    if (picker) picker.remove();
+  };
+
+  self.displayEmojiReaction = function(emoji, isLocal) {
+    var rackId = isLocal ? 'pr' : 'or';
+    var rack = document.getElementById(rackId);
+    if (!rack) return;
+    var rect = rack.getBoundingClientRect();
+    var el = document.createElement('div');
+    el.className = 'emoji-reaction';
+    el.textContent = emoji;
+    el.style.left = (rect.left + rect.width / 2 - 16) + 'px';
+    el.style.top = rect.top + 'px';
+    document.body.appendChild(el);
+    setTimeout(function() {
+      if (el.parentNode) el.parentNode.removeChild(el);
+    }, 4500);
   };
 
 }
