@@ -108,8 +108,8 @@ let g_idleTimer = null;
 let g_idleSeconds = 0;
 let g_postGameTimer = null;
 let g_myRematchGameId = null;
-let g_mpGameEndReason = null;
 let g_lastEmojiSentAt = 0;
+let g_mpGameEndReason = '';
 
 function initSupabase() {
   if (window.supabase) {
@@ -448,47 +448,6 @@ if (document.readyState === 'complete' && document.documentElement.classList.con
 // LOBBY & MATCHMAKING
 // -----------------------------------------------------------------------------
 
-window.showLobby = function() {
-  // Save name
-  localStorage.setItem('player_name', g_myName);
-
-  const html = `
-<h2>${t('Multiplayer Lobby')}</h2>
-<table>
-  <tr class="header">
-    <td><label for="lobby-name">${t('Your name')}</label></td>
-    <td class="input"><input id="lobby-name" value="${g_myName}" maxlength="32"></td>
-  </tr>
-</table>
-<p><strong>${t('Click a player to start a game:')}</strong></p>
-<div id="lobby-players" class="table-container">
-  <em>${t('Loading...')}</em>
-</div>
-`;
-
-  g_bui.prompt(html, `<button class="button" onclick="leaveLobby();hideModal()">${t('Close')}</button>`, 'lobby-modal wide');
-
-  const lobbyNameInput = document.getElementById('lobby-name');
-  if (lobbyNameInput) {
-    lobbyNameInput.addEventListener('keyup', function(event) {
-      if (event.key === 'Enter') {
-        updatePlayerName(this.value);
-      }
-    });
-
-    lobbyNameInput.addEventListener('blur', function() {
-      if (this.value !== g_myName) {
-        updatePlayerName(this.value);
-      }
-    });
-  }
-
-  // Ensure clean state - leave any existing channel before joining lobby
-  leaveLobby().then(() => joinLobbyChannel());
-}
-
-if (typeof g_bui !== 'undefined') g_bui.showLobby = window.showLobby;
-
 window.updatePlayerName = async function(newName) {
   var trimmed = (newName || (t('Player') + '_' + Math.floor(Math.random() * 10000))).substring(0, 32);
   g_myName = trimmed;
@@ -720,6 +679,7 @@ async function startMultiplayerGame(gameId, opponentId, opponentName, isHost) {
   g_opponentName = opponentName;
   g_isMultiplayer = true;
   g_myRematchGameId = null;
+  g_lastEmojiSentAt = 0;
   localStorage['session_mode'] = 'mp';
 
   await leaveLobby();
@@ -834,6 +794,31 @@ function applyNonGameButtonPolicy() {
   if (restartBtn) restartBtn.disabled = false;
 }
 
+function sendEmojiReaction(emoji) {
+  if (!g_isMultiplayer || !g_channel) return;
+  var now = Date.now();
+  if (now - g_lastEmojiSentAt < 5000) {
+    var wait = Math.ceil((5000 - (now - g_lastEmojiSentAt)) / 1000);
+    g_bui.toast(t('Please wait') + ' ' + wait + 's...', 2000);
+    return;
+  }
+  g_lastEmojiSentAt = now;
+  if (g_bui && g_bui.hideEmojiPicker) g_bui.hideEmojiPicker();
+  if (g_bui && g_bui.displayEmojiReaction) g_bui.displayEmojiReaction(emoji, true);
+  sendBroadcastNow('reaction', {
+    emoji: emoji,
+    fromId: g_lobbyUserId,
+    fromName: g_myName
+  });
+}
+
+function handleReactionBroadcast(payload) {
+  if (!payload || payload.fromId === g_lobbyUserId) return;
+  if (g_bui && g_bui.displayEmojiReaction) {
+    g_bui.displayEmojiReaction(payload.emoji, false);
+  }
+}
+
 function enterPostGameState() {
   if (g_idleTimer) {
     clearInterval(g_idleTimer);
@@ -844,11 +829,10 @@ function enterPostGameState() {
     g_reconnectTimer = null;
   }
   if (g_postGameTimer) clearTimeout(g_postGameTimer);
+  if (g_bui && g_bui.hideEmojiPicker) g_bui.hideEmojiPicker();
   g_postGameTimer = setTimeout(function() {
     cleanupMultiplayerSession();
   }, typeof g_wait_mp_rematch !== 'undefined' ? g_wait_mp_rematch : 60000);
-  if (typeof g_bui !== 'undefined' && g_bui.hideEmojiPicker) g_bui.hideEmojiPicker();
-  g_lastEmojiSentAt = 0;
 }
 
 function leavePostGameState() {
@@ -890,56 +874,31 @@ function cleanupMultiplayerSession() {
   g_lastRemoteDragSeq = -1;
   g_dragSeq = 0;
   g_myRematchGameId = null;
-  g_mpGameEndReason = null;
   g_lastEmojiSentAt = 0;
+  g_mpGameEndReason = '';
 
-  if (typeof g_bui !== 'undefined' && g_bui.hideEmojiPicker) g_bui.hideEmojiPicker();
-
+  if (g_bui && g_bui.hideEmojiPicker) g_bui.hideEmojiPicker();
   applyNonGameButtonPolicy();
   updateGameInfoLabels();
-}
-
-function sendEmojiReaction(emoji) {
-  if (!g_isMultiplayer || g_isGameOver) return;
-  var now = Date.now();
-  if (now - g_lastEmojiSentAt < 5000) {
-    g_bui.prompt(t('Please wait'));
-    return;
-  }
-  g_lastEmojiSentAt = now;
-  if (typeof g_bui !== 'undefined' && g_bui.displayEmojiReaction) {
-    g_bui.displayEmojiReaction(emoji, true);
-  }
-  broadcastGameState({
-    type: 'reaction',
-    emoji: emoji,
-    fromId: g_lobbyUserId
-  });
-}
-
-function handleReactionBroadcast(payload) {
-  if (!payload || payload.fromId === g_lobbyUserId) return;
-  if (typeof g_bui !== 'undefined' && g_bui.displayEmojiReaction) {
-    g_bui.displayEmojiReaction(payload.emoji, false);
-  }
 }
 
 window.confirmRestartMultiplayer = function() {
   g_bui.prompt(
     t('Restarting will forfeit this game.'),
     '<button class="button secondary" onclick="hideModal()">' + t('Cancel') + '</button>'
-      + '&nbsp;&nbsp;<button class="button" onclick="hideModal();finalizeMultiplayerGame(\'forfeit\', true);if (g_isMobile) hideGameInfo()">' + t('Forfeit &amp; Restart') + '</button>'
+      + '&nbsp;&nbsp;<button class="button" onclick="hideModal();finalizeMultiplayerGame(\'forfeit\', true);g_bui.restart();if (g_isMobile) hideGameInfo()">' + t('Forfeit &amp; Restart') + '</button>'
   );
 };
 
 window.initiateRematch = function() {
-  if (!g_isMultiplayer || !g_isGameOver) return;
-  if (!g_opponentPresenceState) {
-    cleanupMultiplayerSession();
+  if (!g_isGameOver) return;
+
+  // If opponent is gone (forfeit / disconnect), fall back to single-player
+  if (!g_isMultiplayer) {
     g_bui.restart();
-    if (g_isMobile) hideGameInfo();
     return;
   }
+
   var newGameId = 'game_' + Math.random().toString(36).substr(2, 9);
   g_myRematchGameId = newGameId;
   leavePostGameState();
@@ -954,7 +913,7 @@ window.initiateRematch = function() {
 function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
   if (!g_isMultiplayer || g_isGameOver) return;
   g_isGameOver = true;
-  g_mpGameEndReason = reason || 'ended';
+  g_mpGameEndReason = reason || '';
 
   broadcastGameState({
     type: 'game_ended',
@@ -1467,8 +1426,6 @@ function handleGameStateBroadcast(payload) {
         }
       });
     }
-  } else if (payload.type === 'game_ended') {
-    g_mpGameEndReason = payload.reason || 'ended';
   }
 }
 
@@ -1992,6 +1949,7 @@ handleGameStateBroadcast = function(payload) {
   if (payload.type === 'game_ended') {
     if (g_isGameOver) return;
     g_isGameOver = true;
+    g_mpGameEndReason = payload.reason || '';
     if (payload.reason === 'forfeit') {
       g_bui.prompt(t('Opponent has left the game.'));
     }
@@ -2174,24 +2132,28 @@ function updateGameInfoLabels() {
     if (lblTotal) lblTotal.innerHTML = t('Computer&rsquo;s total score:');
   }
 
-  // Level is only relevant in single-player; disable the row in multiplayer
+  // Level is only relevant in single-player; disable controls in multiplayer
   var levelRow = document.querySelector('tr.level');
   if (levelRow) {
-    if (g_isMultiplayer) {
-      levelRow.setAttribute('aria-disabled', 'true');
-      levelRow.style.opacity = '0.4';
-      levelRow.style.pointerEvents = 'none';
-    } else {
-      levelRow.removeAttribute('aria-disabled');
-      levelRow.style.opacity = '';
-      levelRow.style.pointerEvents = '';
+    var levelControls = levelRow.querySelectorAll('a, select');
+    for (var i = 0; i < levelControls.length; ++i) {
+      var ctrl = levelControls[i];
+      if (g_isMultiplayer) {
+        ctrl.classList.add('disabled');
+        ctrl.setAttribute('aria-disabled', 'true');
+        if (ctrl.tagName === 'SELECT') ctrl.disabled = true;
+      } else {
+        ctrl.classList.remove('disabled');
+        ctrl.removeAttribute('aria-disabled');
+        if (ctrl.tagName === 'SELECT') ctrl.disabled = false;
+      }
     }
   }
 
-  // Emoji reaction button: enabled only during active multiplayer game
-  var reactBtn = document.getElementById('react');
-  if (reactBtn) {
-    reactBtn.disabled = !(g_isMultiplayer && !g_isGameOver && g_opponentName);
+  // Emoji reaction button enabled only in multiplayer
+  var reactBtns = document.querySelectorAll('#react');
+  for (var i = 0; i < reactBtns.length; ++i) {
+    reactBtns[i].disabled = !g_isMultiplayer;
   }
 }
 
