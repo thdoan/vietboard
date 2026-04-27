@@ -6,7 +6,7 @@ function showWhatsNew() {
     '<ul>' +
     '<li>Added multiplayer!</li>' +
     '<li>Added global high scores</li>' +
-    '<li>Updated button icons</li>' +
+    '<li>Revamped button icons</li>' +
     '<li>Fixed broken word lookup</li>' +
     '</ul>'
   );

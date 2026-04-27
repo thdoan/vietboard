@@ -72,6 +72,10 @@ body {
   vertical-align: middle;
 }
 
+:disabled {
+  pointer-events: none !important;
+}
+
 :focus {
   outline: none;
 }
@@ -97,11 +101,15 @@ a[onclick]:active,
 a.link:active {
   color: #e00;
 }
+a.icon:hover,
+a.icon:focus {
+  color: red !important;
+}
 a:hover img,
 a:focus img,
 #wordresult #play:hover,
-#back:hover,
-#back:active {
+:is(button.icon, #back):hover,
+:is(button.icon, #back):active {
   -webkit-filter: brightness(0.85);
   filter: brightness(0.85);
 }
@@ -110,9 +118,10 @@ picture {
   display: inline-block;
 }
 a.link.disabled,
+button.icon:disabled,
 .button.disabled,
 .button[disabled],
-select[disabled] {
+select:disabled {
   cursor: default;
   -webkit-filter: grayscale(1);
   filter: grayscale(1);
@@ -241,8 +250,8 @@ picture img {
   text-shadow: 1px 1px 0 color-mix(in srgb, rgb(var(--rgb-btn-primary)) 60%, rgb(var(--rgb-white)));
   vertical-align: middle;
 }
-.button:not([disabled]):hover,
-.button:not([disabled]):focus {
+.button:not(:disabled):hover,
+.button:not(:disabled):focus {
   background: -webkit-gradient(linear, left top, left bottom, color-stop(0.05, rgb(var(--rgb-btn-primary-hover))), color-stop(1, rgb(var(--rgb-btn-primary))));
   background: linear-gradient(to bottom, rgb(var(--rgb-btn-primary-hover)) 5%, rgb(var(--rgb-btn-primary)) 100%);
   background-color: rgb(var(--rgb-btn-primary-hover));
@@ -261,8 +270,8 @@ picture img {
   border: 1px solid color-mix(in srgb, rgb(var(--rgb-btn-secondary)) 60%, rgb(var(--rgb-black)));
   text-shadow: 1px 1px 0 color-mix(in srgb, rgb(var(--rgb-btn-secondary)) 60%, rgb(var(--rgb-white)));
 }
-.button.secondary:not([disabled]):hover,
-.button.secondary:not([disabled]):focus {
+.button.secondary:not(:disabled):hover,
+.button.secondary:not(:disabled):focus {
   background: -webkit-gradient(linear, left top, left bottom, color-stop(0.05, rgb(var(--rgb-btn-secondary-hover))), color-stop(1, rgb(var(--rgb-btn-secondary))));
   background: linear-gradient(to bottom, rgb(var(--rgb-btn-secondary-hover)) 5%, rgb(var(--rgb-btn-secondary)) 100%);
   background-color: rgb(var(--rgb-btn-secondary-hover));
@@ -275,6 +284,78 @@ picture img {
 .buttons {
   margin-top: auto;
   text-align: center;
+}
+
+/*** Icons ***/
+
+button.icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-shadow: 0 0.3vmin 0.3vmin rgb(var(--rgb-black) / 0.8);
+}
+button.icon:active {
+  text-shadow: 0 0 0.3vmin rgb(var(--rgb-black) / 0.8);
+  transform: translateY(0.1vmin);
+}
+
+button svg {
+  fill: none;
+  filter: drop-shadow(0 0.3vmin 0.3vmin rgb(var(--rgb-black)));
+}
+button svg.hover-on {
+  display: none;
+}
+button:hover svg.hover-off {
+  display: none;
+}
+button:hover svg.hover-on {
+  display: revert;
+}
+button:active svg {
+  filter: drop-shadow(0 0 0.3vmin rgb(var(--rgb-black))) !important;
+}
+button svg .person-1 {
+  transform-box: view-box;
+  transform: translateX(0);
+  transition: transform 0.3s ease;
+}
+button svg .person-2 {
+  opacity: 0;
+  transform-box: view-box;
+  transform: translateX(-42%); /* ~10 SVG units off-screen left */
+  transition: opacity 0.2s ease, transform 0.3s ease;
+}
+button:hover svg .person-1 {
+  transform: translateX(14.6%); /* 3.5/24 SVG units — shifts right to x≈15.5 */
+}
+
+button:hover svg .person-2 {
+  transform: translateX(14.6%); /* slides in to x≈8.5, centered pair under globe */
+  opacity: 1;
+}
+button svg .middle-star {
+  transform: translateY(5px);
+  transition: transform 0.2s ease;
+}
+button:hover svg .middle-star {
+  transform: translateY(2px);
+}
+
+#highscores svg {
+  transform: translateY(-0.3vmin);
+}
+
+#restart svg {
+  transform-origin: calc(50% + 0.16vmin) 50%;
+  transition: filter 0.15s, transform 0.15s;
+}
+#restart:hover svg {
+  filter: drop-shadow(0 -0.3vmin 0.3vmin rgb(var(--rgb-black)));
+  transform: rotate(-180deg);
+}
+#restart svg path {
+  stroke: rgb(var(--rgb-btn-primary));
 }
 
 /*** Scoreboard ***/
@@ -440,20 +521,29 @@ table.board td:after,
   container-type: inline-size;
   display: inline-flex;
   gap: calc(var(--btn-spacing) * 0.75);
+  justify-content: space-evenly;
 }
 #drag .opponent td.mark .button-container {
   left: auto;
   right: calc(var(--btn-spacing) / 2);
   width: calc(50% - var(--btn-spacing) * 2);
 }
-#drag td.mark .button-container .button {
+#drag td.mark .button-container.icons {
+  align-items: center;
+  gap: 0;
+}
+#drag td.mark .button-container :is(.button, .icon) {
   flex: 1;
   font-size: calc(12px + 0.25vmin);
-  font-size: clamp(11px, 5cqi, 20px);
+  font-size: clamp(11px, 5cqi, 24px);
   padding: 0.3vmin 0.5vmin;
 }
-#drag .opponent td.mark .button-container .button {
-  font-size: clamp(11px, 12cqi, 20px);
+#drag .opponent td.mark .button-container :is(.button, .icon) {
+  font-size: clamp(11px, 12cqi, 28px);
+}
+#drag td.mark .button-container .icon {
+  height: 100%;
+  padding: 0.3vmin 0.7vmin;
 }
 
 /* Unused (see toggleORV())
@@ -609,22 +699,6 @@ table.board td .drag,
 
 /*** Game Info ***/
 
-#back {
-  position: absolute;
-  left: 0;
-  width: 48px;
-  height: 48px;
-  background: none;
-  border: none;
-  color: rgb(var(--rgb-white));
-  line-height: 48px;
-  margin: 4px 0;
-  padding: 0;
-}
-#back svg {
-  margin: 14px;
-}
-
 #score {
   position: relative;
   min-width: 300px;
@@ -651,22 +725,38 @@ table.board td .drag,
   padding: 2px 2px 0 2px;
 }
 #score header {
-  position: relative;
+  --header-btn-size: 48px;
+  height: calc(var(--header-btn-size) + 8px);
+  align-items: center;
   background: rgb(var(--rgb-gray-dark));
   display: none;
+  justify-content: space-between;
+}
+#back {
+  width: var(--header-btn-size);
+  height: var(--header-btn-size);
+  background: none;
+  border: none;
+  color: rgb(var(--rgb-white));
+  padding: 0;
+}
+#back svg {
+  margin: 14px;
+}
+#score header .icons {
+  display: flex;
+  gap: 2vmin;
+}
+#score header .icon {
+  width: calc(var(--btn-height) + 2vmin);
+  height: var(--header-btn-size);
+  flex: 1;
+  font-size: 24px;
 }
 #score header > img {
-  position: absolute;
-  top: 8px;
-  right: 8px;
   width: var(--btn-height);
   height: var(--btn-height);
-}
-#score header .button {
-  width: 15%;
-  height: var(--btn-height);
-  font-size: 20px;
-  margin: 8px 1.25vmin;
+  margin-right: 8px;
 }
 #score h2 {
   height: 26px;
@@ -1136,7 +1226,7 @@ html.mobile #score .container {
   padding: 0;
 }
 html.mobile #score header {
-  display: block;
+  display: flex;
 }
 html.mobile #modal-container.wide {
   width: 95%;
