@@ -5,7 +5,9 @@ function showWhatsNew() {
     '<h3>What\'s New</h3>' +
     '<ul>' +
     '<li>Added multiplayer!</li>' +
-    '<li>Added global high scores</li>' +
+    '<li>Implemented global high scores</li>' +
+    '<li>Implemented official end game rules</li>' +
+    '<li>Removed unnecessary page reloads</li>' +
     '<li>Revamped button icons</li>' +
     '<li>Fixed broken word lookup</li>' +
     '</ul>'
