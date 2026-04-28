@@ -1860,7 +1860,8 @@ document.addEventListener('appReady', function() {
     try {
       var mpData = JSON.parse(localStorage['session_mp']);
       var now = Date.now();
-      var MAX_RESUME_AGE_MS = 30 * 60 * 1000; // 30 minutes
+      var idleMs = typeof g_wait_mp_idle !== 'undefined' ? g_wait_mp_idle : 3600000;
+      var MAX_RESUME_AGE_MS = idleMs + 5 * 60 * 1000; // idle timeout + 5 min buffer
       var hasRecentSnapshot = mpData && typeof mpData.savedAt === 'number' && (now - mpData.savedAt) <= MAX_RESUME_AGE_MS;
       var hasRecentMove = mpData && typeof mpData.lastMoveAt === 'number' && (now - mpData.lastMoveAt) <= MAX_RESUME_AGE_MS;
       var hasUsableState = mpData &&
@@ -2131,6 +2132,30 @@ function resetIdleTimer() {
 // Reset idle timer on clicks
 window.addEventListener('click', resetIdleTimer);
 window.addEventListener('touchstart', resetIdleTimer);
+
+// Pause/resume idle timer and force-save session when app goes to background
+function handleVisibilityChange() {
+  if (document.hidden || document.visibilityState === 'hidden') {
+    if (g_isMultiplayer) saveMultiplayerSession();
+    if (g_idleTimer) {
+      clearInterval(g_idleTimer);
+      g_idleTimer = null;
+    }
+  } else {
+    if (g_isMultiplayer && !g_isGameOver) {
+      resetIdleTimer();
+      startIdleTimer();
+    }
+  }
+}
+document.addEventListener('visibilitychange', handleVisibilityChange);
+window.addEventListener('pagehide', function() {
+  if (g_isMultiplayer) saveMultiplayerSession();
+  if (g_idleTimer) {
+    clearInterval(g_idleTimer);
+    g_idleTimer = null;
+  }
+});
 
 // Add to handleGameStateBroadcast to reset timer on opponent activity
 const originalHandleMoveBroadcast3 = handleGameStateBroadcast;
