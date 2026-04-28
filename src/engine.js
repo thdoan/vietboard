@@ -39,6 +39,8 @@ var g_playerPassed = false;
 var g_opponent_has_joker;       // Optimization flag if computer has joker tile
 var g_isShuffling = false;      // Track rack shuffle animation state
 var g_showThinking = false;     // Whether to show "Computer is thinking..." toast
+var g_rackEmptiedBy = '';       // 'player' or 'opponent' when game ends by empty rack
+var g_endgameBonusAmount = 0;   // Bonus from opponent's remaining tiles (official Scrabble rule)
 
 var g_maxpasses = 3;            // Maximum number of consecutive passes
 var g_lmults = [1, 2, 3, 1, 1]; // Letter multipliers by index
@@ -130,6 +132,8 @@ function init(iddiv, skipRacks) {
   g_isGameOver = false;
   g_history = [];
   if (typeof g_mpGameEndReason !== 'undefined') g_mpGameEndReason = '';
+  g_rackEmptiedBy = '';
+  g_endgameBonusAmount = 0;
 
   // Put all the letters in the pool
   var numalpha = g_letters.length;
@@ -187,6 +191,17 @@ function finalizeGameScores() {
 
   g_oscore -= odeduct;
   g_pscore -= pdeduct;
+
+  // Official Scrabble rule: player who emptied their rack gets opponent's remaining tile value
+  if (g_rackEmptiedBy === 'player') {
+    g_pscore += odeduct;
+    g_endgameBonusAmount = odeduct;
+  } else if (g_rackEmptiedBy === 'opponent') {
+    g_oscore += pdeduct;
+    g_endgameBonusAmount = pdeduct;
+  } else {
+    g_endgameBonusAmount = 0;
+  }
 
   // Update total scores
   if (el('oscore')) el('oscore').textContent = g_oscore;
@@ -261,6 +276,9 @@ function announceWinner() {
   }
   html += '</tr></table><ul><li>';
   html += t('You') + ': <strong>' + g_pscore + '</strong></li><li>' + opponentNoun + ': <strong>' + g_oscore + '</strong></li></ul>';
+  if (DEBUG && g_endgameBonusAmount > 0) {
+    console.log(t('Bonus') + ': +' + g_endgameBonusAmount + ' ' + t('from remaining tiles'));
+  }
   var msg = '<h3>' + t('It&rsquo;s a tie!');
   if (g_oscore > g_pscore) msg = '<h3 class="opponent">' + opponentWinsText;
   else if (g_oscore < g_pscore) msg = '<h3 class="player">' + t('You win!');
@@ -1303,8 +1321,9 @@ function onPlayerMove() {
     //console.log('Setting player rack to: ' + pletters);
     g_bui.setPlayerRack(pletters);
     g_bui.setTilesLeft(g_letpool.length);
-    if (pletters === '') {
+    if (pletters.replace(/\./g, '') === '') {
       // All tiles were played and nothing left in the tile pool
+      g_rackEmptiedBy = 'player';
       announceWinner();
       return;
     }
@@ -1327,7 +1346,6 @@ function onPlayerMove() {
   }
 
   var animCallback = function() {
-    setSinglePlayerTurn(true);
     // Create the array of word and created orthogonal words created by
     // opponent move.
     var words = play_word.owords;
@@ -1355,14 +1373,18 @@ function onPlayerMove() {
     var newLetters = takeLetters(g_bui.getOpponentRack());
     g_bui.setOpponentRack(newLetters);
     g_bui.setTilesLeft(g_letpool.length);
-    if (newLetters === '') {
+    if (newLetters.replace(/\./g, '') === '') {
       // All tiles taken, nothing left in tile pool
+      g_rackEmptiedBy = 'opponent';
       announceWinner();
       return;
     }
     // Save session
     localStorage['session'] = getSession();
     localStorage['session_mode'] = 'sp';
+
+    // Re-enable player controls only if game is still ongoing
+    setSinglePlayerTurn(true);
   };
 
   if (play_word !== null) {

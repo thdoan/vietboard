@@ -1589,7 +1589,8 @@ function onMultiplayerMove(passed) {
   g_lastMoveAt = Date.now();
   saveMultiplayerSession();
 
-  if (!passed && rackAfter === '' && g_letpool.length === 0) {
+  if (!passed && rackAfter.replace(/\./g, '') === '' && g_letpool.length === 0) {
+    g_rackEmptiedBy = 'player';
     g_isGameOver = true;
     announceWinner();
     enterPostGameState();
@@ -1708,19 +1709,22 @@ function handleMoveBroadcast(payload) {
         var elStatus = el('status');
         elStatus.innerHTML = t('Opponent') + ' ' + t('scored ') + payload.score;
 
-        g_isMyTurn = true;
-        updateTurnIndicator();
-        updateGameInfoLabels();
-
         // Ensure board UI is perfectly in sync
         syncBoardUI();
 
-        if (payload.rackAfter === '' && g_letpool.length === 0) {
+        if (payload.rackAfter.replace(/\./g, '') === '' && g_letpool.length === 0) {
+          g_rackEmptiedBy = 'opponent';
           g_isGameOver = true;
           announceWinner();
           enterPostGameState();
           return;
         }
+
+        // Game is still ongoing — hand turn back to local player
+        g_isMyTurn = true;
+        updateTurnIndicator();
+        updateGameInfoLabels();
+
         g_lastMoveAt = Date.now();
         saveMultiplayerSession();
       }
@@ -1763,10 +1767,6 @@ function handleMoveBroadcast(payload) {
       elStatus.innerHTML = t('Opponent') + ' ' + t('scored ') + payload.score;
     }
 
-    g_isMyTurn = true;
-    updateTurnIndicator();
-    updateGameInfoLabels();
-
     if (payload.passed) {
       g_bui.toast(payload.swapped ? t('Opponent swapped') : t('Opponent passed'));
       if (!payload.swapped) {
@@ -1783,12 +1783,18 @@ function handleMoveBroadcast(payload) {
     }
 
     // Check if game over
-    if (payload.rackAfter === '' && g_letpool.length === 0) {
+    if (payload.rackAfter.replace(/\./g, '') === '' && g_letpool.length === 0) {
+      g_rackEmptiedBy = 'opponent';
       g_isGameOver = true;
       announceWinner();
       enterPostGameState();
       return;
     }
+
+    // Game is still ongoing — hand turn back to local player
+    g_isMyTurn = true;
+    updateTurnIndicator();
+    updateGameInfoLabels();
 
     g_lastMoveAt = Date.now();
     saveMultiplayerSession();
