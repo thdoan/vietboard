@@ -15,6 +15,7 @@ var translation_map = {
   'Computer': 'Máy tính',
   'Computer&rsquo;s last score:': 'Điểm lượt cuối của máy:',
   'Computer&rsquo;s total score:': 'Tổng điểm của máy:',
+  'changed bonuses layout to': 'đã đổi sơ đồ điểm thưởng sang',
   'Date': 'Ngày',
   'Decrease difficulty': 'Giảm độ khó',
   'Default': 'Mặc định',

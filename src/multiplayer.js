@@ -1426,6 +1426,18 @@ function handleGameStateBroadcast(payload) {
         }
       });
     }
+  } else if (payload.type === 'layout') {
+    if (typeof g_board_empty !== 'undefined' && g_board_empty && payload.layout) {
+      g_layout = payload.layout;
+      localStorage['layout'] = payload.layout;
+      if (typeof applyLayout === 'function') applyLayout(payload.layout);
+      if (typeof saveMultiplayerSession === 'function') saveMultiplayerSession();
+
+      // Show toast only if change came from opponent
+      if (payload.fromId && payload.fromId !== g_lobbyUserId) {
+        g_bui.toast(t('Opponent') + ' ' + t('changed bonuses layout to') + ' ' + payload.layout);
+      }
+    }
   }
 }
 

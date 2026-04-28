@@ -90,18 +90,70 @@ function setLayout(elSelect) {
   g_layout = elSelect.value;
   localStorage['layout'] = elSelect.value;
 
-  if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof saveMultiplayerSession === 'function') {
-    saveMultiplayerSession();
-    localStorage['session_mode'] = 'mp';
-  } else if (typeof getSession === 'function') {
-    localStorage['session'] = getSession();
-    localStorage['session_mode'] = 'sp';
+  if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer &&
+      typeof g_board_empty !== 'undefined' && g_board_empty) {
+    // Pre-first-move multiplayer: broadcast and apply live
+    if (typeof broadcastGameState === 'function') {
+      broadcastGameState({ type: 'layout', layout: g_layout, fromId: g_lobbyUserId });
+    }
+    if (typeof applyLayout === 'function') applyLayout(g_layout);
+    if (typeof saveMultiplayerSession === 'function') {
+      saveMultiplayerSession();
+      localStorage['session_mode'] = 'mp';
+    }
+  } else {
+    // Existing behavior: SP or post-first-move MP
+    if (typeof saveMultiplayerSession === 'function') {
+      saveMultiplayerSession();
+      localStorage['session_mode'] = 'mp';
+    } else if (typeof getSession === 'function') {
+      localStorage['session'] = getSession();
+      localStorage['session_mode'] = 'sp';
+    }
+    location.reload();
   }
   // GA
   gtag('event', elSelect.value, {
     'event_category': 'Bonuses Layout'
   });
-  location.reload();
+}
+
+// Apply a new bonus layout to the existing board without reload
+function applyLayout(layout) {
+  if (typeof g_boardm === 'undefined' || !g_boardm.init) return;
+
+  // Regenerate bonus multipliers (updates g_boardmults globally)
+  g_boardm.init(g_boardwidth, g_boardheight, layout);
+
+  // Keep g_bui's reference in sync
+  if (g_bui) g_bui.boardm = g_boardm.boardm;
+
+  var mults = ['', 'DL', 'TL', 'DW', 'TW'];
+  var st = g_bui ? g_bui.getStartXY() : { x: Math.floor(g_boardwidth / 2), y: Math.floor(g_boardheight / 2) };
+
+  for (var i = 0; i < g_boardheight; ++i) {
+    for (var j = 0; j < g_boardwidth; ++j) {
+      var cell = el('c' + j + '_' + i);
+      if (!cell || (cell.holds && cell.holds !== '')) continue; // Skip occupied cells
+
+      var mult = (j === st.x && i === st.y) ? 'ST' : mults[g_boardmults[j][i]] || '';
+      cell.className = mult;
+    }
+  }
+
+  // Update <select> element to reflect new selection
+  var sel = el('bonuseslayout');
+  if (sel) {
+    var sLayout = g_layouts.indexOf(layout) > -1 ? layout : t('Default');
+    var html = '<option' + (sLayout === t('Default') ? ' value="default"' : '') + '>' + sLayout + '</option>';
+    if (sLayout !== t('Default')) html += '<option value="default">' + t('Default') + '</option>';
+    for (var i = 0; i < g_layouts.length; ++i) {
+      if (g_layouts[i] === sLayout) continue;
+      html += '<option>' + g_layouts[i] + '</option>';
+    }
+    sel.innerHTML = html;
+    sel.title = sLayout;
+  }
 }
 
 // Set tileset
