@@ -178,6 +178,8 @@ async function mergeGlobalHighScores(remoteScores) {
       }
 
       var dedupeKey = (playerId || rawName) + '|' + score;
+      var sessionDedupeKey = item.sessionId ? (item.sessionId + '|' + score) : null;
+      var currentUserId = (typeof g_lobbyUserId !== 'undefined' && g_lobbyUserId) ? String(g_lobbyUserId).trim() : '';
 
       // Check if this local score is missing from remote
       if (i < localList.length && !remoteScoresSet[dedupeKey]) {
@@ -185,23 +187,50 @@ async function mergeGlobalHighScores(remoteScores) {
         if (DEBUG) console.log('Detected local-only high score:', dedupeKey, 'in', key);
       }
 
+      var duplicateIndex = -1;
       if (seen[dedupeKey]) {
-        // If we already saw this score, but the new one has a session and the old one didn't,
-        // update the existing entry to include the session (allows viewing local matches).
-        if (item.session || item.sessionId || item.date) {
-          for (var j = 0; j < unique.length; j++) {
-            if (((unique[j].playerId || unique[j].player) + '|' + unique[j].score) === dedupeKey) {
-              if (!unique[j].session && item.session) unique[j].session = item.session;
-              if (!unique[j].sessionId && item.sessionId) unique[j].sessionId = item.sessionId;
-              if (!unique[j].date && item.date) unique[j].date = item.date;
-              break;
-            }
+        for (var j = 0; j < unique.length; j++) {
+          if (((unique[j].playerId || unique[j].player) + '|' + unique[j].score) === dedupeKey) {
+            duplicateIndex = j;
+            break;
+          }
+        }
+      } else if (sessionDedupeKey && seen[sessionDedupeKey]) {
+        for (var j = 0; j < unique.length; j++) {
+          if ((unique[j].sessionId || 'nosess') + '|' + unique[j].score === sessionDedupeKey) {
+            duplicateIndex = j;
+            break;
+          }
+        }
+      }
+
+      if (duplicateIndex !== -1) {
+        var existing = unique[duplicateIndex];
+        // Merge session data preferring whichever has it
+        if (!existing.session && item.session) existing.session = item.session;
+        if (!existing.sessionId && item.sessionId) existing.sessionId = item.sessionId;
+        if (!existing.date && item.date) existing.date = item.date;
+
+        // Propagate playerId and name updates
+        if (playerId && !existing.playerId) {
+          existing.playerId = playerId;
+          if (rawName) existing.player = rawName;
+        } else if (playerId && existing.playerId && playerId === existing.playerId && rawName && existing.player !== rawName) {
+          // Same known player, different name. Prefer remote (i >= localList.length) unless it's the current user.
+          if (playerId !== currentUserId && i >= localList.length) {
+            existing.player = rawName;
+          }
+        } else if (!playerId && !existing.playerId && item.sessionId && existing.sessionId === item.sessionId && rawName && existing.player !== rawName) {
+          // Same session, no IDs. Prefer remote name.
+          if (i >= localList.length) {
+            existing.player = rawName;
           }
         }
         continue;
       }
 
       seen[dedupeKey] = true;
+      if (sessionDedupeKey) seen[sessionDedupeKey] = true;
       unique.push({
         player: rawName,
         playerId: playerId,
@@ -450,27 +479,26 @@ if (document.readyState === 'complete' && document.documentElement.classList.con
 
 window.updatePlayerName = async function(newName) {
   var trimmed = (newName || (t('Player') + '_' + Math.floor(Math.random() * 10000))).substring(0, 32);
+  var oldName = g_myName;
   g_myName = trimmed;
   localStorage.setItem('player_name', g_myName);
   if (DEBUG) console.log('updatePlayerName: setting to', g_myName);
 
-  // Sync name changes to all high score entries with my ID
-  if (g_lobbyUserId) {
-    var changed = false;
-    for (var key in g_highscores) {
-      if (Array.isArray(g_highscores[key])) {
-        g_highscores[key].forEach(function(item) {
-          if (item.playerId === g_lobbyUserId) {
-            item.player = g_myName;
-            changed = true;
-          }
-        });
-      }
+  // Sync name changes to all high score entries with my ID or old fallback name
+  var changed = false;
+  for (var key in g_highscores) {
+    if (Array.isArray(g_highscores[key])) {
+      g_highscores[key].forEach(function(item) {
+        if ((g_lobbyUserId && item.playerId === g_lobbyUserId) || item.player === oldName) {
+          item.player = g_myName;
+          changed = true;
+        }
+      });
     }
-    if (changed) {
-      localStorage['highscores'] = JSON.stringify(g_highscores);
-      if (typeof saveGlobalHighScores === 'function') saveGlobalHighScores();
-    }
+  }
+  if (changed) {
+    localStorage['highscores'] = JSON.stringify(g_highscores);
+    if (typeof saveGlobalHighScores === 'function') saveGlobalHighScores();
   }
 
   // Update input field value
