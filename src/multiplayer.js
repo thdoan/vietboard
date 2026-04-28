@@ -2168,6 +2168,12 @@ function updateGameInfoLabels() {
     }
   }
 
+  // Bonuses layout must stay disabled once a move has been played
+  var elLayout = el('bonuseslayout');
+  if (elLayout && typeof g_board_empty !== 'undefined' && !g_board_empty) {
+    elLayout.disabled = true;
+  }
+
   // Emoji reaction button enabled only in multiplayer
   var reactBtns = document.querySelectorAll('#react');
   for (var i = 0; i < reactBtns.length; ++i) {

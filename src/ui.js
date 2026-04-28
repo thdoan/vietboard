@@ -172,7 +172,13 @@ function setTileset(elSelect) {
   gtag('event', elSelect.value, {
     'event_category': 'Tileset'
   });
-  location.reload();
+
+  // Apply new font without reloading
+  var sFamily = g_tilesets.indexOf(g_tileset) > -1 ? g_tileset : 'Maven+Pro:wght@500';
+  var link = document.getElementById('tileset-font-link');
+  var style = document.getElementById('tileset-font-style');
+  if (link) link.href = 'https://fonts.googleapis.com/css2?family=' + sFamily + '&display=swap';
+  if (style) style.textContent = '.drag{font-family:\'' + (sFamily.indexOf('Maven')===0 ? 'Maven Pro' : sFamily) + '\', Arial, sans-serif}';
 }
 
 // Toggle game info screen on mobile

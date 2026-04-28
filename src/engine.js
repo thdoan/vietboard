@@ -1249,6 +1249,12 @@ function setSinglePlayerTurn(isPlayerTurn) {
     if (isPlayerTurn) g_bui.makeTilesFixed();
     else g_bui.fixPlayerTiles();
   }
+
+  // Bonuses layout must stay disabled once a move has been played
+  var elLayout = el('bonuseslayout');
+  if (elLayout && typeof g_board_empty !== 'undefined' && !g_board_empty) {
+    elLayout.disabled = true;
+  }
 }
 
 //------------------------------------------------------------------------------

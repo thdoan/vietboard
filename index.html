@@ -64,10 +64,12 @@ window.g_isSupported = Array.prototype.indexOf
   window.g_tileset = localStorage['tileset'];
   var sFamily = g_tilesets.indexOf(g_tileset)>-1 ? g_tileset : 'Maven+Pro:wght@500';
   var link = document.createElement('link');
+  link.id = 'tileset-font-link';
   link.rel = 'stylesheet';
   link.href = 'https://fonts.googleapis.com/css2?family=' + sFamily + '&display=swap';
   document.head.appendChild(link);
   var style = document.createElement('style');
+  style.id = 'tileset-font-style';
   style.textContent = '.drag{font-family:\'' + (sFamily.indexOf('Maven')===0 ? 'Maven Pro' : sFamily) + '\', Arial, sans-serif}';
   // Load bonuses layout
   window.g_layouts = [
@@ -101,8 +103,11 @@ window.g_isSupported = Array.prototype.indexOf
       (i>0 ? sSvgText.replace('__TEXT__', aBonusTiles[i][0]) : '') +
       '</svg>\')}';
   }
-  style.textContent += sCss;
   document.head.appendChild(style);
+  var bonusStyle = document.createElement('style');
+  bonusStyle.id = 'bonus-tiles-style';
+  bonusStyle.textContent = sCss;
+  document.head.appendChild(bonusStyle);
 })();
 </script>
 <link rel="stylesheet" href="css/style.css">
