@@ -90,19 +90,23 @@ function setLayout(elSelect) {
   g_layout = elSelect.value;
   localStorage['layout'] = elSelect.value;
 
-  if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer &&
-      typeof g_board_empty !== 'undefined' && g_board_empty) {
-    // Pre-first-move multiplayer: broadcast and apply live
-    if (typeof broadcastGameState === 'function') {
-      broadcastGameState({ type: 'layout', layout: g_layout, fromId: g_lobbyUserId });
+  if (typeof g_board_empty !== 'undefined' && g_board_empty) {
+    // Pre-first-move: apply live without reload (both SP and MP)
+    if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
+      if (typeof broadcastGameState === 'function') {
+        broadcastGameState({ type: 'layout', layout: g_layout, fromId: g_lobbyUserId });
+      }
+      if (typeof saveMultiplayerSession === 'function') {
+        saveMultiplayerSession();
+        localStorage['session_mode'] = 'mp';
+      }
+    } else if (typeof getSession === 'function') {
+      localStorage['session'] = getSession();
+      localStorage['session_mode'] = 'sp';
     }
     if (typeof applyLayout === 'function') applyLayout(g_layout);
-    if (typeof saveMultiplayerSession === 'function') {
-      saveMultiplayerSession();
-      localStorage['session_mode'] = 'mp';
-    }
   } else {
-    // Existing behavior: SP or post-first-move MP
+    // Post-first-move: reload required
     if (typeof saveMultiplayerSession === 'function') {
       saveMultiplayerSession();
       localStorage['session_mode'] = 'mp';
@@ -112,6 +116,8 @@ function setLayout(elSelect) {
     }
     location.reload();
   }
+  if (g_isMobile) hideGameInfo();
+
   // GA
   gtag('event', elSelect.value, {
     'event_category': 'Bonuses Layout'
@@ -179,6 +185,8 @@ function setTileset(elSelect) {
   var style = document.getElementById('tileset-font-style');
   if (link) link.href = 'https://fonts.googleapis.com/css2?family=' + sFamily + '&display=swap';
   if (style) style.textContent = '.drag{font-family:\'' + (sFamily.indexOf('Maven')===0 ? 'Maven Pro' : sFamily) + '\', Arial, sans-serif}';
+
+  if (g_isMobile) hideGameInfo();
 }
 
 // Toggle game info screen on mobile
