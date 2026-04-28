@@ -76,6 +76,12 @@ The `app_key` field uses a simple XOR obfuscation (`_dk`/`_hk` in `multiplayer.j
 - When a user clicks a high score from another device, `loadHighScore()` falls back to `loadSessionFromCloud()` if no local session exists.
 - Fetched sessions are cached in `localStorage['cloud_sessions']` for instant replay on subsequent clicks.
 
+### Player Name Syncing in High Scores
+When a player renames, the change is synced to global high scores via three mechanisms:
+1. **`updatePlayerName()`** - Updates local high score entries by matching either `playerId` (preferred) or the old fallback name.
+2. **`mergeGlobalHighScores()`** - When loading global scores, uses both `playerId` and `sessionId` for deduplication, preferring the remote name for entries not belonging to the current user.
+3. **`renderHighScoreRows()`** - Display format is `<name> (You)` for current user entries.
+
 ### Multiplayer Rematch
 - After a natural game-over (empty rack or max passes), the game enters a **post-game state** for `g_wait_mp_rematch` ms (default 60s).
 - In post-game state, the game channel stays alive and `cleanupMultiplayerSession()` is deferred.
