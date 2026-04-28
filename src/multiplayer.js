@@ -1435,7 +1435,7 @@ function handleGameStateBroadcast(payload) {
 
       // Show toast only if change came from opponent
       if (payload.fromId && payload.fromId !== g_lobbyUserId) {
-        g_bui.toast(t('Opponent') + ' ' + t('changed bonuses layout to') + ' ' + payload.layout);
+        g_bui.toast(t('Opponent') + ' ' + t('changed bonuses layout to') + ' ' + (payload.layout === 'default' ? 'Default' : payload.layout));
       }
     }
   }

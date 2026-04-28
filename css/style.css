@@ -1096,6 +1096,7 @@ html:not(.mobile) #modal-container.wide {
   position: fixed;
   top: 0;
   left: 50%;
+  width: max-content;
   max-width: min(420px, 90%);
   padding: 8px;
   pointer-events: none;
