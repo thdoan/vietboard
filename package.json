@@ -3,9 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "build": "./build.sh",
     "test": "node test/multiplayer.test.js"
   },
   "devDependencies": {
-    "puppeteer": "^5.5.0"
+    "clean-css-cli": "^5.6.3",
+    "puppeteer": "^5.5.0",
+    "terser": "^5.39.2"
   }
 }
