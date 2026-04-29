@@ -1687,21 +1687,7 @@ function RedipsUI() {
       document.addEventListener('click', self._emojiOutsideClick);
     }
 
-    if (window.g_emojis && window.g_emojis.length) {
-      renderPicker(window.g_emojis);
-    } else {
-      fetch('lang/emojis.json')
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          window.g_emojis = data.emojis || [];
-          renderPicker(window.g_emojis);
-        })
-        .catch(function() {
-          // Fallback minimal set
-          window.g_emojis = ['👍', '👏', '😂', '😮', '🤔', '😢', '🔥', '🎉'];
-          renderPicker(window.g_emojis);
-        });
-    }
+    renderPicker(window.g_emojis && window.g_emojis.length ? window.g_emojis : ['⏳', '🎉', '🎯', '🏆', '👀', '👍', '👏', '🔥', '🤔', '🤣', '🤬', '🤯', '🥳', '😂', '😄', '😤', '😬', '😭', '😱']);
   };
 
   self.showHighScores = async function() {

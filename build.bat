@@ -20,6 +20,7 @@ AjaxMin.exe -inline:no -clobber -term lang\vi_wordlist.js lang\vi_defs.js lang\v
 AjaxMin.exe -inline:no -clobber -ignore:JS1300 -term %temp%\vietboard\src\multiplayer.js %temp%\vietboard\src\redipsdrag.js %temp%\vietboard\src\bonuses.js %temp%\vietboard\src\ui.js %temp%\vietboard\src\engine.js %temp%\vietboard\src\events.js %temp%\vietboard\src\changelog.js -out %target%\js\app.min.js
 REM Deploy
 copy /y index.html %target%
+xcopy /y lang\emojis.js %target%\lang\
 xcopy /y lang\en_translate.js %target%\lang\
 xcopy /y lang\vi_translate.js %target%\lang\
 xcopy /iy pics %target%\pics
