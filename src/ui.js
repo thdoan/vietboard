@@ -319,7 +319,12 @@ async function loadHighScore(sKey, nIndex) {
   if (typeof g_loadingHighScore !== 'undefined' && g_loadingHighScore) return;
   g_loadingHighScore = true;
 
-  if (!localStorage['session']) localStorage['session'] = getSession();
+  if (!localStorage['session_return']) {
+    localStorage['session_return'] = getSession();
+    if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof saveMultiplayerSession === 'function') {
+      saveMultiplayerSession();
+    }
+  }
   var entry = g_highscores[sKey] && g_highscores[sKey][nIndex];
   if (!entry) {
     g_loadingHighScore = false;
@@ -376,6 +381,16 @@ async function loadHighScore(sKey, nIndex) {
   }
   g_loadingHighScore = false;
 }
+
+window.returnToGame = function() {
+  g_bui.created = false;
+  var returnSession = localStorage['session_return'] || localStorage['session'];
+  if (returnSession) load(returnSession);
+  localStorage.removeItem('session_return');
+  if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof updateTurnIndicator === 'function') {
+    updateTurnIndicator();
+  }
+};
 
 // Main UI logic
 function RedipsUI() {
@@ -753,7 +768,7 @@ function RedipsUI() {
 
     if (g_isMobile) html += '</tr><tr>';
     html += '<td class="mark"' + (g_isMobile ? ' colspan="8"' : '') + '><div class="button-container">' +
-      (isHighScore ? '<button class="button secondary wide" onclick="g_bui.created=false;load(localStorage[\'session\'])">' + t('Return to Game') + '</button>' :
+      (isHighScore ? '<button class="button secondary wide" onclick="returnToGame()">' + t('Return to Game') + '</button>' :
       '<button id="play" class="button" onclick="onPlayerMoved()">' + t('Play') + '</button>' +
       '<button id="clear" class="button secondary" onclick="onPlayerShuffle()">' + t('Shuffle') + '</button>' +
       '<button id="swap" class="button secondary" onclick="onPlayerSwap()">' + t('Swap') + '</button>' +
