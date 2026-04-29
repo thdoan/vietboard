@@ -89,6 +89,16 @@ When a player renames, the change is synced to global high scores via three mech
 2. **`mergeGlobalHighScores()`** - When loading global scores, uses both `playerId` and `sessionId` for deduplication, preferring the remote name for entries not belonging to the current user.
 3. **`renderHighScoreRows()`** - Display format is `<name> (You)` for current user entries.
 
+### Lobby Presence and Notifications
+The lobby uses Supabase Realtime presence with metadata to track player activity:
+- **`g_inLobbyModal`** — session variable (resets on page reload) that tracks whether the player has the lobby modal open
+- **`inLobbyModal`** — presence metadata field: `true` when player opens lobby modal, `false` when closed, `undefined` for page-load-only subscribers
+- **Auto-subscribe on page load** — players are subscribed to the lobby channel with `inLobbyModal: false` to receive presence updates
+- **Badge count** — only counts players where `inLobbyModal !== false` (skips page-load subscribers who haven't opened lobby)
+- **Toast notifications** — only fires when: (1) joining player has `inLobbyModal !== false`, (2) current player is not in MP game, (3) lobby modal is closed
+- **Grace period** — `g_lobbySubscribedAt` timestamp prevents toasts for existing players within 2 seconds of subscribing
+- **Design principle** — use presence metadata over broadcasts for cleaner implementation; presence state is inherently more reliable than custom broadcast events
+
 ### Session Persistence
 Multiplayer sessions use `localStorage['session_mp']` for persistence, while single-player uses `localStorage['session']`. Key patterns:
 - **Session mode tracking:** `localStorage['session_mode']` is `'mp'` or `'sp'`, but do not rely on it alone for resume decisions — always check for valid `session_mp` first.
