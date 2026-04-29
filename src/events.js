@@ -156,5 +156,6 @@ window.onload = function() {
 
 if (g_isSupported) {
   window.addEventListener('resize', debounce(toggleMobile));
+  window.addEventListener('resize', debounce(setModalHeight));
   document.addEventListener('keydown', handleKeyDown);
 }
