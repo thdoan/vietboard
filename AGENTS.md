@@ -54,6 +54,7 @@ The build output is placed in the `play/` directory.
 - **Mobile Transitions:** When positioning elements over the board on mobile (e.g., emoji reactions), elements may be off-screen when the drawer is open. Use `transitionend` event on `#board` to wait for CSS transitions before calculating positions.
 - **Rack Representation:** Empty rack cells are represented as `'.'` (dot), not empty string `''`. When checking for empty rack, use `rack.replace(/\./g, '') === ''` instead of `rack === ''`.
 - **Dynamic CSS Updates:** When updating CSS dynamically (e.g., tileset, fonts), use separate `<style>` elements with unique IDs. Avoid concatenating multiple rules into one `textContent` update, as this wipes all other rules. See `index.html` for the pattern with `tileset-font-style` and `bonus-tiles-style`.
+- **Data Loading Pattern:** Prefer loading small data via `<script>` tags (e.g., `lang/emojis.js` setting `window.g_emojis`) over `fetch()` for JSON. Script tags are synchronous and more reliable on mobile browsers where fetch can fail intermittently due to caching or battery-saving modes.
 
 ## Supabase Schema
 
