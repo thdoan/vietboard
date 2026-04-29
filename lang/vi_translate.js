@@ -32,6 +32,7 @@ var translation_map = {
   'Game over. The score is...': 'Trò chơi kết thúc. Số điểm là...',
   'GAME OVER': 'KẾT THÚC',
   'Generating...': 'Đang tạo...',
+  'has joined the lobby': 'đã vào phòng chờ',
   'has no definition or may be part of a compound word': 'chưa có định nghĩa hoặc là một phần trong từ ghép',
   'Hide computer&rsquo;s rack': 'Giấu khay chữ của máy',
   'High Scores': 'Bảng Xếp Hạng',

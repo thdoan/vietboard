@@ -10,6 +10,7 @@
   --rgb-gray-dark: 58 58 58; /* #3a3a3a */
   --rgb-gray: 173 173 173; /* #adadad */
   --rgb-highlight: 254 254 186; /* #fefeba */
+  --rgb-red: 255 68 68; /* #f44 */
   --rgb-tile-opponent: 205 92 92; /* #cd5c5c (indianred) */
   --rgb-tile-player: 73 155 51; /* #499b33 */
   --rgb-white: 255 255 255;
@@ -341,6 +342,36 @@ button svg .middle-star {
 }
 button:hover svg .middle-star {
   transform: translateY(2px);
+}
+
+#lobby {
+  position: relative;
+  container-type: inline-size;
+}
+#lobby::after {
+  position: absolute;
+  top: 0.25ch;
+  right: 1ch;
+  min-width: 2ch;
+  background: rgb(var(--rgb-red) / 0.9);
+  border-radius: var(--border-radius);
+  color: rgb(var(--rgb-white));
+  content: attr(data-count);
+  font-size: clamp(6px, 32cqi, 11px);
+  font-weight: bold;
+  letter-spacing: -1px;
+  line-height: 1;
+  padding: 0.375ch;
+  pointer-events: none;
+  text-indent: -1px;
+  text-shadow: none;
+}
+html.mobile #lobby::after {
+  top: 0;
+}
+#lobby:not([data-count])::after,
+#lobby[data-count="0"]::after {
+  display: none;
 }
 
 #highscores svg {
@@ -1068,6 +1099,7 @@ html:not(.mobile) #modal-container.wide {
 .lobby-modal p {
   margin: 0.25rem 0 0 0;
 }
+
 #lobby-players {
   height: 150px;
   -webkit-backdrop-filter: blur(3px);

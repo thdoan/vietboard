@@ -121,6 +121,11 @@ window.onload = function() {
     } else {
       init('board');
     }
+    // Auto-join lobby in background so player receives presence updates even
+    // when the lobby modal has never been opened.
+    if (!hasMultiplayerSession && typeof joinLobbyChannel === 'function' && window.supabaseClient) {
+      joinLobbyChannel();
+    }
     // Close modal by clicking on its shadow
     g_cache['modalMask'].addEventListener('click', closeModal);
     g_cache['modalInner'].addEventListener('click', handleHideModal);

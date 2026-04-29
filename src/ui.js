@@ -1518,6 +1518,7 @@ function RedipsUI() {
   };
 
   self.restart = function() {
+    if (typeof leaveLobby === 'function') leaveLobby();
     localStorage.removeItem('session');
     g_bui = new RedipsUI();
     init('board');
@@ -1741,7 +1742,7 @@ function RedipsUI() {
 </div>
 `;
 
-    self.prompt(html, `<button class="button" onclick="leaveLobby();hideModal()">${t('Close')}</button>`, 'lobby-modal wide');
+    self.prompt(html, `<button class="button" onclick="closeLobbyModal()">${t('Close')}</button>`, 'lobby-modal wide');
 
     const lobbyNameInput = document.getElementById('lobby-name');
     if (lobbyNameInput) {
@@ -1759,7 +1760,10 @@ function RedipsUI() {
     }
 
     // Ensure clean state - leave any existing channel before joining lobby
-    leaveLobby().then(() => joinLobbyChannel());
+    leaveLobby().then(() => {
+      g_inLobbyModal = true;
+      joinLobbyChannel();
+    });
   };
 
   self.showSwapModal = function() {

@@ -114,6 +114,8 @@ let g_mpAutoSaveTimer = null;
 let g_channelSubscribed = false;
 let g_resumeConnectionTimer = null;
 let g_resumeFailTimer = null;
+let g_inLobbyModal = false;
+let g_lobbySubscribedAt = 0;
 
 function initSupabase() {
   if (window.supabase) {
@@ -566,7 +568,40 @@ function joinLobbyChannel() {
     .on('presence', { event: 'join' }, (payload) => {
       if (DEBUG) console.log('Presence join event received:', payload);
       if (payload && payload.key) g_explicitLeftUsers.delete(payload.key);
-      renderLobbyPlayers(filterExplicitLeft(g_channel.presenceState()));
+
+      // presenceState() can lag behind the join event; manually merge the new
+      // presence so the badge updates immediately with the correct count.
+      var state = filterExplicitLeft(g_channel.presenceState());
+      if (payload && payload.key && payload.newPresences && payload.newPresences.length > 0) {
+        if (!state[payload.key]) {
+          state[payload.key] = payload.newPresences.slice();
+        } else {
+          payload.newPresences.forEach(function(np) {
+            var exists = state[payload.key].some(function(ep) {
+              return ep.presence_ref === np.presence_ref;
+            });
+            if (!exists) state[payload.key].push(np);
+          });
+        }
+      }
+      renderLobbyPlayers(state);
+
+      // Toast: notify when another player opens the lobby modal
+      // Skip toasts for players already in the lobby when we first subscribe
+      if (payload && payload.key !== g_lobbyUserId && Date.now() - g_lobbySubscribedAt > 2000) {
+        var newUser = payload.newPresences && payload.newPresences.length > 0
+          ? payload.newPresences[payload.newPresences.length - 1]
+          : null;
+        if (newUser && newUser.inLobbyModal !== false && newUser.lookingForGame && newUser.name) {
+          if (typeof g_isMultiplayer === 'undefined' || !g_isMultiplayer) {
+            var lobbyPlayers = document.getElementById('lobby-players');
+            var isLobbyOpen = lobbyPlayers && lobbyPlayers.offsetParent !== null;
+            if (!isLobbyOpen) {
+              g_bui.toast(newUser.name + ' ' + t('has joined the lobby'), 3000);
+            }
+          }
+        }
+      }
     })
     .on('presence', { event: 'update' }, (payload) => {
       if (DEBUG) console.log('Presence update event received:', payload);
@@ -584,34 +619,45 @@ function joinLobbyChannel() {
     .on('broadcast', { event: 'invite' }, (payload) => {
       if (payload.payload.to === g_lobbyUserId) {
         if (DEBUG) console.log('Received invite!', payload);
+        // Ignore invites during active games to avoid interrupting in-progress play
+        if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) return;
+        if (typeof g_board_empty !== 'undefined' && !g_board_empty) return;
         startMultiplayerGame(payload.payload.gameId, payload.payload.fromId, payload.payload.fromName, false);
       }
     })
     .subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
-        await g_channel.track({ name: g_myName, lookingForGame: true, id: g_lobbyUserId });
+        g_lobbySubscribedAt = Date.now();
+        await g_channel.track({ name: g_myName, lookingForGame: true, id: g_lobbyUserId, inLobbyModal: g_inLobbyModal });
+        // Explicitly refresh badge after initial join in case sync event is delayed
+        if (g_channel) {
+          renderLobbyPlayers(filterExplicitLeft(g_channel.presenceState()));
+        }
       }
     });
 }
 
-function renderLobbyPlayers(state) {
-  const container = document.getElementById('lobby-players');
-  if (!container) return; // Modal closed
+function updateLobbyBadge(count) {
+  var btn = document.getElementById('lobby');
+  if (!btn) return;
+  btn.setAttribute('data-count', String(count));
+}
 
+function renderLobbyPlayers(state) {
   if (DEBUG) console.log('renderLobbyPlayers called with state:', state, 'g_lobbyUserId:', g_lobbyUserId);
   let html = '';
   let count = 0;
   for (const id in state) {
     const metas = state[id] || [];
     const user = metas.length > 0 ? metas[metas.length - 1] : null;
-    if (!user) continue; // Skip if user data is undefined/null
+    if (!user) continue;
     if (DEBUG) console.log('Checking user id:', id, 'user:', user);
-    // Don't show self. User name can change, so rely on presence key.
     if (id === g_lobbyUserId || user.id === g_lobbyUserId) {
       if (DEBUG) console.log('Skipping self:', id);
       continue;
     }
     if (!user.lookingForGame) continue;
+    if (user.inLobbyModal === false) continue;
 
     const displayName = String(user.name || t('Player'));
     const safeName = displayName.replace(/'/g, "\\'");
@@ -623,11 +669,17 @@ function renderLobbyPlayers(state) {
     count++;
   }
 
-  if (count === 0) html = '<em>' + t('No other players waiting.') + '</em>';
-  container.innerHTML = html;
+  const container = document.getElementById('lobby-players');
+  if (container) {
+    if (count === 0) html = '<em>' + t('No other players waiting.') + '</em>';
+    container.innerHTML = html;
+  }
+
+  updateLobbyBadge(count);
 }
 
 window.leaveLobby = async function() {
+  g_inLobbyModal = false;
   g_explicitLeftUsers.clear();
   if (g_channel) {
     // Broadcast explicit leave so other clients remove us immediately,
@@ -658,6 +710,21 @@ window.leaveLobby = async function() {
     g_dragGhost = null;
   }
 }
+
+window.closeLobbyModal = function() {
+  g_inLobbyModal = false;
+  if (g_channel) {
+    g_channel.track({
+      name: g_myName,
+      lookingForGame: true,
+      id: g_lobbyUserId,
+      inLobbyModal: false
+    }).catch(function(err) {
+      if (DEBUG) console.warn('Failed to update lobby state:', err);
+    });
+  }
+  hideModal();
+};
 
 window.invitePlayer = function(opponentId, opponentName) {
   if (!g_channel) return;
