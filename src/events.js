@@ -101,11 +101,20 @@ window.onload = function() {
   // Check browser support
   if (g_isSupported) {
     // Restore exact previous mode/session from localStorage
-    var sessionMode = localStorage['session_mode'];
-    var hasMultiplayerSession = !!localStorage['session_mp'];
+    // Prioritize multiplayer sessions unconditionally to avoid falling back to
+    // single-player when the tab is unloaded and reloaded (e.g. Firefox for Android).
+    var mpSession = null;
+    var hasMultiplayerSession = false;
+    try {
+      mpSession = JSON.parse(localStorage['session_mp'] || 'null');
+      hasMultiplayerSession = !!(mpSession && mpSession.gameId && !mpSession.isGameOver);
+    } catch (e) {
+      hasMultiplayerSession = false;
+    }
+
     var hasSinglePlayerSession = !!localStorage['session'];
 
-    if ((sessionMode === 'mp' && hasMultiplayerSession) || (hasMultiplayerSession && !hasSinglePlayerSession)) {
+    if (hasMultiplayerSession) {
       init('board', true);
     } else if (hasSinglePlayerSession) {
       load(localStorage['session']);

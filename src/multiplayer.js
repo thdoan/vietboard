@@ -110,6 +110,10 @@ let g_postGameTimer = null;
 let g_myRematchGameId = null;
 let g_lastEmojiSentAt = 0;
 let g_mpGameEndReason = '';
+let g_mpAutoSaveTimer = null;
+let g_channelSubscribed = false;
+let g_resumeConnectionTimer = null;
+let g_resumeFailTimer = null;
 
 function initSupabase() {
   if (window.supabase) {
@@ -716,6 +720,9 @@ async function startMultiplayerGame(gameId, opponentId, opponentName, isHost) {
 
   // Connect to game channel
   joinGameChannel(gameId, isHost);
+
+  // Start periodic auto-save
+  startMpAutoSaveTimer();
 }
 
 function joinGameChannel(gameId, isHost) {
@@ -723,6 +730,8 @@ function joinGameChannel(gameId, isHost) {
     g_channel.unsubscribe();
     g_channel = null;
   }
+
+  g_channelSubscribed = false;
 
   g_channel = window.supabaseClient.channel('game:' + gameId, {
     config: {
@@ -779,9 +788,18 @@ function joinGameChannel(gameId, isHost) {
     })
     .subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
+        g_channelSubscribed = true;
         if (g_reconnectTimer) {
           clearTimeout(g_reconnectTimer);
           g_reconnectTimer = null;
+        }
+        if (g_resumeConnectionTimer) {
+          clearTimeout(g_resumeConnectionTimer);
+          g_resumeConnectionTimer = null;
+        }
+        if (g_resumeFailTimer) {
+          clearTimeout(g_resumeFailTimer);
+          g_resumeFailTimer = null;
         }
         await g_channel.track({ name: g_myName, id: g_lobbyUserId, isHost });
         startIdleTimer();
@@ -790,6 +808,7 @@ function joinGameChannel(gameId, isHost) {
           setTimeout(() => initializeHostGame(), 500); // short delay to ensure opponent is connected
         }
       } else if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') && g_isMultiplayer && !g_isGameOver) {
+        g_channelSubscribed = false;
         if (!g_reconnectTimer) {
           g_reconnectTimer = setTimeout(function() {
             g_reconnectTimer = null;
@@ -858,6 +877,7 @@ function enterPostGameState() {
   }
   if (g_postGameTimer) clearTimeout(g_postGameTimer);
   if (g_bui && g_bui.hideEmojiPicker) g_bui.hideEmojiPicker();
+  stopMpAutoSaveTimer();
   g_postGameTimer = setTimeout(function() {
     cleanupMultiplayerSession();
   }, typeof g_wait_mp_rematch !== 'undefined' ? g_wait_mp_rematch : 60000);
@@ -882,6 +902,15 @@ function cleanupMultiplayerSession() {
   if (g_postGameTimer) {
     clearTimeout(g_postGameTimer);
     g_postGameTimer = null;
+  }
+  stopMpAutoSaveTimer();
+  if (g_resumeConnectionTimer) {
+    clearTimeout(g_resumeConnectionTimer);
+    g_resumeConnectionTimer = null;
+  }
+  if (g_resumeFailTimer) {
+    clearTimeout(g_resumeFailTimer);
+    g_resumeFailTimer = null;
   }
   if (g_channel) {
     g_channel.unsubscribe();
@@ -1859,8 +1888,7 @@ function saveMultiplayerSession() {
 
     if (!inferredLastMoveAt) inferredLastMoveAt = now;
 
-    localStorage['session_mode'] = 'mp';
-    localStorage['session_mp'] = JSON.stringify({
+    var snapshot = {
       gameId: g_gameId,
       opponentName: g_opponentName,
       isMyTurn: g_isMyTurn,
@@ -1878,113 +1906,148 @@ function saveMultiplayerSession() {
       history: g_history,
       savedAt: now,
       lastMoveAt: inferredLastMoveAt
-    });
+    };
+
+    var snapshotJson = JSON.stringify(snapshot);
+    // Skip write if identical to last saved snapshot to reduce disk I/O
+    if (previousSnapshot && JSON.stringify(previousSnapshot) === snapshotJson) {
+      return;
+    }
+
+    localStorage['session_mode'] = 'mp';
+    localStorage['session_mp'] = snapshotJson;
   }
 }
 
 document.addEventListener('appReady', function() {
   // Check if we have a multiplayer session to resume
-  if (localStorage['session_mp']) {
-    try {
-      var mpData = JSON.parse(localStorage['session_mp']);
-      var now = Date.now();
-      var idleMs = typeof g_wait_mp_idle !== 'undefined' ? g_wait_mp_idle : 3600000;
-      var MAX_RESUME_AGE_MS = idleMs + 5 * 60 * 1000; // idle timeout + 5 min buffer
-      var hasRecentSnapshot = mpData && typeof mpData.savedAt === 'number' && (now - mpData.savedAt) <= MAX_RESUME_AGE_MS;
-      var hasRecentMove = mpData && typeof mpData.lastMoveAt === 'number' && (now - mpData.lastMoveAt) <= MAX_RESUME_AGE_MS;
-      var hasUsableState = mpData &&
-        typeof mpData.gameId === 'string' && mpData.gameId !== '' &&
-        typeof mpData.stateVersion === 'number' && mpData.stateVersion > 0 &&
-        typeof mpData.myRack === 'string' &&
-        typeof mpData.oppRack === 'string' &&
-        Array.isArray(mpData.letpool);
+  if (!localStorage['session_mp']) return;
 
-      // Resume only with a recent, valid in-game snapshot.
-      if (hasUsableState && (hasRecentSnapshot || hasRecentMove)) {
-        if (mpData.isGameOver) {
-          localStorage.removeItem('session_mp');
-          cleanupMultiplayerSession();
-          return;
-        }
-        if (DEBUG) console.log('Resuming multiplayer session for game:', mpData.gameId);
+  var mpData = null;
+  try {
+    mpData = JSON.parse(localStorage['session_mp']);
+  } catch (e) {
+    console.error('Failed to parse session_mp:', e);
+  }
 
-        g_gameId = mpData.gameId;
-        g_opponentName = mpData.opponentName;
-        g_isMultiplayer = true;
-        g_isMyTurn = mpData.isMyTurn;
-        g_letpool = Array.isArray(mpData.letpool) ? mpData.letpool : (Array.isArray(g_letpool) ? g_letpool : []);
-        g_pscore = typeof mpData.pscore === 'number' ? mpData.pscore : g_pscore;
-        g_oscore = typeof mpData.oscore === 'number' ? mpData.oscore : g_oscore;
-        g_board = normalizeBoardMatrix(mpData.board, '');
-        g_boardpoints = normalizeBoardMatrix(mpData.boardp, 0);
-        g_boardtypes = normalizeBoardMatrix(mpData.boardt, 0);
-        g_board_empty = mpData.boardEmpty;
-        g_stateVersion = mpData.stateVersion || 0;
-        g_isGameOver = !!mpData.isGameOver;
+  var now = Date.now();
+  var idleMs = typeof g_wait_mp_idle !== 'undefined' ? g_wait_mp_idle : 3600000;
+  var MAX_RESUME_AGE_MS = idleMs + 5 * 60 * 1000; // idle timeout + 5 min buffer
+  var hasRecentSnapshot = mpData && typeof mpData.savedAt === 'number' && (now - mpData.savedAt) <= MAX_RESUME_AGE_MS;
+  var hasRecentMove = mpData && typeof mpData.lastMoveAt === 'number' && (now - mpData.lastMoveAt) <= MAX_RESUME_AGE_MS;
+  var hasUsableState = mpData &&
+    typeof mpData.gameId === 'string' && mpData.gameId !== '' &&
+    typeof mpData.stateVersion === 'number' && mpData.stateVersion > 0 &&
+    typeof mpData.myRack === 'string' &&
+    typeof mpData.oppRack === 'string' &&
+    Array.isArray(mpData.letpool);
 
-        // Restore words-played history
-        g_history = Array.isArray(mpData.history) ? mpData.history : [];
-        var histHtml = '<table>';
-        for (var i = 0; i < g_history.length; ++i) {
-          var entry = g_history[i];
-          histHtml += g_bui.renderWordPlayed(entry[0], entry[1]);
-        }
-        histHtml += '</table>';
-        el('history').innerHTML = histHtml;
-        g_bui.hlines = histHtml;
-        g_bui.hcount = g_history.length;
+  if (!hasUsableState || (!hasRecentSnapshot && !hasRecentMove)) {
+    localStorage.removeItem('session_mp');
+    if (localStorage['session_mode'] === 'mp') localStorage['session_mode'] = 'sp';
+    return;
+  }
 
-        // Apply restored rack and board state immediately
-        if (DEBUG) console.log('Applying restored rack and board state...');
-        g_bui.setPlayerRack(String(mpData.myRack || ''));
-        g_bui.setOpponentRack(String(mpData.oppRack || ''));
-        g_bui.setPlayerScore(0, g_pscore);
-        g_bui.setOpponentScore(0, g_oscore);
-        g_bui.setTilesLeft((g_letpool || []).length);
+  if (mpData.isGameOver) {
+    localStorage.removeItem('session_mp');
+    cleanupMultiplayerSession();
+    return;
+  }
 
-        if (Array.isArray(g_board) && Array.isArray(g_boardtypes)) {
-          for (var x = 0; x < g_boardwidth; ++x) {
-            var boardColumn = g_board[x];
-            var boardTypeColumn = g_boardtypes[x];
-            if (!Array.isArray(boardColumn) || !Array.isArray(boardTypeColumn)) continue;
+  if (DEBUG) console.log('Resuming multiplayer session for game:', mpData.gameId);
 
-            for (var y = 0; y < g_boardheight; ++y) {
-              var cell = el('c' + x + '_' + y);
-              var char = boardColumn[y];
-              if (char && char !== '' && typeof char !== 'undefined' && cell && cell.innerHTML === '') {
-                var displayChar = char.toUpperCase();
-                var tClass = boardTypeColumn[y] === 1 ? 't1' : 't2';
-                var points = (g_boardpoints[x] && g_boardpoints[x][y]) || 0;
-                var p = parseInt(points);
-                var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
-                var html = '<div class="drag ' + tClass + '">' + (char !== ' ' ? displayChar : '&nbsp;&nbsp;') + pointsHtml + '</div>';
-                cell.innerHTML = html;
-                var holdsObj = { 'letter': char, 'points': p };
-                cell.holds = holdsObj;
-                if (cell.firstChild) cell.firstChild.holds = holdsObj;
-              } else if (cell && (!char || char === '')) {
-                cell.holds = '';
-              }
-            }
+  try {
+    g_gameId = mpData.gameId;
+    g_opponentName = mpData.opponentName;
+    g_isMultiplayer = true;
+    g_isMyTurn = mpData.isMyTurn;
+    g_letpool = Array.isArray(mpData.letpool) ? mpData.letpool : (Array.isArray(g_letpool) ? g_letpool : []);
+    g_pscore = typeof mpData.pscore === 'number' ? mpData.pscore : g_pscore;
+    g_oscore = typeof mpData.oscore === 'number' ? mpData.oscore : g_oscore;
+    g_board = normalizeBoardMatrix(mpData.board, '');
+    g_boardpoints = normalizeBoardMatrix(mpData.boardp, 0);
+    g_boardtypes = normalizeBoardMatrix(mpData.boardt, 0);
+    g_board_empty = mpData.boardEmpty;
+    g_stateVersion = mpData.stateVersion || 0;
+    g_isGameOver = !!mpData.isGameOver;
+
+    // Restore words-played history
+    g_history = Array.isArray(mpData.history) ? mpData.history : [];
+    var histHtml = '<table>';
+    for (var i = 0; i < g_history.length; ++i) {
+      var entry = g_history[i];
+      histHtml += g_bui.renderWordPlayed(entry[0], entry[1]);
+    }
+    histHtml += '</table>';
+    el('history').innerHTML = histHtml;
+    g_bui.hlines = histHtml;
+    g_bui.hcount = g_history.length;
+
+    // Apply restored rack and board state immediately
+    if (DEBUG) console.log('Applying restored rack and board state...');
+    g_bui.setPlayerRack(String(mpData.myRack || ''));
+    g_bui.setOpponentRack(String(mpData.oppRack || ''));
+    g_bui.setPlayerScore(0, g_pscore);
+    g_bui.setOpponentScore(0, g_oscore);
+    g_bui.setTilesLeft((g_letpool || []).length);
+
+    if (Array.isArray(g_board) && Array.isArray(g_boardtypes)) {
+      for (var x = 0; x < g_boardwidth; ++x) {
+        var boardColumn = g_board[x];
+        var boardTypeColumn = g_boardtypes[x];
+        if (!Array.isArray(boardColumn) || !Array.isArray(boardTypeColumn)) continue;
+
+        for (var y = 0; y < g_boardheight; ++y) {
+          var cell = el('c' + x + '_' + y);
+          var char = boardColumn[y];
+          if (char && char !== '' && typeof char !== 'undefined' && cell && cell.innerHTML === '') {
+            var displayChar = char.toUpperCase();
+            var tClass = boardTypeColumn[y] === 1 ? 't1' : 't2';
+            var points = (g_boardpoints[x] && g_boardpoints[x][y]) || 0;
+            var p = parseInt(points);
+            var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
+            var html = '<div class="drag ' + tClass + '">' + (char !== ' ' ? displayChar : '&nbsp;&nbsp;') + pointsHtml + '</div>';
+            cell.innerHTML = html;
+            var holdsObj = { 'letter': char, 'points': p };
+            cell.holds = holdsObj;
+            if (cell.firstChild) cell.firstChild.holds = holdsObj;
+          } else if (cell && (!char || char === '')) {
+            cell.holds = '';
           }
         }
-        g_bui.makeTilesFixed();
-        updateTurnIndicator();
-        updateGameInfoLabels();
-
-        // Rejoin channel
-        joinGameChannel(g_gameId, false);
-
-        // Request latest state just in case we missed a move while refreshing
-        broadcastGameState({ type: 'request_state' });
-      } else {
-        // Prevent stale/incomplete snapshots from forcing broken reconnect attempts.
-        localStorage.removeItem('session_mp');
-        if (localStorage['session_mode'] === 'mp') localStorage['session_mode'] = 'sp';
       }
-    } catch (e) {
-      console.error(e);
     }
+    g_bui.makeTilesFixed();
+    updateTurnIndicator();
+    updateGameInfoLabels();
+
+    // Rejoin channel
+    joinGameChannel(g_gameId, false);
+
+    // Connection watchdog: show reconnecting toast if not subscribed quickly
+    g_resumeConnectionTimer = setTimeout(function() {
+      if (!g_channelSubscribed) {
+        if (g_bui) g_bui.toast(t('Reconnecting...'), 3000);
+      }
+    }, 5000);
+
+    g_resumeFailTimer = setTimeout(function() {
+      if (!g_channelSubscribed) {
+        g_bui.prompt(
+          t('Unable to reconnect to game.'),
+          '<button class="button" onclick="hideModal();cleanupMultiplayerSession();init(\'board\')">' + t('Play Computer') + '</button>'
+        );
+      }
+    }, 20000);
+
+    // Request latest state just in case we missed a move while refreshing
+    broadcastGameState({ type: 'request_state' });
+  } catch (err) {
+    console.error('Error restoring multiplayer session:', err);
+    localStorage.removeItem('session_mp');
+    if (localStorage['session_mode'] === 'mp') localStorage['session_mode'] = 'sp';
+    // Fall back to fresh single-player board so user is never stuck
+    init('board');
   }
 });
 
@@ -2090,6 +2153,25 @@ handleGameStateBroadcast = function(payload) {
 };
 
 // -----------------------------------------------------------------------------
+// PERIODIC AUTO-SAVE
+// -----------------------------------------------------------------------------
+function startMpAutoSaveTimer() {
+  if (g_mpAutoSaveTimer) clearInterval(g_mpAutoSaveTimer);
+  g_mpAutoSaveTimer = setInterval(function() {
+    if (g_isMultiplayer && !g_isGameOver) {
+      saveMultiplayerSession();
+    }
+  }, 30000);
+}
+
+function stopMpAutoSaveTimer() {
+  if (g_mpAutoSaveTimer) {
+    clearInterval(g_mpAutoSaveTimer);
+    g_mpAutoSaveTimer = null;
+  }
+}
+
+// -----------------------------------------------------------------------------
 // IDLE & DISCONNECT HANDLING
 // -----------------------------------------------------------------------------
 
@@ -2169,10 +2251,12 @@ function handleVisibilityChange() {
       clearInterval(g_idleTimer);
       g_idleTimer = null;
     }
+    stopMpAutoSaveTimer();
   } else {
     if (g_isMultiplayer && !g_isGameOver) {
       resetIdleTimer();
       startIdleTimer();
+      startMpAutoSaveTimer();
     }
   }
 }
@@ -2182,6 +2266,15 @@ window.addEventListener('pagehide', function() {
   if (g_idleTimer) {
     clearInterval(g_idleTimer);
     g_idleTimer = null;
+  }
+  stopMpAutoSaveTimer();
+});
+window.addEventListener('beforeunload', function() {
+  if (g_isMultiplayer) saveMultiplayerSession();
+});
+window.addEventListener('pageshow', function(e) {
+  if (e.persisted && g_isMultiplayer && g_gameId && !g_isGameOver) {
+    joinGameChannel(g_gameId, false);
   }
 });
 
