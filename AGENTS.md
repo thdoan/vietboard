@@ -76,6 +76,12 @@ The `app_key` field uses a simple XOR obfuscation (`_dk`/`_hk` in `multiplayer.j
 - When a user clicks a high score from another device, `loadHighScore()` falls back to `loadSessionFromCloud()` if no local session exists.
 - Fetched sessions are cached in `localStorage['cloud_sessions']` for instant replay on subsequent clicks.
 
+### Return to Game (High Score Viewing)
+When a user clicks a high score to view a replay, the current game state must be preserved to enable "Return to Game". This is handled via:
+- **`session_return`** key in localStorage — set exactly once per viewing session (not the legacy `session` key used for SP).
+- For multiplayer games, also call `saveMultiplayerSession()` to snapshot `session_mp` state.
+- **`returnToGame()`** — helper function that loads from `session_return` (falling back to `session`), clears the key, and calls `updateTurnIndicator()` to restore button states.
+
 ### Player Name Syncing in High Scores
 When a player renames, the change is synced to global high scores via three mechanisms:
 1. **`updatePlayerName()`** - Updates local high score entries by matching either `playerId` (preferred) or the old fallback name.
