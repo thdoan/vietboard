@@ -1304,5 +1304,5 @@ html.mobile #modal-container.wide {
   max-height: 95%;
 }
 html.mobile #modal-content {
-  padding: 4%;
+  padding: 4% 2.5vmin;
 }

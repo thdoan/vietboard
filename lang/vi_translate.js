@@ -30,7 +30,7 @@ var translation_map = {
   'Game ends in ': 'Trò chơi kết thúc sau ',
   'Game over due to inactivity.': 'Trò chơi kết thúc do không hoạt động.',
   'Game over. The score is...': 'Trò chơi kết thúc. Số điểm là...',
-  'GAMEOVER': 'KẾT THÚC',
+  'GAME OVER': 'KẾT THÚC',
   'Generating...': 'Đang tạo...',
   'has no definition or may be part of a compound word': 'chưa có định nghĩa hoặc là một phần trong từ ghép',
   'Hide computer&rsquo;s rack': 'Giấu khay chữ của máy',

@@ -270,9 +270,9 @@ function announceWinner() {
   finalizeGameScores();
 
   var html = '<table id="gameover" class="centered"><tr>';
-  var text = t('GAMEOVER');
+  var text = t('GAME OVER');
   for (var i = 0; i < text.length; ++i) {
-    html += '<td class="tile"><div class="drag t' + randInt(1, 2) + '">' + text[i] + '</div></td>';
+    html += '<td class="tile"><div class="drag t' + randInt(1, 2) + '">' + (text[i] === ' ' ? '&nbsp;' : text[i]) + '</div></td>';
   }
   html += '</tr></table><ul><li>';
   html += t('You') + ': <strong>' + g_pscore + '</strong></li><li>' + opponentNoun + ': <strong>' + g_oscore + '</strong></li></ul>';
