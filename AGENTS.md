@@ -88,6 +88,15 @@ When a player renames, the change is synced to global high scores via three mech
 2. **`mergeGlobalHighScores()`** - When loading global scores, uses both `playerId` and `sessionId` for deduplication, preferring the remote name for entries not belonging to the current user.
 3. **`renderHighScoreRows()`** - Display format is `<name> (You)` for current user entries.
 
+### Session Persistence
+Multiplayer sessions use `localStorage['session_mp']` for persistence, while single-player uses `localStorage['session']`. Key patterns:
+- **Session mode tracking:** `localStorage['session_mode']` is `'mp'` or `'sp'`, but do not rely on it alone for resume decisions — always check for valid `session_mp` first.
+- **On-load priority:** In `window.onload` (`src/events.js`), parse `session_mp` directly and check for valid `gameId` and `!isGameOver` before falling back to SP or fresh start.
+- **Periodic auto-save:** Use a 30-second interval (`g_mpAutoSaveTimer`) to keep `session_mp` fresh for mobile scenarios where visibility events may not fire reliably.
+- **Lifecycle events:** Handle `visibilitychange` (tab hide/visible), `pagehide` (beforeunload alternative for mobile), `beforeunload` (explicit unload), and `pageshow` (bfcache restore).
+- **Skip identical saves:** In `saveMultiplayerSession()`, compare serialized JSON before writing to reduce disk I/O.
+- **Resume connection watchdog:** After re-joining a game channel on resume, use a timer to show user feedback if connection is slow (toast at 5s, prompt at 20s).
+
 ### Multiplayer Rematch
 - After a natural game-over (empty rack or max passes), the game enters a **post-game state** for `g_wait_mp_rematch` ms (default 60s).
 - In post-game state, the game channel stays alive and `cleanupMultiplayerSession()` is deferred.
