@@ -702,6 +702,9 @@ table.board td .drag,
   margin: 6px 0;
   padding: 6px;
 }
+#wordresult .phanloai:empty {
+  display: none;
+}
 
 /*** Game Info ***/
 

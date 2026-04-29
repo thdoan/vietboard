@@ -1863,10 +1863,10 @@ function RedipsUI() {
       // Try to get definition locally first
       var html = '<div id="wordresult"><div style="text-align:center"><h1>' + word + '</h1></div>';
       if (typeof g_defs[word] === 'string') {
-        html += '<div class="phanloai">&nbsp;</div>' + g_defs[word];
+        html += '<div class="phanloai"></div>' + g_defs[word];
       } else {
         for (var type in g_defs[word]) {
-          html += '<div class="phanloai">' + (type || '&nbsp;') + '</div>';
+          html += '<div class="phanloai">' + (type || '') + '</div>';
           for (var i = 0, entry; i < g_defs[word][type].length; ++i) {
             entry = g_defs[word][type][i];
             html += '<ul class="list1"><li>' + entry['definition'];
