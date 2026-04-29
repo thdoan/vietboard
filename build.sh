@@ -9,7 +9,7 @@ echo "=== Vietboard Build ==="
 # ---------------------------------------------------------------------------
 # 1. Clean build directory
 # ---------------------------------------------------------------------------
-echo "[1/7] Cleaning play/..."
+echo "[1/8] Cleaning play/..."
 rm -rf play
 mkdir -p play/js play/css play/lang play/pics play/sounds
 
@@ -17,18 +17,18 @@ mkdir -p play/js play/css play/lang play/pics play/sounds
 # 2. Timestamp for cache busting (HHMMSS, zero-padded)
 # ---------------------------------------------------------------------------
 TIMESTAMP=$(date +%H%M%S)
-echo "[2/7] Build timestamp: $TIMESTAMP"
+echo "[2/8] Build timestamp: $TIMESTAMP"
 
 # ---------------------------------------------------------------------------
 # 3. Minify CSS
 # ---------------------------------------------------------------------------
-echo "[3/7] Minifying CSS..."
+echo "[3/8] Minifying CSS..."
 node scripts/minify.js css css/style.css -o play/css/styles.min.css
 
 # ---------------------------------------------------------------------------
 # 4. Bundle + minify language files (includes emojis)
 # ---------------------------------------------------------------------------
-echo "[4/7] Bundling language files..."
+echo "[4/8] Bundling language files..."
 node scripts/minify.js js \
   lang/vi_wordlist.js \
   lang/vi_defs.js \
@@ -37,23 +37,32 @@ node scripts/minify.js js \
   -o play/js/lang.min.js
 
 # ---------------------------------------------------------------------------
-# 5. Bundle + minify application source files
+# 5. Prepare production engine.js (increase bag size)
 # ---------------------------------------------------------------------------
-echo "[5/7] Bundling application files..."
+echo "[5/8] Preparing production engine.js..."
+TMP_ENGINE=$(mktemp)
+cp src/engine.js "$TMP_ENGINE"
+sed -i 's/g_tiles_in_bag = 20/g_tiles_in_bag = 200/' "$TMP_ENGINE"
+
+# ---------------------------------------------------------------------------
+# 6. Bundle + minify application source files
+# ---------------------------------------------------------------------------
+echo "[6/8] Bundling application files..."
 node scripts/minify.js js \
   src/multiplayer.js \
   src/redipsdrag.js \
   src/bonuses.js \
   src/ui.js \
-  src/engine.js \
+  "$TMP_ENGINE" \
   src/events.js \
   src/changelog.js \
   -o play/js/app.min.js
+rm -f "$TMP_ENGINE"
 
 # ---------------------------------------------------------------------------
-# 6. Copy static assets
+# 7. Copy static assets
 # ---------------------------------------------------------------------------
-echo "[6/7] Copying static assets..."
+echo "[7/8] Copying static assets..."
 cp index.html play/
 cp -a pics/* play/pics/
 cp -a sounds/* play/sounds/
@@ -63,9 +72,9 @@ cp lang/en_translate.js play/lang/
 cp lang/vi_translate.js play/lang/
 
 # ---------------------------------------------------------------------------
-# 7. Transform play/index.html for production
+# 8. Transform play/index.html for production
 # ---------------------------------------------------------------------------
-echo "[7/7] Transforming index.html for production..."
+echo "[8/8] Transforming index.html for production..."
 
 # Cache-bust CSS
 sed -i "s|css/style.css|css/styles.min.css?v=$TIMESTAMP|" play/index.html
