@@ -10,7 +10,8 @@ echo "=== Vietboard Build ==="
 # 1. Clean build directory
 # ---------------------------------------------------------------------------
 echo "[1/8] Cleaning play/..."
-rm -rf play
+mkdir -p play
+find play -mindepth 1 -delete
 mkdir -p play/js play/css play/lang play/pics play/sounds
 
 # ---------------------------------------------------------------------------
@@ -42,6 +43,7 @@ node scripts/minify.js js \
 echo "[5/8] Preparing production engine.js..."
 TMP_ENGINE=$(mktemp)
 cp src/engine.js "$TMP_ENGINE"
+sed -i 's/const DEBUG = true/const DEBUG = false/' "$TMP_ENGINE"
 sed -i 's/g_tiles_in_bag = 20/g_tiles_in_bag = 200/' "$TMP_ENGINE"
 
 # ---------------------------------------------------------------------------
