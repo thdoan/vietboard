@@ -120,6 +120,8 @@ let g_lastLobbyTrackAt = 0;
 let g_lastForceRejoinAt = 0;
 let g_lobbyRenderTimer = null;
 let g_seenLobbyKeys = new Set();   // tracks presence keys already seen (deduplicates join toasts)
+let g_lastPresenceSyncAt = 0;
+const PRESENCE_SYNC_GRACE_MS = 3000; // suppress join toasts this long after any sync
 
 // Channel lifecycle guards
 let g_activeChannelType = null;   // 'lobby' | 'game'
@@ -717,6 +719,7 @@ function joinLobbyChannel() {
   g_channel
     .on('presence', { event: 'sync' }, () => {
       if (DEBUG) console.log('Presence sync event received');
+      g_lastPresenceSyncAt = Date.now();
       // Seed the dedupe set with every key currently in presence state so
       // that any subsequent join events for existing members are ignored.
       var state = g_channel.presenceState();
@@ -729,8 +732,11 @@ function joinLobbyChannel() {
       if (DEBUG) console.log('Presence join event received:', payload);
       renderLobbyPlayers();
 
-      // Toast: notify when another player comes online (deduped via g_seenLobbyKeys)
-      if (payload && payload.key && payload.key !== g_lobbyUserId && !g_seenLobbyKeys.has(payload.key)) {
+      // Toast: notify when another player comes online.
+      // Ignore joins that arrive within the grace period after a sync (covers
+      // page reloads and reconnections where existing members may re-fire join).
+      var withinGrace = (Date.now() - g_lastPresenceSyncAt) <= PRESENCE_SYNC_GRACE_MS;
+      if (payload && payload.key && payload.key !== g_lobbyUserId && !withinGrace && !g_seenLobbyKeys.has(payload.key)) {
         g_seenLobbyKeys.add(payload.key);
         var newUser = payload.newPresences && payload.newPresences.length > 0
           ? payload.newPresences[payload.newPresences.length - 1]
@@ -806,6 +812,7 @@ function forceRejoinLobby() {
   g_channelSubscribed = false;
   g_channelSubscribing = false;
   g_seenLobbyKeys.clear();
+  g_lastPresenceSyncAt = 0;
   // Small delay to let the old channel's presence expire before rejoining
   setTimeout(function() {
     g_lobbyRejoining = false;
@@ -1188,6 +1195,7 @@ window.leaveLobby = async function() {
   g_pendingInvites = {};
   g_myInvites = {};
   g_seenLobbyKeys.clear();
+  g_lastPresenceSyncAt = 0;
   if (g_inviteSub) {
     g_inviteSub.unsubscribe();
     g_inviteSub = null;
