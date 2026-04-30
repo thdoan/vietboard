@@ -142,6 +142,7 @@ The invite system replaces the old broadcast-based invites with a persistent Sup
 **Critical implementation notes:**
 - NEVER call `g_bui.restart()` during MP game initialization (`initializeHostGame`, `handleGameStateBroadcast type='init'`). The `restart()` method unconditionally calls `cleanupMultiplayerSession()` when `g_isMultiplayer === true`, destroying the active game channel. Instead, use direct `init('board')` + explicitly set `g_isMultiplayer = true` afterward.
 - Stale `accepted` invites in Supabase can cause `reconcileInvites()` to auto-start abandoned games. Mitigate with: (1) 5-minute freshness guard in reconcileInvites, (2) mark invite as `started` when game begins, (3) delete invite row on game end.
+- Stale `pending` invites can cause phantom Accept buttons to appear. Mitigate with 24-hour TTL in `reconcileInvites()` - pending invites older than 24h are skipped and not added to `g_pendingInvites`/`g_myInvites`.
 - Always validate session data before resuming (e.g., check `opponentName` is not null/empty) to reject corrupted sessions from buggy prior runs.
 - When fixing bugs that affect game initialization, clear localStorage and delete stale Supabase invite rows before testing.
 
