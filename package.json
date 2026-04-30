@@ -4,10 +4,12 @@
   "private": true,
   "scripts": {
     "build": "./build.sh",
-    "test": "node test/multiplayer.test.js"
+    "test": "node test/multiplayer.test.js",
+    "test:invite": "node test/invite-system.test.js"
   },
   "devDependencies": {
     "clean-css-cli": "^5.6.3",
+    "playwright": "^1.59.1",
     "puppeteer": "^5.5.0",
     "terser": "^5.46.2"
   }
