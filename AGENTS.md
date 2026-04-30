@@ -139,6 +139,12 @@ The invite system replaces the old broadcast-based invites with a persistent Sup
 - There is no manual Cancel button. Invites persist until accepted or auto-declined.
 - `reconcileInvites()` queries the DB on page load to restore missed invites and also checks for `status='accepted'` outgoing invites to auto-start as host after a reload.
 
+**Critical implementation notes:**
+- NEVER call `g_bui.restart()` during MP game initialization (`initializeHostGame`, `handleGameStateBroadcast type='init'`). The `restart()` method unconditionally calls `cleanupMultiplayerSession()` when `g_isMultiplayer === true`, destroying the active game channel. Instead, use direct `init('board')` + explicitly set `g_isMultiplayer = true` afterward.
+- Stale `accepted` invites in Supabase can cause `reconcileInvites()` to auto-start abandoned games. Mitigate with: (1) 5-minute freshness guard in reconcileInvites, (2) mark invite as `started` when game begins, (3) delete invite row on game end.
+- Always validate session data before resuming (e.g., check `opponentName` is not null/empty) to reject corrupted sessions from buggy prior runs.
+- When fixing bugs that affect game initialization, clear localStorage and delete stale Supabase invite rows before testing.
+
 ### Session Persistence
 Multiplayer sessions use `localStorage['session_mp']` for persistence, while single-player uses `localStorage['session']`. Key patterns:
 - **Session mode tracking:** `localStorage['session_mode']` is `'mp'` or `'sp'`, but do not rely on it alone for resume decisions — always check for valid `session_mp` first.
