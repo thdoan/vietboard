@@ -125,7 +125,6 @@ window.onload = function() {
     // when the lobby modal has never been opened.
     if (!hasMultiplayerSession && typeof joinLobbyChannel === 'function' && window.supabaseClient) {
       joinLobbyChannel();
-      if (typeof reconcileInvites === 'function') reconcileInvites();
     }
     // Close modal by clicking on its shadow
     g_cache['modalMask'].addEventListener('click', closeModal);

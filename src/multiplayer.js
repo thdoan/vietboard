@@ -1022,7 +1022,11 @@ async function reconcileInvites() {
       .eq('status', 'pending');
 
     if (incoming) {
+      var now = Date.now();
+      var staleThresholdMs = 24 * 60 * 60 * 1000;
       incoming.forEach(function(inv) {
+        var ageMs = now - new Date(inv.created_at).getTime();
+        if (ageMs > staleThresholdMs) return;
         g_pendingInvites[inv.game_id] = {
           from_id: inv.from_id,
           from_name: inv.from_name,
@@ -1039,7 +1043,11 @@ async function reconcileInvites() {
       .eq('status', 'pending');
 
     if (outgoing) {
+      var now2 = Date.now();
+      var staleThresholdMs2 = 24 * 60 * 60 * 1000;
       outgoing.forEach(function(inv) {
+        var ageMs = now2 - new Date(inv.created_at).getTime();
+        if (ageMs > staleThresholdMs2) return;
         g_myInvites[inv.game_id] = {
           to_id: inv.to_id,
           to_name: inv.to_name || t('Player'),
@@ -1212,11 +1220,6 @@ window.closeLobbyModal = function() {
 };
 
 
-
-// Listen for invites in the lobby
-function setupLobbyInviteListener() {
-  // We need to attach this when joining the lobby
-}
 
 // Mock translation function fallback if not defined
 if (typeof t !== 'function') {
