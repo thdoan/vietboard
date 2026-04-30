@@ -62,6 +62,29 @@ The app uses two tables in Supabase:
 
 - **`highscores`** — single row (`id='vietboard'`) storing all scores as a JSON blob. Schema: `{ id text PK, scores jsonb, app_key text }`.
 - **`sessions`** — stores full game state for replay. Schema: `{ id text PK, session_data text, app_key text, created_at timestamptz }`.
+- **`invites`** — persistent invite queue for lobby matchmaking. Schema:
+  ```sql
+  create table invites (
+    id text primary key default gen_random_uuid()::text,
+    from_id text not null,
+    to_id text not null,
+    game_id text not null,
+    from_name text not null,
+    to_name text,
+    status text not null default 'pending',
+    app_key text not null,
+    created_at timestamptz default now(),
+    unique(from_id, to_id, game_id)
+  );
+  ```
+  **Indexes:** `idx_invites_to_status`, `idx_invites_from_status`, `idx_invites_game`
+  **RLS:** SELECT open to all; upsert gated by `app_key`.
+  **Realtime:** `alter publication supabase_realtime add table invites;` — required for live invite delivery.
+  **Required SQL on fresh DB:**
+  ```sql
+  alter table invites add column if not exists to_name text;
+  alter publication supabase_realtime add table invites;
+  ```
 
 An RPC function `sync_highscores_and_sessions` atomically upserts both tables and prunes orphaned sessions in a single call:
 
@@ -90,14 +113,31 @@ When a player renames, the change is synced to global high scores via three mech
 3. **`renderHighScoreRows()`** - Display format is `<name> (You)` for current user entries.
 
 ### Lobby Presence and Notifications
-The lobby uses Supabase Realtime presence with metadata to track player activity:
-- **`g_inLobbyModal`** — session variable (resets on page reload) that tracks whether the player has the lobby modal open
-- **`inLobbyModal`** — presence metadata field: `true` when player opens lobby modal, `false` when closed, `undefined` for page-load-only subscribers
-- **Auto-subscribe on page load** — players are subscribed to the lobby channel with `inLobbyModal: false` to receive presence updates
-- **Badge count** — only counts players where `inLobbyModal !== false` (skips page-load subscribers who haven't opened lobby)
-- **Toast notifications** — only fires when: (1) joining player has `inLobbyModal !== false`, (2) current player is not in MP game, (3) lobby modal is closed
-- **Grace period** — `g_lobbySubscribedAt` timestamp prevents toasts for existing players within 2 seconds of subscribing
-- **Design principle** — use presence metadata over broadcasts for cleaner implementation; presence state is inherently more reliable than custom broadcast events
+The lobby follows a chess.com-style model where anyone who visits the page is online, and anyone not currently in an MP game is available to be invited:
+- **Auto-subscribe on page load** — all players subscribe to the lobby presence channel in the background via `joinLobbyChannel()` on `window.onload`, regardless of whether the lobby modal is open.
+- **Badge count** — counts all online players (excluding self) who are in the lobby presence state.
+- **Toast notifications** — fires when a new player joins the lobby (grace period: 2 seconds after `g_lobbySubscribedAt` to suppress initial sync noise), unless the current player is already in an MP game.
+
+### Invite Queue System
+The invite system replaces the old broadcast-based invites with a persistent Supabase `invites` table + Realtime subscriptions.
+
+**Client state:**
+- `g_pendingInvites` — `gameId -> {from_id, from_name, created_at}` for incoming invites.
+- `g_myInvites` — `gameId -> {to_id, to_name, sent_at}` for outgoing invites.
+- `g_inviteSub` — Realtime channel listening for INSERT/UPDATE on `to_id=eq.me`.
+- `g_myInviteSub` — Realtime channel listening for UPDATE on `from_id=eq.me` with `status='accepted'`.
+
+**Invite lifecycle:**
+1. **Send:** `sendInvite(opponentId, opponentName)` checks for existing pending invites, inserts a row with `status='pending'`, and stores in `g_myInvites`.
+2. **Receive:** Realtime INSERT on recipient's `g_inviteSub` populates `g_pendingInvites` and shows toast: `"<name> has invited you to play! Go to lobby to accept"`.
+3. **Accept:** `acceptInvite(gameId)` updates the row to `status='accepted'` (filtered by `status='pending'` to avoid accepting stale auto-declined invites) and starts the game as non-host.
+4. **Auto-start (inviter):** Realtime UPDATE on `g_myInviteSub` triggers `startMultiplayerGame()` as host.
+5. **Auto-decline:** When a player starts an MP game, `startMultiplayerGame()` calls `cancelMyInvites()`, which updates all pending outgoing invites to `status='cancelled'`.
+
+**Key rules:**
+- SP game start does NOT cancel invites; MP game start DOES.
+- There is no manual Cancel button. Invites persist until accepted or auto-declined.
+- `reconcileInvites()` queries the DB on page load to restore missed invites and also checks for `status='accepted'` outgoing invites to auto-start as host after a reload.
 
 ### Session Persistence
 Multiplayer sessions use `localStorage['session_mp']` for persistence, while single-player uses `localStorage['session']`. Key patterns:
