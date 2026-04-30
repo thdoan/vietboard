@@ -6055,7 +6055,6 @@ var g_wordmap = {
   'chuyển vế': 1,
   'chuyển vị': 1,
   'chuyên viên': 1,
-  'clo': 1,
   'co': 1,
   'có': 1,
   'cò': 1,
