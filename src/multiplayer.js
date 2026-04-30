@@ -119,6 +119,7 @@ let g_lobbyRejoining = false;
 let g_lastLobbyTrackAt = 0;
 let g_lastForceRejoinAt = 0;
 let g_lobbyRenderTimer = null;
+let g_seenLobbyKeys = new Set();   // tracks presence keys already seen (deduplicates join toasts)
 
 // Channel lifecycle guards
 let g_activeChannelType = null;   // 'lobby' | 'game'
@@ -716,15 +717,21 @@ function joinLobbyChannel() {
   g_channel
     .on('presence', { event: 'sync' }, () => {
       if (DEBUG) console.log('Presence sync event received');
+      // Seed the dedupe set with every key currently in presence state so
+      // that any subsequent join events for existing members are ignored.
+      var state = g_channel.presenceState();
+      for (var id in state) {
+        if (id !== g_lobbyUserId) g_seenLobbyKeys.add(id);
+      }
       renderLobbyPlayers();
     })
     .on('presence', { event: 'join' }, (payload) => {
       if (DEBUG) console.log('Presence join event received:', payload);
       renderLobbyPlayers();
 
-      // Toast: notify when another player comes online
-      // Skip toasts for players already in the lobby when we first subscribe
-      if (payload && payload.key !== g_lobbyUserId && Date.now() - g_lobbySubscribedAt > 2000) {
+      // Toast: notify when another player comes online (deduped via g_seenLobbyKeys)
+      if (payload && payload.key && payload.key !== g_lobbyUserId && !g_seenLobbyKeys.has(payload.key)) {
+        g_seenLobbyKeys.add(payload.key);
         var newUser = payload.newPresences && payload.newPresences.length > 0
           ? payload.newPresences[payload.newPresences.length - 1]
           : null;
@@ -741,6 +748,8 @@ function joinLobbyChannel() {
     })
     .on('presence', { event: 'leave' }, (payload) => {
       if (DEBUG) console.log('Presence leave event received:', payload);
+      // Allow a true rejoin later to trigger a toast again
+      if (payload && payload.key) g_seenLobbyKeys.delete(payload.key);
       renderLobbyPlayers();
     })
     .on('broadcast', { event: 'lobby_ping' }, ({ payload }) => {
@@ -796,6 +805,7 @@ function forceRejoinLobby() {
   g_activeGameId = null;
   g_channelSubscribed = false;
   g_channelSubscribing = false;
+  g_seenLobbyKeys.clear();
   // Small delay to let the old channel's presence expire before rejoining
   setTimeout(function() {
     g_lobbyRejoining = false;
@@ -1177,6 +1187,7 @@ window.cancelMyInvites = async function() {
 window.leaveLobby = async function() {
   g_pendingInvites = {};
   g_myInvites = {};
+  g_seenLobbyKeys.clear();
   if (g_inviteSub) {
     g_inviteSub.unsubscribe();
     g_inviteSub = null;
