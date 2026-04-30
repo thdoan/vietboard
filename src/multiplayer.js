@@ -707,6 +707,7 @@ function joinLobbyChannel() {
   g_activeGameId = null;
   g_channelSubscribed = false;
   g_channelSubscribing = true;
+  g_lastPresenceSyncAt = Date.now(); // start grace period now so pre-sync joins are suppressed
 
   g_channel = window.supabaseClient.channel('lobby', {
     config: {
