@@ -200,6 +200,12 @@ function hideGameInfo() {
 // Modal functions
 function showModal(sHtml, sClass) {
   if (g_bui && g_bui.hideBusy) g_bui.hideBusy();
+  // Cancel any pending hideModal() timer to prevent race conditions
+  // where a previous hideModal() timer fires after we show the modal
+  if (g_bui && g_bui.timer) {
+    clearTimeout(g_bui.timer);
+    g_bui.timer = null;
+  }
   if (sClass) g_cache['modalContainer'].className = sClass;
   g_cache['modalContent'].innerHTML = sHtml;
   g_cache['modalMask'].style.display = 'block';
@@ -415,6 +421,8 @@ function RedipsUI() {
   self.acceptPlayerPlacement = function() {
     self.newplays = {};
     self.makeTilesFixed();
+    el('clear').textContent = t('Shuffle');
+    el('clear').onclick = onPlayerShuffle;
   };
 
   self.addToHistory = function(words, player) {
@@ -1420,7 +1428,11 @@ function RedipsUI() {
   };
 
   self.playSound = function() {
-    g_cache['sound'].play();
+    try {
+      g_cache['sound'].play();
+    } catch (e) {
+      // Silently ignore autoplay restrictions before first user interaction
+    }
   };
 
   self.prompt = function(msg, button, sClass) {
@@ -1480,7 +1492,7 @@ function RedipsUI() {
       var currentUserName = (typeof g_myName !== 'undefined' && g_myName) ? String(g_myName).trim() : '';
       var currentUserId = (typeof g_lobbyUserId !== 'undefined' && g_lobbyUserId) ? String(g_lobbyUserId).trim() : '';
       for (var i = 0; i < g_highscores[sKey].length; ++i) {
-        if (!g_highscores[sKey][i]) break;
+        if (!g_highscores[sKey][i]) continue;
         var score = Number(g_highscores[sKey][i]['score']);
         if (!(score > 0)) continue;
         var playerName = g_highscores[sKey][i]['player'];
@@ -1518,7 +1530,9 @@ function RedipsUI() {
   };
 
   self.restart = function() {
-    if (typeof leaveLobby === 'function') leaveLobby();
+    if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof cleanupMultiplayerSession === 'function') {
+      cleanupMultiplayerSession();
+    }
     localStorage.removeItem('session');
     g_bui = new RedipsUI();
     init('board');
@@ -1725,6 +1739,7 @@ function RedipsUI() {
   };
 
   self.showLobby = function() {
+    if (typeof ensureLobbyConnection === 'function') ensureLobbyConnection();
     // Save name
     localStorage.setItem('player_name', g_myName);
 
@@ -1759,11 +1774,8 @@ function RedipsUI() {
       });
     }
 
-    // Ensure clean state - leave any existing channel before joining lobby
-    leaveLobby().then(() => {
-      g_inLobbyModal = true;
-      joinLobbyChannel();
-    });
+    // Refresh lobby UI with current state (player is already in lobby channel from page load)
+    if (typeof renderLobbyPlayers === 'function') renderLobbyPlayers();
   };
 
   self.showSwapModal = function() {
@@ -1806,7 +1818,7 @@ function RedipsUI() {
     // Check for existing visible toast to reuse instead of stacking
     var existing = container.querySelector('.toast-message.show');
     if (existing) {
-      existing.textContent = msg;
+      existing.innerHTML = msg;
       existing.classList.remove('hide');
       if (existing._toastTimeout) clearTimeout(existing._toastTimeout);
       if (duration !== 0) {
@@ -1820,7 +1832,7 @@ function RedipsUI() {
 
     var toast = document.createElement('div');
     toast.className = 'toast-message';
-    toast.textContent = msg;
+    toast.innerHTML = msg;
     container.insertBefore(toast, container.firstChild);
 
     window.requestAnimationFrame(function() {

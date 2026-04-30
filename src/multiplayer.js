@@ -37,8 +37,7 @@ if (!g_lobbyUserId) {
 let g_myName = localStorage.getItem('player_name');
 if (!g_myName) {
   // Real fallback stored immediately — never expose "Generating..." to high scores
-  var fallback = t('Player') + '_' + Math.floor(Math.random() * 10000);
-  g_myName = fallback.substring(0, 32);
+  g_myName = generateUniquePlayerName();
   localStorage.setItem('player_name', g_myName);
   if (DEBUG) console.log('Generated fallback player_name:', g_myName);
 
@@ -65,7 +64,7 @@ if (!g_myName) {
     }
 
     var oldName = g_myName;
-    g_myName = sNickname.substring(0, 32);
+    g_myName = generateUniquePlayerName();
     localStorage.setItem('player_name', g_myName);
 
     // Rename any local high scores that used the old fallback name and re-sync
@@ -88,8 +87,8 @@ if (!g_myName) {
 
   generateNickname();
 }
+
 var g_channel = null; // Either lobby or game channel
-let g_explicitLeftUsers = new Set();
 let g_opponentPresenceState = false;
 let g_dragThrottleTimer = null;
 let g_dragGhost = null;
@@ -111,11 +110,133 @@ let g_myRematchGameId = null;
 let g_lastEmojiSentAt = 0;
 let g_mpGameEndReason = '';
 let g_mpAutoSaveTimer = null;
-let g_channelSubscribed = false;
+  let g_channelSubscribed = false;
 let g_resumeConnectionTimer = null;
 let g_resumeFailTimer = null;
-let g_inLobbyModal = false;
 let g_lobbySubscribedAt = 0;
+let g_lobbyReconnectTimer = null;
+let g_lobbyRejoining = false;
+let g_lastLobbyTrackAt = 0;
+let g_lastForceRejoinAt = 0;
+let g_lobbyRenderTimer = null;
+
+// Channel lifecycle guards
+let g_activeChannelType = null;   // 'lobby' | 'game'
+let g_activeGameId = null;        // current gameId when type==='game'
+let g_channelSubscribing = false; // true while subscribe handshake is in flight
+let g_lastAppliedMoveTimestamp = 0;
+
+// Invite queue (lobby only, backed by Supabase Realtime)
+let g_inviteSub = null;      // Realtime subscription for invites to me
+let g_myInviteSub = null;    // Realtime subscription for my outgoing invites
+let g_pendingInvites = {};   // gameId -> {from_id, from_name, created_at}
+let g_myInvites = {};        // gameId -> {to_id, to_name, sent_at}
+
+// Hybrid heartbeat for reliable lobby lists on mobile
+let g_lobbyHeartbeats = {};  // opponentId -> {name, lastPing}
+let g_lobbyHeartbeatTimer = null;
+const LOBBY_HEARTBEAT_INTERVAL_MS = 5000;
+const LOBBY_HEARTBEAT_STALE_MS = 15000;
+
+function isReservedPlayerName(name) {
+  if (!name || typeof name !== 'string') return true;
+  var lower = name.trim().toLowerCase();
+  // Block "Computer" in all supported languages + common variants
+  var reserved = ['computer', 'máy tính', 'máy', 'tính', 'bot', 'ai', 'cpu'];
+  for (var i = 0; i < reserved.length; ++i) {
+    if (lower === reserved[i]) return true;
+  }
+  return false;
+}
+
+function getKnownPlayerNames() {
+  var names = {};
+
+  // 1. Local high scores (all entries ever recorded locally)
+  if (typeof g_highscores === 'object' && g_highscores) {
+    for (var key in g_highscores) {
+      if (Array.isArray(g_highscores[key])) {
+        g_highscores[key].forEach(function(item) {
+          if (item && item.player) {
+            var raw = item.player;
+            // Strip "You (name)" wrapper to get the real name
+            var match = raw.match(/^You \((.+)\)$/);
+            var realName = match ? match[1] : raw;
+            if (realName && realName !== 'You' && realName !== t('You')) {
+              names[realName.toLowerCase()] = true;
+            }
+          }
+        });
+      }
+    }
+  }
+
+  // 2. Currently online players (presence)
+  if (g_channel && g_activeChannelType === 'lobby') {
+    var pstate = g_channel.presenceState();
+    for (var id in pstate) {
+      if (id === g_lobbyUserId) continue;
+      var metas = pstate[id];
+      var user = metas.length > 0 ? metas[metas.length - 1] : null;
+      if (user && user.name) names[user.name.toLowerCase()] = true;
+    }
+  }
+
+  // 3. Heartbeat cache
+  var now = Date.now();
+  for (var id in g_lobbyHeartbeats) {
+    if (id === g_lobbyUserId) continue;
+    var hb = g_lobbyHeartbeats[id];
+    if (now - hb.lastPing > LOBBY_HEARTBEAT_STALE_MS) continue;
+    if (hb.name) names[hb.name.toLowerCase()] = true;
+  }
+
+  return names;
+}
+
+function sanitizePlayerName(name) {
+  if (!name || typeof name !== 'string') return '';
+  return name.trim().replace(/ {2,}/g, ' ').substring(0, 32);
+}
+
+var g_validNameRegex = /^[\p{L}\p{N}_\-. ]+$/u;
+
+function validatePlayerName(desiredName) {
+  var name = sanitizePlayerName(desiredName);
+  if (!name) {
+    return { valid: false, reason: 'empty' };
+  }
+  if (!g_validNameRegex.test(name)) {
+    return { valid: false, reason: 'invalid' };
+  }
+  if (isReservedPlayerName(name)) {
+    return { valid: false, reason: 'reserved' };
+  }
+  var existing = getKnownPlayerNames();
+  var lower = name.toLowerCase();
+  // Allow keeping your own current name
+  if (g_myName && lower === g_myName.toLowerCase()) {
+    return { valid: true };
+  }
+  if (existing[lower]) {
+    return { valid: false, reason: 'taken' };
+  }
+  return { valid: true };
+}
+
+function generateUniquePlayerName() {
+  var base = t('Player') + '_' + Math.floor(Math.random() * 10000);
+  var existing = getKnownPlayerNames();
+  var lower = base.toLowerCase();
+  if (!existing[lower]) return base;
+  var suffix = 2;
+  var candidate = base + ' (' + suffix + ')';
+  while (existing[candidate.toLowerCase()] && suffix < 1000) {
+    suffix++;
+    candidate = base + ' (' + suffix + ')';
+  }
+  return candidate.substring(0, 32);
+}
 
 function initSupabase() {
   if (window.supabase) {
@@ -204,8 +325,13 @@ async function mergeGlobalHighScores(remoteScores) {
       } else if (sessionDedupeKey && seen[sessionDedupeKey]) {
         for (var j = 0; j < unique.length; j++) {
           if ((unique[j].sessionId || 'nosess') + '|' + unique[j].score === sessionDedupeKey) {
-            duplicateIndex = j;
-            break;
+            // Only merge if it's the same player (same playerId or same name)
+            var samePlayer = (playerId && unique[j].playerId && playerId === unique[j].playerId) ||
+                              (!playerId && !unique[j].playerId && rawName && unique[j].player === rawName);
+            if (samePlayer) {
+              duplicateIndex = j;
+              break;
+            }
           }
         }
       }
@@ -453,6 +579,14 @@ async function saveGlobalHighScores() {
        return;
     }
 
+    if (DEBUG) {
+      for (var key in strippedHighScores) {
+        if (Array.isArray(strippedHighScores[key])) {
+          console.log('Sending ' + strippedHighScores[key].length + ' scores for key: ' + key);
+        }
+      }
+    }
+
     if (DEBUG) console.log('Syncing high scores and sessions to Supabase...');
     var { error } = await window.supabaseClient
       .rpc('sync_highscores_and_sessions', {
@@ -484,9 +618,27 @@ if (document.readyState === 'complete' && document.documentElement.classList.con
 // -----------------------------------------------------------------------------
 
 window.updatePlayerName = async function(newName) {
-  var trimmed = (newName || (t('Player') + '_' + Math.floor(Math.random() * 10000))).substring(0, 32);
+  var sanitized = sanitizePlayerName(newName);
+  var validation = validatePlayerName(sanitized);
+
+  if (!validation.valid) {
+    // Reject the change and reset input
+    var inp = document.getElementById('lobby-name');
+    if (inp) inp.value = g_myName;
+    if (validation.reason === 'empty') {
+      // Silently reset to current name — no toast needed
+    } else if (validation.reason === 'reserved') {
+      g_bui.toast(`<strong>${sanitized}</strong> ${t('is reserved')}`, 3000);
+    } else if (validation.reason === 'taken') {
+      g_bui.toast(`<strong>${sanitized}</strong> ${t('is already taken')}`, 3000);
+    } else if (validation.reason === 'invalid') {
+      g_bui.toast(t('Name contains invalid characters'), 3000);
+    }
+    return;
+  }
+
   var oldName = g_myName;
-  g_myName = trimmed;
+  g_myName = sanitized;
   localStorage.setItem('player_name', g_myName);
   if (DEBUG) console.log('updatePlayerName: setting to', g_myName);
 
@@ -540,7 +692,18 @@ window.updatePlayerName = async function(newName) {
 }
 
 function joinLobbyChannel() {
-  if (g_channel) g_channel.unsubscribe();
+  if (g_activeChannelType === 'lobby') return;
+  if (g_channelSubscribing) return;
+
+  if (g_channel) {
+    g_channel.unsubscribe();
+    g_channel = null;
+  }
+
+  g_activeChannelType = 'lobby';
+  g_activeGameId = null;
+  g_channelSubscribed = false;
+  g_channelSubscribing = true;
 
   g_channel = window.supabaseClient.channel('lobby', {
     config: {
@@ -550,147 +713,478 @@ function joinLobbyChannel() {
     },
   });
 
-  function filterExplicitLeft(state) {
-    const filtered = Object.assign({}, state);
-    for (const id of g_explicitLeftUsers) {
-      delete filtered[id];
-    }
-    return filtered;
-  }
-
   g_channel
     .on('presence', { event: 'sync' }, () => {
       if (DEBUG) console.log('Presence sync event received');
-      const state = g_channel.presenceState();
-      if (DEBUG) console.log('Presence state:', state);
-      renderLobbyPlayers(filterExplicitLeft(state));
+      renderLobbyPlayers();
     })
     .on('presence', { event: 'join' }, (payload) => {
       if (DEBUG) console.log('Presence join event received:', payload);
-      if (payload && payload.key) g_explicitLeftUsers.delete(payload.key);
+      renderLobbyPlayers();
 
-      // presenceState() can lag behind the join event; manually merge the new
-      // presence so the badge updates immediately with the correct count.
-      var state = filterExplicitLeft(g_channel.presenceState());
-      if (payload && payload.key && payload.newPresences && payload.newPresences.length > 0) {
-        if (!state[payload.key]) {
-          state[payload.key] = payload.newPresences.slice();
-        } else {
-          payload.newPresences.forEach(function(np) {
-            var exists = state[payload.key].some(function(ep) {
-              return ep.presence_ref === np.presence_ref;
-            });
-            if (!exists) state[payload.key].push(np);
-          });
-        }
-      }
-      renderLobbyPlayers(state);
-
-      // Toast: notify when another player opens the lobby modal
+      // Toast: notify when another player comes online
       // Skip toasts for players already in the lobby when we first subscribe
       if (payload && payload.key !== g_lobbyUserId && Date.now() - g_lobbySubscribedAt > 2000) {
         var newUser = payload.newPresences && payload.newPresences.length > 0
           ? payload.newPresences[payload.newPresences.length - 1]
           : null;
-        if (newUser && newUser.inLobbyModal !== false && newUser.lookingForGame && newUser.name) {
+        if (newUser && newUser.lookingForGame && newUser.name) {
           if (typeof g_isMultiplayer === 'undefined' || !g_isMultiplayer) {
-            var lobbyPlayers = document.getElementById('lobby-players');
-            var isLobbyOpen = lobbyPlayers && lobbyPlayers.offsetParent !== null;
-            if (!isLobbyOpen) {
-              g_bui.toast(newUser.name + ' ' + t('has joined the lobby'), 3000);
-            }
+            g_bui.toast(`<strong>${newUser.name}</strong> ${t('has joined the lobby')}`, 3000);
           }
         }
       }
     })
     .on('presence', { event: 'update' }, (payload) => {
       if (DEBUG) console.log('Presence update event received:', payload);
-      renderLobbyPlayers(filterExplicitLeft(g_channel.presenceState()));
+      renderLobbyPlayers();
     })
     .on('presence', { event: 'leave' }, (payload) => {
       if (DEBUG) console.log('Presence leave event received:', payload);
-      renderLobbyPlayers(filterExplicitLeft(g_channel.presenceState()));
+      renderLobbyPlayers();
     })
-    .on('broadcast', { event: 'lobby_leave' }, ({ payload }) => {
-      if (DEBUG) console.log('Broadcast lobby_leave received:', payload);
-      if (payload && payload.id) g_explicitLeftUsers.add(payload.id);
-      renderLobbyPlayers(filterExplicitLeft(g_channel ? g_channel.presenceState() : {}));
-    })
-    .on('broadcast', { event: 'invite' }, (payload) => {
-      if (payload.payload.to === g_lobbyUserId) {
-        if (DEBUG) console.log('Received invite!', payload);
-        // Ignore invites during active games to avoid interrupting in-progress play
-        if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) return;
-        if (typeof g_board_empty !== 'undefined' && !g_board_empty) return;
-        startMultiplayerGame(payload.payload.gameId, payload.payload.fromId, payload.payload.fromName, false);
-      }
+    .on('broadcast', { event: 'lobby_ping' }, ({ payload }) => {
+      if (!payload || !payload.id || payload.id === g_lobbyUserId) return;
+      var pingName = payload.name || t('Player');
+      g_lobbyHeartbeats[payload.id] = {
+        name: pingName,
+        lastPing: Date.now()
+      };
+      updateLobbyBadgeFromMergedState();
     })
     .subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
         g_lobbySubscribedAt = Date.now();
-        await g_channel.track({ name: g_myName, lookingForGame: true, id: g_lobbyUserId, inLobbyModal: g_inLobbyModal });
-        // Explicitly refresh badge after initial join in case sync event is delayed
-        if (g_channel) {
-          renderLobbyPlayers(filterExplicitLeft(g_channel.presenceState()));
+        g_channelSubscribed = true;
+        g_channelSubscribing = false;
+        await g_channel.track({ name: g_myName, lookingForGame: true, id: g_lobbyUserId });
+        renderLobbyPlayers();
+        startLobbyHeartbeat();
+        subscribeToInvites();
+        subscribeToMyInvites();
+        reconcileInvites();
+      } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        g_channelSubscribed = false;
+        g_channelSubscribing = false;
+        if (!g_lobbyReconnectTimer) {
+          g_lobbyReconnectTimer = setTimeout(function() {
+            g_lobbyReconnectTimer = null;
+            if (!g_isMultiplayer) {
+              forceRejoinLobby();
+            }
+          }, 2000);
         }
       }
     });
 }
 
+function forceRejoinLobby() {
+  if (g_lobbyRejoining) return;
+  var now = Date.now();
+  if (now - g_lastForceRejoinAt < 2000) return; // Throttle rejoins to once per 2s
+  g_lastForceRejoinAt = now;
+  g_lobbyRejoining = true;
+  if (g_lobbyReconnectTimer) {
+    clearTimeout(g_lobbyReconnectTimer);
+    g_lobbyReconnectTimer = null;
+  }
+  if (g_channel) {
+    g_channel.unsubscribe();
+    g_channel = null;
+  }
+  g_activeChannelType = null;
+  g_activeGameId = null;
+  g_channelSubscribed = false;
+  g_channelSubscribing = false;
+  // Small delay to let the old channel's presence expire before rejoining
+  setTimeout(function() {
+    g_lobbyRejoining = false;
+    joinLobbyChannel();
+  }, 300);
+}
+
+function ensureLobbyConnection() {
+  if (g_isMultiplayer) return;
+  if (g_lobbyRejoining || g_channelSubscribing) return;
+  if (g_activeChannelType !== 'lobby' || !g_channelSubscribed) {
+    forceRejoinLobby();
+    return;
+  }
+  if (g_channel && typeof g_channel.track === 'function') {
+    var now = Date.now();
+    if (now - g_lastLobbyTrackAt < 3000) return; // Throttle track to once per 3s
+    g_lastLobbyTrackAt = now;
+    g_channel.track({ name: g_myName, lookingForGame: true, id: g_lobbyUserId }).catch(function() {
+      forceRejoinLobby();
+    });
+  }
+}
+
+function getMergedLobbyState() {
+  var merged = {};
+  if (g_channel && g_activeChannelType === 'lobby') {
+    var pstate = g_channel.presenceState();
+    for (var id in pstate) {
+      if (id === g_lobbyUserId) continue;
+      var metas = pstate[id];
+      var user = metas.length > 0 ? metas[metas.length - 1] : null;
+      if (user && user.lookingForGame) {
+        merged[id] = { name: String(user.name || t('Player')) };
+      }
+    }
+  }
+  var now = Date.now();
+  for (var id in g_lobbyHeartbeats) {
+    if (id === g_lobbyUserId) continue;
+    var hb = g_lobbyHeartbeats[id];
+    if (now - hb.lastPing > LOBBY_HEARTBEAT_STALE_MS) continue;
+    merged[id] = { name: hb.name };
+  }
+  return merged;
+}
+
 function updateLobbyBadge(count) {
+  if (typeof count !== 'number') {
+    var state = getMergedLobbyState();
+    count = 0;
+    for (var id in state) {
+      if (id !== g_lobbyUserId) count++;
+    }
+  }
   var btn = document.getElementById('lobby');
   if (!btn) return;
   btn.setAttribute('data-count', String(count));
 }
 
-function renderLobbyPlayers(state) {
-  if (DEBUG) console.log('renderLobbyPlayers called with state:', state, 'g_lobbyUserId:', g_lobbyUserId);
-  let html = '';
-  let count = 0;
-  for (const id in state) {
-    const metas = state[id] || [];
-    const user = metas.length > 0 ? metas[metas.length - 1] : null;
-    if (!user) continue;
-    if (DEBUG) console.log('Checking user id:', id, 'user:', user);
-    if (id === g_lobbyUserId || user.id === g_lobbyUserId) {
-      if (DEBUG) console.log('Skipping self:', id);
-      continue;
-    }
-    if (!user.lookingForGame) continue;
-    if (user.inLobbyModal === false) continue;
+function updateLobbyBadgeFromMergedState() {
+  updateLobbyBadge();
+}
 
-    const displayName = String(user.name || t('Player'));
-    const safeName = displayName.replace(/'/g, "\\'");
+function renderLobbyPlayers(state) {
+  if (g_lobbyRenderTimer) clearTimeout(g_lobbyRenderTimer);
+  g_lobbyRenderTimer = setTimeout(function() {
+    g_lobbyRenderTimer = null;
+    _doRenderLobbyPlayers(getMergedLobbyState());
+  }, 300);
+}
+
+function _doRenderLobbyPlayers(state) {
+  if (DEBUG) console.log('renderLobbyPlayers state:', state);
+
+  var html = '';
+  var count = 0;
+  for (var id in state) {
+    if (id === g_lobbyUserId) continue;
+    var raw = state[id];
+    if (!raw) continue;
+
+    var user = null;
+    if (Array.isArray(raw)) {
+      // presenceState format: [{name, lookingForGame, ...}]
+      user = raw.length > 0 ? raw[raw.length - 1] : null;
+      if (user && user.lookingForGame === false) user = null;
+    } else if (typeof raw === 'object') {
+      // merged state format: {name: '...'}
+      user = raw;
+    }
+    if (!user) continue;
+
+    var displayName = String(user.name || t('Player'));
+    var safeName = displayName.replace(/'/g, "\\'");
+
+    // Check for incoming/outgoing invites for this player
+    var incomingGameId = null;
+    for (var gid in g_pendingInvites) {
+      if (g_pendingInvites[gid].from_id === id) {
+        incomingGameId = gid;
+        break;
+      }
+    }
+    var outgoingGameId = null;
+    for (var gid in g_myInvites) {
+      if (g_myInvites[gid].to_id === id) {
+        outgoingGameId = gid;
+        break;
+      }
+    }
+
+    var actionButton = '';
+    if (incomingGameId) {
+      actionButton = `<button class="button small primary" onclick="event.stopPropagation();acceptInvite('${incomingGameId}')">${t('Accept')}</button>`;
+    } else if (outgoingGameId) {
+      actionButton = `<span class="lobby-pending">${t('Invited...')}</span>`;
+    } else {
+      actionButton = `<button class="button small" onclick="event.stopPropagation();sendInvite('${id}','${safeName}')">${t('Invite')}</button>`;
+    }
+
     html += `
-<div class="lobby-player" onclick="invitePlayer('${id}','${safeName}')">
+<div class="lobby-player">
   <strong>${displayName}</strong>
+  ${actionButton}
 </div>
 `;
     count++;
   }
 
-  const container = document.getElementById('lobby-players');
+  var container = document.getElementById('lobby-players');
   if (container) {
-    if (count === 0) html = '<em>' + t('No other players waiting.') + '</em>';
+    if (count === 0) html = '<em>' + t('No players online.') + '</em>';
     container.innerHTML = html;
   }
 
   updateLobbyBadge(count);
 }
 
+// -------------------------------------------------------------------------
+// INVITE SYSTEM
+// -------------------------------------------------------------------------
+
+function subscribeToInvites() {
+  if (!window.supabaseClient) return;
+  if (g_inviteSub) {
+    g_inviteSub.unsubscribe();
+    g_inviteSub = null;
+  }
+
+  g_inviteSub = window.supabaseClient
+    .channel('invites_to_me')
+    .on('postgres_changes', {
+      event: 'INSERT',
+      schema: 'public',
+      table: 'invites',
+      filter: 'to_id=eq.' + g_lobbyUserId
+    }, (payload) => {
+      if (!payload.new || payload.new.status !== 'pending') return;
+      if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) return;
+
+      var isNew = !g_pendingInvites[payload.new.game_id];
+
+      g_pendingInvites[payload.new.game_id] = {
+        from_id: payload.new.from_id,
+        from_name: payload.new.from_name,
+        created_at: payload.new.created_at
+      };
+
+      if (isNew) {
+        g_bui.toast(`<strong>${payload.new.from_name}</strong> ${t('has invited you to play! Go to lobby to accept')}`, 4000);
+      }
+      renderLobbyPlayers();
+      updateLobbyBadgeFromMergedState();
+    })
+    .on('postgres_changes', {
+      event: 'UPDATE',
+      schema: 'public',
+      table: 'invites',
+      filter: 'to_id=eq.' + g_lobbyUserId
+    }, (payload) => {
+      if (!payload.new) return;
+      if (payload.new.status !== 'pending') {
+        delete g_pendingInvites[payload.new.game_id];
+        renderLobbyPlayers();
+      }
+    })
+    .subscribe();
+}
+
+function subscribeToMyInvites() {
+  if (!window.supabaseClient) return;
+  if (g_myInviteSub) {
+    g_myInviteSub.unsubscribe();
+    g_myInviteSub = null;
+  }
+
+  g_myInviteSub = window.supabaseClient
+    .channel('my_invites')
+    .on('postgres_changes', {
+      event: 'UPDATE',
+      schema: 'public',
+      table: 'invites',
+      filter: 'from_id=eq.' + g_lobbyUserId
+    }, (payload) => {
+      if (!payload.new || payload.new.status !== 'accepted') return;
+      if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) return;
+
+      delete g_myInvites[payload.new.game_id];
+      startMultiplayerGame(payload.new.game_id, payload.new.to_id, payload.new.to_name || t('Player'), true);
+    })
+    .subscribe();
+}
+
+async function reconcileInvites() {
+  if (!window.supabaseClient || g_isMultiplayer) return;
+
+  try {
+    // Fetch pending invites sent to me
+    var { data: incoming } = await window.supabaseClient
+      .from('invites')
+      .select('*')
+      .eq('to_id', g_lobbyUserId)
+      .eq('status', 'pending');
+
+    if (incoming) {
+      incoming.forEach(function(inv) {
+        g_pendingInvites[inv.game_id] = {
+          from_id: inv.from_id,
+          from_name: inv.from_name,
+          created_at: inv.created_at
+        };
+      });
+    }
+
+    // Fetch pending invites sent by me
+    var { data: outgoing } = await window.supabaseClient
+      .from('invites')
+      .select('*')
+      .eq('from_id', g_lobbyUserId)
+      .eq('status', 'pending');
+
+    if (outgoing) {
+      outgoing.forEach(function(inv) {
+        g_myInvites[inv.game_id] = {
+          to_id: inv.to_id,
+          to_name: inv.to_name || t('Player'),
+          sent_at: inv.created_at
+        };
+      });
+    }
+
+    // Fetch accepted invites sent by me (e.g. opponent accepted while I was offline)
+    var { data: acceptedOutgoing } = await window.supabaseClient
+      .from('invites')
+      .select('*')
+      .eq('from_id', g_lobbyUserId)
+      .eq('status', 'accepted')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (acceptedOutgoing) {
+      // Opponent accepted while we were offline/reloading — auto-start as host
+      // Guard: only auto-start if accepted within last 5 minutes (stale invites from
+      // abandoned games should not trigger auto-start on every lobby rejoin).
+      var acceptedAgeMs = Date.now() - new Date(acceptedOutgoing.created_at).getTime();
+      if (acceptedAgeMs < 5 * 60 * 1000 && typeof g_isMultiplayer !== 'undefined' && !g_isMultiplayer) {
+        startMultiplayerGame(acceptedOutgoing.game_id, acceptedOutgoing.to_id, acceptedOutgoing.to_name || t('Player'), true);
+        return; // startMultiplayerGame handles its own cleanup
+      }
+    }
+
+    renderLobbyPlayers();
+  } catch (err) {
+    if (DEBUG) console.warn('Failed to reconcile invites:', err);
+  }
+}
+
+window.sendInvite = async function(opponentId, opponentName) {
+  if (!window.supabaseClient) return;
+
+  // Check if we already have a pending invite to this player
+  try {
+    var { data: existing } = await window.supabaseClient
+      .from('invites')
+      .select('game_id')
+      .eq('from_id', g_lobbyUserId)
+      .eq('to_id', opponentId)
+      .eq('status', 'pending')
+      .maybeSingle();
+
+    if (existing) {
+      // Already invited this player
+      return;
+    }
+  } catch (e) {
+    // Continue anyway
+  }
+
+  var newGameId = 'game_' + Math.random().toString(36).substr(2, 9);
+
+  try {
+    await window.supabaseClient.from('invites').upsert({
+      from_id: g_lobbyUserId,
+      to_id: opponentId,
+      game_id: newGameId,
+      from_name: g_myName,
+      to_name: opponentName,
+      status: 'pending',
+      app_key: _dk(_hk)
+    });
+
+    g_myInvites[newGameId] = {
+      to_id: opponentId,
+      to_name: opponentName,
+      sent_at: Date.now()
+    };
+
+    renderLobbyPlayers();
+  } catch (err) {
+    if (DEBUG) console.warn('Failed to send invite:', err);
+  }
+}
+
+window.acceptInvite = async function(gameId) {
+  var invite = g_pendingInvites[gameId];
+  if (!invite) return;
+
+  try {
+    var { data: updated, error } = await window.supabaseClient.from('invites')
+      .update({ status: 'accepted' })
+      .eq('game_id', gameId)
+      .eq('to_id', g_lobbyUserId)
+      .eq('status', 'pending')
+      .select()
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!updated) {
+      // Invite was auto-declined (cancelled) by the inviter starting another MP game
+      delete g_pendingInvites[gameId];
+      renderLobbyPlayers();
+      return;
+    }
+  } catch (err) {
+    if (DEBUG) console.warn('Failed to accept invite:', err);
+    return;
+  }
+
+  delete g_pendingInvites[gameId];
+  startMultiplayerGame(gameId, invite.from_id, invite.from_name, false);
+}
+
+window.cancelMyInvites = async function() {
+  if (!window.supabaseClient) return;
+
+  try {
+    await window.supabaseClient.from('invites')
+      .update({ status: 'cancelled' })
+      .eq('from_id', g_lobbyUserId)
+      .eq('status', 'pending');
+
+    g_myInvites = {};
+    renderLobbyPlayers();
+  } catch (err) {
+    if (DEBUG) console.warn('Failed to cancel invites:', err);
+  }
+}
+
 window.leaveLobby = async function() {
-  g_inLobbyModal = false;
-  g_explicitLeftUsers.clear();
+  g_pendingInvites = {};
+  g_myInvites = {};
+  if (g_inviteSub) {
+    g_inviteSub.unsubscribe();
+    g_inviteSub = null;
+  }
+  if (g_myInviteSub) {
+    g_myInviteSub.unsubscribe();
+    g_myInviteSub = null;
+  }
+  stopLobbyHeartbeat();
   if (g_channel) {
-    // Broadcast explicit leave so other clients remove us immediately,
-    // independent of presence propagation timing
     try {
       await g_channel.send({
         type: 'broadcast',
         event: 'lobby_leave',
         payload: { id: g_lobbyUserId }
       });
-      // Wait briefly to ensure broadcast propagates before untracking/unsubscribing
       await new Promise(res => setTimeout(res, 120));
     } catch (err) {
       if (DEBUG) console.warn('Failed to broadcast lobby_leave:', err);
@@ -705,6 +1199,8 @@ window.leaveLobby = async function() {
     await g_channel.unsubscribe();
     g_channel = null;
   }
+  g_activeChannelType = null;
+  g_activeGameId = null;
   if (g_dragGhost) {
     g_dragGhost.remove();
     g_dragGhost = null;
@@ -712,53 +1208,10 @@ window.leaveLobby = async function() {
 }
 
 window.closeLobbyModal = function() {
-  g_inLobbyModal = false;
-  if (g_channel) {
-    g_channel.track({
-      name: g_myName,
-      lookingForGame: true,
-      id: g_lobbyUserId,
-      inLobbyModal: false
-    }).catch(function(err) {
-      if (DEBUG) console.warn('Failed to update lobby state:', err);
-    });
-  }
   hideModal();
 };
 
-window.invitePlayer = function(opponentId, opponentName) {
-  if (!g_channel) return;
 
-  const state = g_channel.presenceState();
-  const metas = state[opponentId] || [];
-  const user = metas.length > 0 ? metas[metas.length - 1] : null;
-
-  if (!user || !user.lookingForGame) {
-    renderLobbyPlayers(state);
-    g_bui.prompt(t('This player is no longer available.'));
-    return;
-  }
-
-  // To keep it simple, we just start a game instantly using a deterministic game ID based on the two IDs.
-  // Actually, random UUID is safer. We will broadcast a "start_game" message to the lobby.
-  const newGameId = 'game_' + Math.random().toString(36).substr(2, 9);
-
-  // We send a directed broadcast to that user in the lobby
-  g_channel.send({
-    type: 'broadcast',
-    event: 'invite',
-    payload: {
-      to: opponentId,
-      fromId: g_lobbyUserId,
-      fromName: g_myName,
-      gameId: newGameId
-    }
-  });
-
-  // And start our side
-  g_opponentId = opponentId;
-  startMultiplayerGame(newGameId, opponentId, opponentName, true);
-}
 
 // Listen for invites in the lobby
 function setupLobbyInviteListener() {
@@ -781,9 +1234,27 @@ async function startMultiplayerGame(gameId, opponentId, opponentName, isHost) {
   g_lastEmojiSentAt = 0;
   localStorage['session_mode'] = 'mp';
 
+  // If we're starting a game (either as host or joining), cancel any pending invites we sent
+  if (typeof cancelMyInvites === 'function') {
+    await cancelMyInvites();
+  }
+
   await leaveLobby();
   hideModal();
   if (g_isMobile) hideGameInfo();
+
+  // Mark the invite row as started so reconcileInvites() never re-triggers it
+  if (window.supabaseClient && gameId) {
+    window.supabaseClient.from('invites')
+      .update({ status: 'started' })
+      .eq('game_id', gameId)
+      .then(function() {
+        if (DEBUG) console.log('Marked invite as started for game:', gameId);
+      })
+      .catch(function(err) {
+        if (DEBUG) console.warn('Failed to mark invite as started:', err);
+      });
+  }
 
   // Connect to game channel
   joinGameChannel(gameId, isHost);
@@ -792,13 +1263,32 @@ async function startMultiplayerGame(gameId, opponentId, opponentName, isHost) {
   startMpAutoSaveTimer();
 }
 
+async function deleteGameInvite(gameId) {
+  if (!window.supabaseClient || !gameId) return;
+  try {
+    await window.supabaseClient.from('invites')
+      .delete()
+      .eq('game_id', gameId);
+    if (DEBUG) console.log('Deleted invite for game:', gameId);
+  } catch (err) {
+    if (DEBUG) console.warn('Failed to delete invite:', err);
+  }
+}
+
 function joinGameChannel(gameId, isHost) {
+  if (g_activeChannelType === 'game' && g_activeGameId === gameId && (g_channelSubscribed || g_channelSubscribing)) {
+    return;
+  }
+
   if (g_channel) {
     g_channel.unsubscribe();
     g_channel = null;
   }
 
+  g_activeChannelType = 'game';
+  g_activeGameId = gameId;
   g_channelSubscribed = false;
+  g_channelSubscribing = true;
 
   g_channel = window.supabaseClient.channel('game:' + gameId, {
     config: {
@@ -856,6 +1346,7 @@ function joinGameChannel(gameId, isHost) {
     .subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
         g_channelSubscribed = true;
+        g_channelSubscribing = false;
         if (g_reconnectTimer) {
           clearTimeout(g_reconnectTimer);
           g_reconnectTimer = null;
@@ -876,6 +1367,7 @@ function joinGameChannel(gameId, isHost) {
         }
       } else if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') && g_isMultiplayer && !g_isGameOver) {
         g_channelSubscribed = false;
+        g_channelSubscribing = false;
         if (!g_reconnectTimer) {
           g_reconnectTimer = setTimeout(function() {
             g_reconnectTimer = null;
@@ -987,6 +1479,12 @@ function cleanupMultiplayerSession() {
   localStorage.removeItem('session_mp');
   localStorage['session_mode'] = 'sp';
 
+  // Purge the invite row for this game so it can never cause stale-state issues
+  var endedGameId = g_gameId;
+  if (endedGameId) {
+    deleteGameInvite(endedGameId);
+  }
+
   g_isMultiplayer = false;
   g_isMyTurn = true;
   g_gameId = null;
@@ -1001,9 +1499,17 @@ function cleanupMultiplayerSession() {
   g_lastEmojiSentAt = 0;
   g_mpGameEndReason = '';
 
+  g_activeChannelType = null;
+  g_activeGameId = null;
+
   if (g_bui && g_bui.hideEmojiPicker) g_bui.hideEmojiPicker();
   applyNonGameButtonPolicy();
   updateGameInfoLabels();
+
+  // Rejoin lobby so the player is discoverable for new games
+  if (typeof joinLobbyChannel === 'function' && window.supabaseClient) {
+    joinLobbyChannel();
+  }
 }
 
 window.confirmRestartMultiplayer = function() {
@@ -1044,6 +1550,11 @@ function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
     reason: reason || 'ended',
     stateVersion: g_stateVersion
   });
+
+  // Purge invite row immediately on game end so it can never cause stale-state issues
+  if (g_gameId) {
+    deleteGameInvite(g_gameId);
+  }
 
   if (!skipLocalAnnounce) {
     announceWinner();
@@ -1091,8 +1602,11 @@ function initializeHostGame() {
   // Set up board empty, etc. (done by init('board'))
   // But we need to sync g_letpool and the initial racks
 
-  // Call restart without prompting
-  g_bui.restart(true);
+  // Reset board state for a fresh MP game WITHOUT calling cleanupMultiplayerSession().
+  // g_bui.restart() would tear down the active game channel because it sees g_isMultiplayer === true.
+  localStorage.removeItem('session');
+  g_bui = new RedipsUI();
+  init('board');
   if (g_isMobile) hideGameInfo();
   g_isMultiplayer = true;
 
@@ -1512,9 +2026,12 @@ function handleDragBroadcast(payload) {
 function handleGameStateBroadcast(payload) {
   if (payload.type === 'init') {
     // Phase 4: Ensure board is fresh for both players
-    if (g_bui) g_bui.restart();
+    // g_bui.restart() would call cleanupMultiplayerSession() which tears down the game channel
+    localStorage.removeItem('session');
+    g_bui = new RedipsUI();
+    init('board');
     if (g_isMobile) hideGameInfo();
-    g_isMultiplayer = true; // g_bui.restart() might have cleared it via cleanup
+    g_isMultiplayer = true; // init() clears this, re-enable it
 
     setTimeout(() => {
       // Apply init state from host
@@ -1737,8 +2254,15 @@ function onMultiplayerMove(passed) {
 function handleMoveBroadcast(payload) {
   if (g_isGameOver) return;
   if (payload.type === 'move') {
-    if (payload.stateVersion && payload.stateVersion <= g_stateVersion) return;
+    if (payload.stateVersion && payload.stateVersion <= g_stateVersion) {
+      if (DEBUG) console.log('Ignoring stale move, version:', payload.stateVersion, '<= current:', g_stateVersion);
+      return;
+    }
+    if (payload.timestamp && typeof g_lastAppliedMoveTimestamp === 'number' && payload.timestamp <= g_lastAppliedMoveTimestamp) {
+      return;
+    }
     g_stateVersion = Math.max(g_stateVersion, payload.stateVersion || 0);
+    g_lastAppliedMoveTimestamp = Date.now();
 
     // Clean up any stray ghost tiles before applying the move
     cleanupDragGhosts();
@@ -1939,6 +2463,12 @@ function handleMoveBroadcast(payload) {
 
 function saveMultiplayerSession() {
   if (g_isMultiplayer) {
+    // Don't save corrupted sessions (e.g. opponentName missing indicates cleanupMultiplayerSession
+    // was incorrectly called during init, leaving g_isMultiplayer=true but opponentName=null)
+    if (!g_opponentName || !g_gameId) {
+      if (DEBUG) console.warn('Skipping save of corrupted MP session: missing opponentName or gameId');
+      return;
+    }
     var now = Date.now();
     var inferredLastMoveAt = g_lastMoveAt || 0;
     var previousSnapshot = null;
@@ -2007,7 +2537,8 @@ document.addEventListener('appReady', function() {
     typeof mpData.stateVersion === 'number' && mpData.stateVersion > 0 &&
     typeof mpData.myRack === 'string' &&
     typeof mpData.oppRack === 'string' &&
-    Array.isArray(mpData.letpool);
+    Array.isArray(mpData.letpool) &&
+    typeof mpData.opponentName === 'string' && mpData.opponentName !== '';
 
   if (!hasUsableState || (!hasRecentSnapshot && !hasRecentMove)) {
     localStorage.removeItem('session_mp');
@@ -2158,7 +2689,14 @@ handleGameStateBroadcast = function(payload) {
       lastMoveAt: g_lastMoveAt || Date.now()
     });
   } else if (payload.type === 'state_sync') {
-    if (payload.stateVersion && payload.stateVersion < g_stateVersion) return;
+    var hasLocalBoard = false;
+    for (var sx = 0; sx < g_boardwidth; ++sx) {
+      for (var sy = 0; sy < g_boardheight; ++sy) {
+        if (g_board[sx] && g_board[sx][sy]) { hasLocalBoard = true; break; }
+      }
+      if (hasLocalBoard) break;
+    }
+    if (payload.stateVersion && payload.stateVersion < g_stateVersion && hasLocalBoard) return;
 
     // We received a sync from the other player
     g_board = normalizeBoardMatrix(payload.board, '');
@@ -2236,6 +2774,37 @@ function stopMpAutoSaveTimer() {
     clearInterval(g_mpAutoSaveTimer);
     g_mpAutoSaveTimer = null;
   }
+}
+
+// -----------------------------------------------------------------------------
+// LOBBY HEARTBEAT (hybrid presence for mobile reliability)
+// -----------------------------------------------------------------------------
+function startLobbyHeartbeat() {
+  if (g_lobbyHeartbeatTimer) clearInterval(g_lobbyHeartbeatTimer);
+  g_lobbyHeartbeatTimer = setInterval(function() {
+    if (g_activeChannelType !== 'lobby' || !g_channel) return;
+    g_channel.send({
+      type: 'broadcast',
+      event: 'lobby_ping',
+      payload: { id: g_lobbyUserId, name: g_myName }
+    }).catch(function() {});
+
+    var now = Date.now();
+    for (var id in g_lobbyHeartbeats) {
+      if (now - g_lobbyHeartbeats[id].lastPing > LOBBY_HEARTBEAT_STALE_MS) {
+        delete g_lobbyHeartbeats[id];
+      }
+    }
+    updateLobbyBadgeFromMergedState();
+  }, LOBBY_HEARTBEAT_INTERVAL_MS);
+}
+
+function stopLobbyHeartbeat() {
+  if (g_lobbyHeartbeatTimer) {
+    clearInterval(g_lobbyHeartbeatTimer);
+    g_lobbyHeartbeatTimer = null;
+  }
+  g_lobbyHeartbeats = {};
 }
 
 // -----------------------------------------------------------------------------
@@ -2325,6 +2894,9 @@ function handleVisibilityChange() {
       startIdleTimer();
       startMpAutoSaveTimer();
     }
+    if (!g_isMultiplayer) {
+      ensureLobbyConnection();
+    }
   }
 }
 document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -2340,8 +2912,16 @@ window.addEventListener('beforeunload', function() {
   if (g_isMultiplayer) saveMultiplayerSession();
 });
 window.addEventListener('pageshow', function(e) {
-  if (e.persisted && g_isMultiplayer && g_gameId && !g_isGameOver) {
-    joinGameChannel(g_gameId, false);
+  if (e.persisted) {
+    if (g_isMultiplayer && g_gameId && !g_isGameOver) {
+      setTimeout(function() {
+        if (!g_channelSubscribed && !g_channelSubscribing) {
+          joinGameChannel(g_gameId, false);
+        }
+      }, 100);
+    } else {
+      ensureLobbyConnection();
+    }
   }
 });
 

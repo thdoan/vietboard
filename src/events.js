@@ -10,7 +10,7 @@ function closeModal() {
     // Clear Blank tile if closing modal without selecting a letter
     g_bui.cancelPlayerPlacement(g_bui.onSelLetter('*'));
   } else {
-    var elButton = g_cache['modalContent'].querySelector('.button');
+    var elButton = g_cache['modalContent'].querySelector('.buttons .button');
     if (elButton) elButton.click();
     else hideModal();
   }
@@ -125,6 +125,7 @@ window.onload = function() {
     // when the lobby modal has never been opened.
     if (!hasMultiplayerSession && typeof joinLobbyChannel === 'function' && window.supabaseClient) {
       joinLobbyChannel();
+      if (typeof reconcileInvites === 'function') reconcileInvites();
     }
     // Close modal by clicking on its shadow
     g_cache['modalMask'].addEventListener('click', closeModal);
