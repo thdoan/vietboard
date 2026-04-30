@@ -7,6 +7,7 @@ function showWhatsNew() {
     '<li>Added multiplayer!</li>' +
     '<li>Implemented global high scores</li>' +
     '<li>Implemented official end game rules</li>' +
+    '<li>Implemented coin flip for SP and MP games</li>' +
     '<li>Removed unnecessary page reloads</li>' +
     '<li>Revamped button icons</li>' +
     '<li>Fixed broken word lookup</li>' +

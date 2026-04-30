@@ -130,6 +130,7 @@ function init(iddiv, skipRacks) {
   g_passes = 0;
   g_board_empty = true;
   g_isGameOver = false;
+  g_isMultiplayer = false;
   g_history = [];
   if (typeof g_mpGameEndReason !== 'undefined') g_mpGameEndReason = '';
   g_rackEmptiedBy = '';
@@ -168,7 +169,20 @@ function init(iddiv, skipRacks) {
     //g_bui.setPlayerRack(takeLetters('qẵễỗệộỵv'));
   }
   g_bui.setTilesLeft(g_letpool.length);
-  setSinglePlayerTurn(true);
+
+  // Coin flip for first turn in single-player
+  var computerGoesFirst = Math.random() < 0.5;
+  if (computerGoesFirst) {
+    setSinglePlayerTurn(false);
+    setTimeout(function() {
+      // Trigger computer move by simulating a player pass
+      g_playerPassed = true;
+      onPlayerMove();
+      g_passes = 0; // Reset - computer's first turn is not a real pass
+    }, 500);
+  } else {
+    setSinglePlayerTurn(true);
+  }
 }
 
 //------------------------------------------------------------------------------
@@ -239,7 +253,21 @@ function finalizeGameScores() {
     });
   }
   if (scoreEntries.length) {
-    g_highscores[sHighScoresKey].push.apply(g_highscores[sHighScoresKey], scoreEntries);
+    // Pre-insert deduplication: skip if identical entry already exists
+    var existing = g_highscores[sHighScoresKey];
+    for (var i = 0; i < scoreEntries.length; ++i) {
+      var entry = scoreEntries[i];
+      var isDup = false;
+      for (var j = 0; j < existing.length; ++j) {
+        if (existing[j].playerId === entry.playerId &&
+            existing[j].score === entry.score &&
+            existing[j].sessionId === entry.sessionId) {
+          isDup = true;
+          break;
+        }
+      }
+      if (!isDup) existing.push(entry);
+    }
   }
   g_highscores[sHighScoresKey].sort(gCompareScores);
   g_highscores[sHighScoresKey] = g_highscores[sHighScoresKey].slice(0, 100);
@@ -1364,6 +1392,8 @@ function onPlayerMove() {
     g_oscore += score;
     if (play_word.seq.length === g_racksize) g_oscore += g_allLettersBonus;
     g_bui.setOpponentScore(score, g_oscore);
+
+    g_board_empty = false;
 
     var played = play_word.seq;
 

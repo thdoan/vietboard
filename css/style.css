@@ -1114,15 +1114,30 @@ html:not(.mobile) #modal-container.wide {
   padding: 5px;
 }
 .lobby-player {
+  align-items: center;
   background: rgb(var(--rgb-black) / 0.8);
   border-radius: var(--border-radius-xs);
   color: rgb(var(--rgb-white));
-  cursor: pointer;
+  display: flex;
+  gap: 0.5rem;
+  justify-content: space-between;
   margin: 4px 0;
-  padding: 5px 10px;
+  padding: 0.35rem 0.5rem;
 }
-.lobby-player:hover {
-  background: rgb(var(--rgb-btn-primary-hover));
+.lobby-player strong {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lobby-player .button.small {
+  font-size: 11px;
+  padding: 0.35rem 0.5rem;
+}
+.lobby-player .lobby-pending {
+  color: rgb(var(--rgb-white) / 0.6);
+  font-size: 12px;
+  font-style: italic;
 }
 
 /*** Toast ***/
