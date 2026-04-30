@@ -1,7 +1,0 @@
-{
-  "database": "dolt",
-  "backend": "dolt",
-  "dolt_mode": "embedded",
-  "dolt_database": "vietboard",
-  "project_id": "de9f7246-5644-4a63-8c5e-b1069ddbbf9b"
-}

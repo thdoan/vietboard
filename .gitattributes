@@ -1,4 +1,0 @@
-*     text eol=lf
-*.bat text eol=crlf
-*.mp3 -text
-*.png -text
