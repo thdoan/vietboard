@@ -1114,7 +1114,9 @@ html:not(.mobile) #modal-container.wide {
   padding: 5px;
 }
 .lobby-player {
-  --row-padding: 0.35rem 0.5rem;
+  --row-x-padding: 0.5rem;
+  --row-y-padding: 0.35rem;
+  --row-padding: var(--row-y-padding) var(--row-x-padding);
   align-items: center;
   background: rgb(var(--rgb-black) / 0.8);
   border-radius: var(--border-radius-xs);
@@ -1139,7 +1141,7 @@ html:not(.mobile) #modal-container.wide {
   color: rgb(var(--rgb-white) / 0.6);
   font-size: 12.33px;
   font-style: italic;
-  padding: var(--row-padding);
+  padding: var(--row-y-padding) 0;
 }
 
 /*** Toast ***/
