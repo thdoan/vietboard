@@ -115,6 +115,7 @@ let g_resumeConnectionTimer = null;
 let g_resumeFailTimer = null;
 let g_lobbySubscribedAt = 0;
 let g_lobbyFirstSubscribed = false;
+let g_lobbyJustLoaded = false;
 let g_lobbyReconnectTimer = null;
 let g_lobbyRejoining = false;
 let g_lastLobbyTrackAt = 0;
@@ -718,6 +719,8 @@ function joinLobbyChannel() {
   g_channelSubscribed = false;
   g_channelSubscribing = true;
   g_lobbySubscribedAt = Date.now();
+  g_lobbyJustLoaded = true;
+  setTimeout(function() { g_lobbyJustLoaded = false; }, 5000);
 
   g_channel = window.supabaseClient.channel('lobby', {
     config: {
@@ -741,6 +744,8 @@ function joinLobbyChannel() {
       renderLobbyPlayers();
 
       // Toast: notify when a genuinely new player comes online.
+      // Skip toasts entirely during the first 5 seconds after page load.
+      if (g_lobbyJustLoaded) return;
       // Only show if this key was NOT present in the last sync (true delta).
       if (payload && payload.key && payload.key !== g_lobbyUserId && !g_lastSyncKeys.has(payload.key)) {
         var newUser = payload.newPresences && payload.newPresences.length > 0
