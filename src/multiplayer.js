@@ -114,19 +114,24 @@ let g_mpAutoSaveTimer = null;
 let g_resumeConnectionTimer = null;
 let g_resumeFailTimer = null;
 let g_lobbySubscribedAt = 0;
+let g_lobbyFirstSubscribed = false;
 let g_lobbyReconnectTimer = null;
 let g_lobbyRejoining = false;
 let g_lastLobbyTrackAt = 0;
 let g_lastForceRejoinAt = 0;
+let g_lastReconnectAt = 0;
 let g_lobbyRenderTimer = null;
-const LOBBY_JOIN_GRACE_MS = 5000;     // suppress ALL join toasts this long after subscription starts
 
 let g_playersInGames = new Set();      // player IDs with started/accepted invites (DB source of truth)
 let g_lobbyRefreshTimer = null;
+let g_lastSyncKeys = new Set();        // keys from previous presence sync (true-delta join toasts)
+let g_lastRenderedLobbyKey = '';       // hash of last rendered lobby state (DOM diff)
 
 let g_cachedInitPayload = null;        // host caches init state for idempotent re-send
 let g_initTimeout = null;
 let g_seenInitIds = new Set();
+
+let g_lastCleanupAt = 0;               // throttle cleanupStaleInvites()
 
 // Channel lifecycle guards
 let g_activeChannelType = null;   // 'lobby' | 'game'
@@ -712,7 +717,7 @@ function joinLobbyChannel() {
   g_activeGameId = null;
   g_channelSubscribed = false;
   g_channelSubscribing = true;
-  g_lobbySubscribedAt = Date.now(); // start grace period before any events can fire
+  g_lobbySubscribedAt = Date.now();
 
   g_channel = window.supabaseClient.channel('lobby', {
     config: {
@@ -724,36 +729,36 @@ function joinLobbyChannel() {
 
   g_channel
     .on('presence', { event: 'sync' }, () => {
-      if (DEBUG) console.log('Presence sync event received');
+      // Track all keys currently in presence state for true-delta join toasts
+      g_lastSyncKeys.clear();
+      var state = g_channel.presenceState();
+      for (var id in state) {
+        if (id !== g_lobbyUserId) g_lastSyncKeys.add(id);
+      }
       renderLobbyPlayers();
     })
     .on('presence', { event: 'join' }, (payload) => {
-      if (DEBUG) console.log('Presence join event received:', payload);
       renderLobbyPlayers();
 
-      // Toast: notify when another player comes online.
-      // Only show toast if outside the subscription grace period.
-      if (payload && payload.key && payload.key !== g_lobbyUserId) {
-        var now = Date.now();
-        var withinGrace = (now - g_lobbySubscribedAt) <= LOBBY_JOIN_GRACE_MS;
-        if (!withinGrace) {
-          var newUser = payload.newPresences && payload.newPresences.length > 0
-            ? payload.newPresences[payload.newPresences.length - 1]
-            : null;
-          if (newUser && newUser.lookingForGame && newUser.name) {
-            if (typeof g_isMultiplayer === 'undefined' || !g_isMultiplayer) {
-              g_bui.toast(`<strong>${newUser.name}</strong> ${t('has joined the lobby')}`, 3000);
-            }
+      // Toast: notify when a genuinely new player comes online.
+      // Only show if this key was NOT present in the last sync (true delta).
+      if (payload && payload.key && payload.key !== g_lobbyUserId && !g_lastSyncKeys.has(payload.key)) {
+        var newUser = payload.newPresences && payload.newPresences.length > 0
+          ? payload.newPresences[payload.newPresences.length - 1]
+          : null;
+        if (newUser && newUser.lookingForGame && newUser.name) {
+          if (typeof g_isMultiplayer === 'undefined' || !g_isMultiplayer) {
+            g_bui.toast(`<strong>${newUser.name}</strong> ${t('has joined the lobby')}`, 3000);
           }
         }
+        g_lastSyncKeys.add(payload.key);
       }
     })
     .on('presence', { event: 'update' }, (payload) => {
-      if (DEBUG) console.log('Presence update event received:', payload);
       renderLobbyPlayers();
     })
     .on('presence', { event: 'leave' }, (payload) => {
-      if (DEBUG) console.log('Presence leave event received:', payload);
+      if (payload && payload.key) g_lastSyncKeys.delete(payload.key);
       renderLobbyPlayers();
     })
     .on('broadcast', { event: 'lobby_ping' }, ({ payload }) => {
@@ -775,10 +780,14 @@ function joinLobbyChannel() {
         startLobbyHeartbeat();
         subscribeToInvites();
         subscribeToMyInvites();
-        reconcileInvites();
+        if (!g_lobbyFirstSubscribed) {
+          g_lobbyFirstSubscribed = true;
+          reconcileInvites();
+        }
       } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
         g_channelSubscribed = false;
         g_channelSubscribing = false;
+        g_lobbyFirstSubscribed = false;
         if (!g_lobbyReconnectTimer) {
           g_lobbyReconnectTimer = setTimeout(function() {
             g_lobbyReconnectTimer = null;
@@ -794,8 +803,9 @@ function joinLobbyChannel() {
 function forceRejoinLobby() {
   if (g_lobbyRejoining) return;
   var now = Date.now();
-  if (now - g_lastForceRejoinAt < 2000) return; // Throttle rejoins to once per 2s
+  if (now - g_lastForceRejoinAt < 5000) return; // Throttle rejoins to once per 5s
   g_lastForceRejoinAt = now;
+  g_lastReconnectAt = now;
   g_lobbyRejoining = true;
   if (g_lobbyReconnectTimer) {
     clearTimeout(g_lobbyReconnectTimer);
@@ -918,7 +928,10 @@ function renderLobbyPlayers(state) {
 }
 
 function _doRenderLobbyPlayers(state) {
-  if (DEBUG) console.log('renderLobbyPlayers state:', state);
+  // Diff before render: skip DOM update if state is unchanged
+  var stateKey = Object.keys(state).sort().join(',');
+  if (stateKey === g_lastRenderedLobbyKey) return;
+  g_lastRenderedLobbyKey = stateKey;
 
   var html = '';
   var count = 0;
@@ -1259,7 +1272,10 @@ window.leaveLobby = async function() {
   g_pendingInvites = {};
   g_myInvites = {};
   g_lobbySubscribedAt = 0;
+  g_lobbyFirstSubscribed = false;
+  g_lastSyncKeys.clear();
   stopLobbyRefresh();
+  stopLobbyHeartbeat();
   if (g_inviteSub) {
     g_inviteSub.unsubscribe();
     g_inviteSub = null;
@@ -1359,6 +1375,9 @@ async function deleteGameInvite(gameId) {
 
 async function cleanupStaleInvites(currentGameId) {
   if (!window.supabaseClient) return;
+  var now = Date.now();
+  if (now - g_lastCleanupAt < 30000) return; // Throttle to once per 30s
+  g_lastCleanupAt = now;
   try {
     var query = window.supabaseClient.from('invites')
       .delete()
@@ -1370,7 +1389,6 @@ async function cleanupStaleInvites(currentGameId) {
     }
     var { error } = await query;
     if (error) throw error;
-    if (DEBUG) console.log('Cleaned up stale invites for user:', g_lobbyUserId);
   } catch (err) {
     if (DEBUG) console.warn('Failed to clean up stale invites:', err);
   }
