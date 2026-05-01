@@ -1050,6 +1050,9 @@ async function reconcileInvites() {
   if (!window.supabaseClient || g_isMultiplayer) return;
 
   try {
+    // Purge any stale started/accepted/cancelled invites for this user first
+    await cleanupStaleInvites(null);
+
     // Fetch pending invites sent to me
     var { data: incoming } = await window.supabaseClient
       .from('invites')
@@ -1199,9 +1202,10 @@ window.cancelMyInvites = async function() {
 
   try {
     await window.supabaseClient.from('invites')
-      .update({ status: 'cancelled' })
+      .delete()
       .eq('from_id', g_lobbyUserId)
-      .eq('status', 'pending');
+      .eq('status', 'pending')
+      .eq('app_key', _dk(_hk));
 
     g_myInvites = {};
     renderLobbyPlayers();
@@ -1281,6 +1285,10 @@ async function startMultiplayerGame(gameId, opponentId, opponentName, isHost) {
     await cancelMyInvites();
   }
 
+  // Purge any stale started/accepted/cancelled invites for this user (rematch,
+  // crash recovery, or accumulated cancelled rows) before creating a new one.
+  await cleanupStaleInvites(gameId);
+
   await leaveLobby();
   hideModal();
   if (g_isMobile) hideGameInfo();
@@ -1310,10 +1318,30 @@ async function deleteGameInvite(gameId) {
   try {
     await window.supabaseClient.from('invites')
       .delete()
-      .eq('game_id', gameId);
+      .eq('game_id', gameId)
+      .eq('app_key', _dk(_hk));
     if (DEBUG) console.log('Deleted invite for game:', gameId);
   } catch (err) {
     if (DEBUG) console.warn('Failed to delete invite:', err);
+  }
+}
+
+async function cleanupStaleInvites(currentGameId) {
+  if (!window.supabaseClient) return;
+  try {
+    var query = window.supabaseClient.from('invites')
+      .delete()
+      .eq('app_key', _dk(_hk))
+      .in('status', ['started', 'accepted', 'cancelled'])
+      .or('from_id.eq.' + g_lobbyUserId + ',to_id.eq.' + g_lobbyUserId);
+    if (currentGameId) {
+      query = query.neq('game_id', currentGameId);
+    }
+    var { error } = await query;
+    if (error) throw error;
+    if (DEBUG) console.log('Cleaned up stale invites for user:', g_lobbyUserId);
+  } catch (err) {
+    if (DEBUG) console.warn('Failed to clean up stale invites:', err);
   }
 }
 
@@ -2943,7 +2971,10 @@ function handleVisibilityChange() {
 }
 document.addEventListener('visibilitychange', handleVisibilityChange);
 window.addEventListener('pagehide', function() {
-  if (g_isMultiplayer) saveMultiplayerSession();
+  if (g_isMultiplayer) {
+    saveMultiplayerSession();
+    if (g_gameId) deleteGameInvite(g_gameId);
+  }
   if (g_idleTimer) {
     clearInterval(g_idleTimer);
     g_idleTimer = null;
@@ -2951,7 +2982,10 @@ window.addEventListener('pagehide', function() {
   stopMpAutoSaveTimer();
 });
 window.addEventListener('beforeunload', function() {
-  if (g_isMultiplayer) saveMultiplayerSession();
+  if (g_isMultiplayer) {
+    saveMultiplayerSession();
+    if (g_gameId) deleteGameInvite(g_gameId);
+  }
 });
 window.addEventListener('pageshow', function(e) {
   if (e.persisted) {

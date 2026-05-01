@@ -117,6 +117,7 @@ The lobby follows a chess.com-style model where anyone who visits the page is on
 - **Auto-subscribe on page load** — all players subscribe to the lobby presence channel in the background via `joinLobbyChannel()` on `window.onload`, regardless of whether the lobby modal is open.
 - **Badge count** — counts all online players (excluding self) who are in the lobby presence state.
 - **Toast notifications** — fires when a new player joins the lobby, unless the current player is already in an MP game. Hybrid deduplication: (1) a 5-second grace period after `joinLobbyChannel()` starts suppresses all join toasts during initial subscription churn, and (2) a per-key cooldown map (`g_lobbyJoinCooldowns`) suppresses toasts for keys seen within the last 30s. Timestamps are refreshed on `sync` and `join`, deleted on `leave`, and both the map and subscription timestamp are cleared in `leaveLobby()`/`forceRejoinLobby()`.
+- **Instant leave tracking** — when a player starts an MP game, `leaveLobby()` broadcasts `lobby_leave` with their user ID. Other clients handle this broadcast via `g_lobbyExplicitLeaves` (a Set) to immediately remove the player from the lobby list instead of waiting for Supabase's ~5-second presence timeout.
 
 ### Invite Queue System
 The invite system replaces the old broadcast-based invites with a persistent Supabase `invites` table + Realtime subscriptions.
@@ -132,17 +133,20 @@ The invite system replaces the old broadcast-based invites with a persistent Sup
 2. **Receive:** Realtime INSERT on recipient's `g_inviteSub` populates `g_pendingInvites` and shows toast: `"<name> has invited you to play! Go to lobby to accept"`.
 3. **Accept:** `acceptInvite(gameId)` updates the row to `status='accepted'` (filtered by `status='pending'` to avoid accepting stale auto-declined invites) and starts the game as non-host.
 4. **Auto-start (inviter):** Realtime UPDATE on `g_myInviteSub` triggers `startMultiplayerGame()` as host.
-5. **Auto-decline:** When a player starts an MP game, `startMultiplayerGame()` calls `cancelMyInvites()`, which updates all pending outgoing invites to `status='cancelled'`.
+5. **Auto-decline:** When a player starts an MP game, `startMultiplayerGame()` calls `cancelMyInvites()`, which **hard-deletes** all pending outgoing invites (no soft-delete accumulation).
+6. **Cleanup:** `cleanupStaleInvites(currentGameId)` hard-deletes any `started`/`accepted`/`cancelled` invite rows belonging to the current user (excluding the active game). Called from `startMultiplayerGame()` (rematch/crash recovery) and `reconcileInvites()` (page-load safety net).
+7. **Unload purge:** `beforeunload`/`pagehide` delete the invite row for the active game so tab closure doesn't leave stale `started` rows.
 
 **Key rules:**
 - SP game start does NOT cancel invites; MP game start DOES.
-- There is no manual Cancel button. Invites persist until accepted or auto-declined.
+- There is no manual Cancel button. Pending invites are hard-deleted on game start.
 - `reconcileInvites()` queries the DB on page load to restore missed invites and also checks for `status='accepted'` outgoing invites to auto-start as host after a reload.
+- All Supabase invite operations (insert, update, delete) must include `app_key` for RLS policy validation.
 
 **Critical implementation notes:**
 - NEVER call `g_bui.restart()` during MP game initialization (`initializeHostGame`, `handleGameStateBroadcast type='init'`). The `restart()` method unconditionally calls `cleanupMultiplayerSession()` when `g_isMultiplayer === true`, destroying the active game channel. Instead, use direct `init('board')` + explicitly set `g_isMultiplayer = true` afterward.
-- Stale `accepted` invites in Supabase can cause `reconcileInvites()` to auto-start abandoned games. Mitigate with: (1) 5-minute freshness guard in reconcileInvites, (2) mark invite as `started` when game begins, (3) delete invite row on game end.
-- Stale `pending` invites can cause phantom Accept buttons to appear. Mitigate with 24-hour TTL in `reconcileInvites()` - pending invites older than 24h are skipped and not added to `g_pendingInvites`/`g_myInvites`.
+- Stale invite rows are prevented by: (1) `cleanupStaleInvites()` purging old `started`/`accepted`/`cancelled` rows on game start and page load, (2) `deleteGameInvite()` called on game end and page unload, (3) 5-minute freshness guard in `reconcileInvites()` for accepted invites.
+- Stale `pending` invites can cause phantom Accept buttons. Mitigate with 24-hour TTL in `reconcileInvites()` — pending invites older than 24h are skipped and not added to `g_pendingInvites`/`g_myInvites`.
 - Always validate session data before resuming (e.g., check `opponentName` is not null/empty) to reject corrupted sessions from buggy prior runs.
 - When fixing bugs that affect game initialization, clear localStorage and delete stale Supabase invite rows before testing.
 
