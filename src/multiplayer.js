@@ -2962,12 +2962,17 @@ handleGameStateBroadcast = function(payload) {
   resetIdleTimer();
 };
 
+function getOpponentDisplayName() {
+  return (typeof g_opponentName !== 'undefined' && g_opponentName) ? g_opponentName : t('Opponent');
+}
+
 function updateGameInfoLabels() {
   const lblLast = document.getElementById('label-loscore');
   const lblTotal = document.getElementById('label-oscore');
   if (g_isMultiplayer && g_opponentName) {
-    if (lblLast) lblLast.innerHTML = t('Opponent&rsquo;s last score:');
-    if (lblTotal) lblTotal.innerHTML = t('Opponent&rsquo;s total score:');
+    var name = getOpponentDisplayName();
+    if (lblLast) lblLast.innerHTML = t('Opponent&rsquo;s last score:').replace('Opponent', name).replace('đối thủ', name);
+    if (lblTotal) lblTotal.innerHTML = t('Opponent&rsquo;s total score:').replace('Opponent', name).replace('đối thủ', name);
   } else {
     if (lblLast) lblLast.innerHTML = t('Computer&rsquo;s last score:');
     if (lblTotal) lblTotal.innerHTML = t('Computer&rsquo;s total score:');

@@ -815,8 +815,8 @@ table.board td .drag,
 }
 #score table.gameinfo td:first-child { /* Opponent */
   width: 57%;
+  overflow-wrap: anywhere;
   padding-left: 2%;
-  white-space: nowrap;
 }
 #score table.gameinfo td:last-child { /* Player */
   padding-right: 2%;
