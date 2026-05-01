@@ -725,13 +725,6 @@ function joinLobbyChannel() {
   g_channel
     .on('presence', { event: 'sync' }, () => {
       if (DEBUG) console.log('Presence sync event received');
-      // Refresh cooldown timestamps for every key currently in presence state so
-      // that any subsequent join events for existing members are suppressed.
-      var state = g_channel.presenceState();
-      var now = Date.now();
-      for (var id in state) {
-        if (id !== g_lobbyUserId) g_lobbyJoinCooldowns[id] = now;
-      }
       renderLobbyPlayers();
     })
     .on('presence', { event: 'join' }, (payload) => {
