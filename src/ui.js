@@ -1739,6 +1739,9 @@ function RedipsUI() {
 
   self.showLobby = function() {
     if (typeof ensureLobbyConnection === 'function') ensureLobbyConnection();
+    // Refresh in-game players from DB and start periodic refresh
+    if (typeof refreshPlayersInGames === 'function') refreshPlayersInGames();
+    if (typeof startLobbyRefresh === 'function') startLobbyRefresh();
     // Save name
     localStorage.setItem('player_name', g_myName);
 

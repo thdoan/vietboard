@@ -119,10 +119,14 @@ let g_lobbyRejoining = false;
 let g_lastLobbyTrackAt = 0;
 let g_lastForceRejoinAt = 0;
 let g_lobbyRenderTimer = null;
-let g_lobbyJoinCooldowns = {};     // key -> lastSeenTimestamp (deduplicates join toasts)
-let g_lobbyExplicitLeaves = new Set(); // keys that explicitly left via broadcast (pending Supabase presence expiry)
-const LOBBY_JOIN_COOLDOWN_MS = 30000; // suppress join toast for same key this long
 const LOBBY_JOIN_GRACE_MS = 5000;     // suppress ALL join toasts this long after subscription starts
+
+let g_playersInGames = new Set();      // player IDs with started/accepted invites (DB source of truth)
+let g_lobbyRefreshTimer = null;
+
+let g_cachedInitPayload = null;        // host caches init state for idempotent re-send
+let g_initTimeout = null;
+let g_seenInitIds = new Set();
 
 // Channel lifecycle guards
 let g_activeChannelType = null;   // 'lobby' | 'game'
@@ -735,16 +739,11 @@ function joinLobbyChannel() {
       renderLobbyPlayers();
 
       // Toast: notify when another player comes online.
-      // Hybrid dedupe: 5s grace period after subscription starts (covers page
-      // loads where join fires before sync) + 30s per-key cooldown (covers
-      // reconnections where sync fires first and seeds the map).
+      // Only show toast if outside the subscription grace period.
       if (payload && payload.key && payload.key !== g_lobbyUserId) {
         var now = Date.now();
         var withinGrace = (now - g_lobbySubscribedAt) <= LOBBY_JOIN_GRACE_MS;
-        var lastSeen = g_lobbyJoinCooldowns[payload.key];
-        var isNew = !lastSeen || (now - lastSeen) > LOBBY_JOIN_COOLDOWN_MS;
-        if (!withinGrace && isNew) {
-          g_lobbyJoinCooldowns[payload.key] = now;
+        if (!withinGrace) {
           var newUser = payload.newPresences && payload.newPresences.length > 0
             ? payload.newPresences[payload.newPresences.length - 1]
             : null;
@@ -753,8 +752,6 @@ function joinLobbyChannel() {
               g_bui.toast(`<strong>${newUser.name}</strong> ${t('has joined the lobby')}`, 3000);
             }
           }
-        } else {
-          g_lobbyJoinCooldowns[payload.key] = now;
         }
       }
     })
@@ -764,17 +761,6 @@ function joinLobbyChannel() {
     })
     .on('presence', { event: 'leave' }, (payload) => {
       if (DEBUG) console.log('Presence leave event received:', payload);
-      // Allow a true rejoin later to trigger a toast again
-      if (payload && payload.key) {
-        delete g_lobbyJoinCooldowns[payload.key];
-        g_lobbyExplicitLeaves.delete(payload.key);
-      }
-      renderLobbyPlayers();
-    })
-    .on('broadcast', { event: 'lobby_leave' }, ({ payload }) => {
-      if (!payload || !payload.id || payload.id === g_lobbyUserId) return;
-      g_lobbyExplicitLeaves.add(payload.id);
-      delete g_lobbyHeartbeats[payload.id];
       renderLobbyPlayers();
     })
     .on('broadcast', { event: 'lobby_ping' }, ({ payload }) => {
@@ -792,6 +778,7 @@ function joinLobbyChannel() {
         g_channelSubscribing = false;
         await g_channel.track({ name: g_myName, lookingForGame: true, id: g_lobbyUserId });
         renderLobbyPlayers();
+        refreshPlayersInGames();
         startLobbyHeartbeat();
         subscribeToInvites();
         subscribeToMyInvites();
@@ -829,8 +816,6 @@ function forceRejoinLobby() {
   g_activeGameId = null;
   g_channelSubscribed = false;
   g_channelSubscribing = false;
-  g_lobbyJoinCooldowns = {};
-  g_lobbyExplicitLeaves.clear();
   g_lobbySubscribedAt = 0;
   // Small delay to let the old channel's presence expire before rejoining
   setTimeout(function() {
@@ -856,12 +841,47 @@ function ensureLobbyConnection() {
   }
 }
 
+async function refreshPlayersInGames() {
+  if (!window.supabaseClient) return;
+  try {
+    var { data, error } = await window.supabaseClient
+      .from('invites')
+      .select('from_id, to_id')
+      .in('status', ['started', 'accepted'])
+      .eq('app_key', _dk(_hk));
+    if (error) throw error;
+    g_playersInGames.clear();
+    if (data) {
+      data.forEach(function(row) {
+        if (row.from_id) g_playersInGames.add(row.from_id);
+        if (row.to_id) g_playersInGames.add(row.to_id);
+      });
+    }
+    renderLobbyPlayers();
+  } catch (err) {
+    if (DEBUG) console.warn('Failed to refresh players in games:', err);
+  }
+}
+
+function startLobbyRefresh() {
+  stopLobbyRefresh();
+  refreshPlayersInGames();
+  g_lobbyRefreshTimer = setInterval(refreshPlayersInGames, 15000);
+}
+
+function stopLobbyRefresh() {
+  if (g_lobbyRefreshTimer) {
+    clearInterval(g_lobbyRefreshTimer);
+    g_lobbyRefreshTimer = null;
+  }
+}
+
 function getMergedLobbyState() {
   var merged = {};
   if (g_channel && g_activeChannelType === 'lobby') {
     var pstate = g_channel.presenceState();
     for (var id in pstate) {
-      if (id === g_lobbyUserId || g_lobbyExplicitLeaves.has(id)) continue;
+      if (id === g_lobbyUserId || g_playersInGames.has(id)) continue;
       var metas = pstate[id];
       var user = metas.length > 0 ? metas[metas.length - 1] : null;
       if (user && user.lookingForGame) {
@@ -871,7 +891,7 @@ function getMergedLobbyState() {
   }
   var now = Date.now();
   for (var id in g_lobbyHeartbeats) {
-    if (id === g_lobbyUserId || g_lobbyExplicitLeaves.has(id)) continue;
+    if (id === g_lobbyUserId || g_playersInGames.has(id)) continue;
     var hb = g_lobbyHeartbeats[id];
     if (now - hb.lastPing > LOBBY_HEARTBEAT_STALE_MS) continue;
     merged[id] = { name: hb.name };
@@ -1016,6 +1036,18 @@ function subscribeToInvites() {
       if (!payload.new) return;
       if (payload.new.status !== 'pending') {
         delete g_pendingInvites[payload.new.game_id];
+        renderLobbyPlayers();
+      }
+    })
+    .on('postgres_changes', {
+      event: 'DELETE',
+      schema: 'public',
+      table: 'invites',
+      filter: 'to_id=eq.' + g_lobbyUserId
+    }, (payload) => {
+      var gameId = payload.old ? payload.old.game_id : null;
+      if (gameId && g_pendingInvites[gameId]) {
+        delete g_pendingInvites[gameId];
         renderLobbyPlayers();
       }
     })
@@ -1169,11 +1201,28 @@ window.sendInvite = async function(opponentId, opponentName) {
 }
 
 window.acceptInvite = async function(gameId) {
-  var invite = g_pendingInvites[gameId];
-  if (!invite) return;
+  var invite = null;
 
   try {
-    var { data: updated, error } = await window.supabaseClient.from('invites')
+    // Verify invite is still pending using DB as source of truth
+    var { data: dbInvite, error } = await window.supabaseClient
+      .from('invites')
+      .select('*')
+      .eq('game_id', gameId)
+      .eq('to_id', g_lobbyUserId)
+      .eq('status', 'pending')
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!dbInvite) {
+      delete g_pendingInvites[gameId];
+      renderLobbyPlayers();
+      return;
+    }
+
+    invite = dbInvite;
+
+    var { data: updated, error: updateError } = await window.supabaseClient.from('invites')
       .update({ status: 'accepted' })
       .eq('game_id', gameId)
       .eq('to_id', g_lobbyUserId)
@@ -1181,9 +1230,8 @@ window.acceptInvite = async function(gameId) {
       .select()
       .maybeSingle();
 
-    if (error) throw error;
+    if (updateError) throw updateError;
     if (!updated) {
-      // Invite was auto-declined (cancelled) by the inviter starting another MP game
       delete g_pendingInvites[gameId];
       renderLobbyPlayers();
       return;
@@ -1217,9 +1265,8 @@ window.cancelMyInvites = async function() {
 window.leaveLobby = async function() {
   g_pendingInvites = {};
   g_myInvites = {};
-  g_lobbyJoinCooldowns = {};
-  g_lobbyExplicitLeaves.clear();
   g_lobbySubscribedAt = 0;
+  stopLobbyRefresh();
   if (g_inviteSub) {
     g_inviteSub.unsubscribe();
     g_inviteSub = null;
@@ -1230,16 +1277,6 @@ window.leaveLobby = async function() {
   }
   stopLobbyHeartbeat();
   if (g_channel) {
-    try {
-      await g_channel.send({
-        type: 'broadcast',
-        event: 'lobby_leave',
-        payload: { id: g_lobbyUserId }
-      });
-      await new Promise(res => setTimeout(res, 120));
-    } catch (err) {
-      if (DEBUG) console.warn('Failed to broadcast lobby_leave:', err);
-    }
     try {
       if (typeof g_channel.untrack === 'function') {
         await g_channel.untrack();
@@ -1259,6 +1296,7 @@ window.leaveLobby = async function() {
 }
 
 window.closeLobbyModal = function() {
+  stopLobbyRefresh();
   hideModal();
 };
 
@@ -1360,6 +1398,14 @@ function joinGameChannel(gameId, isHost) {
   g_channelSubscribed = false;
   g_channelSubscribing = true;
 
+  // Clear old init state for this new game channel
+  g_cachedInitPayload = null;
+  g_seenInitIds.clear();
+  if (g_initTimeout) {
+    clearTimeout(g_initTimeout);
+    g_initTimeout = null;
+  }
+
   g_channel = window.supabaseClient.channel('game:' + gameId, {
     config: {
       presence: {
@@ -1405,13 +1451,29 @@ function joinGameChannel(gameId, isHost) {
     .on('broadcast', { event: 'rematch' }, ({ payload }) => {
       if (!payload || payload.fromId === g_lobbyUserId) return;
       leavePostGameState();
-      if (g_myRematchGameId && g_myRematchGameId < payload.gameId) {
-        return;
-      }
+      g_myRematchGameId = payload.gameId;
       startMultiplayerGame(payload.gameId, g_opponentId, g_opponentName, false);
     })
     .on('broadcast', { event: 'reaction' }, ({ payload }) => {
       handleReactionBroadcast(payload);
+    })
+    .on('broadcast', { event: 'ready' }, ({ payload }) => {
+      // Host receives ready from guest
+      if (isHost && payload && payload.gameId === g_gameId && payload.fromId !== g_lobbyUserId) {
+        initializeHostGame();
+      }
+    })
+    .on('broadcast', { event: 'request_init' }, ({ payload }) => {
+      // Host re-sends cached init
+      if (isHost && payload && payload.gameId === g_gameId && g_cachedInitPayload) {
+        broadcastGameState(g_cachedInitPayload);
+      }
+    })
+    .on('broadcast', { event: 'init_ack' }, ({ payload }) => {
+      // Host receives ACK (for logging/debugging)
+      if (isHost && payload && payload.gameId === g_gameId) {
+        if (DEBUG) console.log('Guest ACKed init:', payload.initId);
+      }
     })
     .subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
@@ -1431,9 +1493,14 @@ function joinGameChannel(gameId, isHost) {
         }
         await g_channel.track({ name: g_myName, id: g_lobbyUserId, isHost });
         startIdleTimer();
-        if (isHost) {
-          // Initialize game state and send it out
-          setTimeout(() => initializeHostGame(), 500); // short delay to ensure opponent is connected
+        if (!isHost) {
+          // Guest: send ready and set timeout for retry
+          sendBroadcastNow('ready', { gameId: g_gameId, fromId: g_lobbyUserId });
+          g_initTimeout = setTimeout(function() {
+            if (!g_cachedInitPayload) {
+              sendBroadcastNow('request_init', { gameId: g_gameId, fromId: g_lobbyUserId });
+            }
+          }, 5000);
         }
       } else if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') && g_isMultiplayer && !g_isGameOver) {
         g_channelSubscribed = false;
@@ -1568,6 +1635,12 @@ function cleanupMultiplayerSession() {
   g_myRematchGameId = null;
   g_lastEmojiSentAt = 0;
   g_mpGameEndReason = '';
+  g_cachedInitPayload = null;
+  g_seenInitIds.clear();
+  if (g_initTimeout) {
+    clearTimeout(g_initTimeout);
+    g_initTimeout = null;
+  }
 
   g_activeChannelType = null;
   g_activeGameId = null;
@@ -1599,15 +1672,28 @@ window.initiateRematch = function() {
     return;
   }
 
-  var newGameId = 'game_' + Math.random().toString(36).substr(2, 9);
-  g_myRematchGameId = newGameId;
   leavePostGameState();
-  sendBroadcastNow('rematch', {
-    gameId: newGameId,
-    fromId: g_lobbyUserId,
-    fromName: g_myName
-  });
-  startMultiplayerGame(newGameId, g_opponentId, g_opponentName, true);
+
+  // Deterministic host: lexicographically smaller playerId generates the gameId
+  var isHost = g_lobbyUserId < g_opponentId;
+
+  if (isHost) {
+    var newGameId = 'game_' + Math.random().toString(36).substr(2, 9);
+    g_myRematchGameId = newGameId;
+    sendBroadcastNow('rematch', {
+      gameId: newGameId,
+      fromId: g_lobbyUserId,
+      fromName: g_myName
+    });
+    startMultiplayerGame(newGameId, g_opponentId, g_opponentName, true);
+  } else {
+    // Non-host waits for host's rematch broadcast
+    if (g_myRematchGameId) {
+      startMultiplayerGame(g_myRematchGameId, g_opponentId, g_opponentName, false);
+    } else {
+      g_bui.toast(t('Waiting for opponent to start rematch...'), 3000);
+    }
+  }
 };
 
 function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
@@ -1665,6 +1751,13 @@ function normalizeBoardMatrix(matrix, fallbackValue) {
 }
 
 function initializeHostGame() {
+  // Guard: only initialize once per game. Subsequent ready broadcasts
+  // from guest will re-send the cached init payload.
+  if (g_cachedInitPayload) {
+    broadcastGameState(g_cachedInitPayload);
+    return;
+  }
+
   // Coin flip for turn
   const hostGoesFirst = Math.random() < 0.5;
   g_isMyTurn = hostGoesFirst;
@@ -1705,14 +1798,19 @@ function initializeHostGame() {
     updateGameInfoLabels();
     g_stateVersion = 1;
 
-    broadcastGameState({
+    // Build and cache init payload for idempotent re-send
+    g_cachedInitPayload = {
       type: 'init',
+      gameId: g_gameId,
+      initId: 'init_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
       letpool: g_letpool,
       myRack: oppRack, // What is opponent rack to us is their rack
       oppRack: myRack,
       hostGoesFirst: hostGoesFirst,
       stateVersion: g_stateVersion
-    });
+    };
+
+    broadcastGameState(g_cachedInitPayload);
     g_lastMoveAt = Date.now();
     saveMultiplayerSession();
     updateTurnIndicator();
@@ -2095,6 +2193,20 @@ function handleDragBroadcast(payload) {
 
 function handleGameStateBroadcast(payload) {
   if (payload.type === 'init') {
+    // Validate gameId and dedupe initId
+    if (payload.gameId !== g_gameId) return;
+    if (payload.initId && g_seenInitIds.has(payload.initId)) return;
+    if (payload.initId) g_seenInitIds.add(payload.initId);
+
+    // Clear guest init timeout
+    if (g_initTimeout) {
+      clearTimeout(g_initTimeout);
+      g_initTimeout = null;
+    }
+
+    // Send ACK back to host
+    sendBroadcastNow('init_ack', { gameId: g_gameId, initId: payload.initId });
+
     // Phase 4: Ensure board is fresh for both players
     // g_bui.restart() would call cleanupMultiplayerSession() which tears down the game channel
     localStorage.removeItem('session');

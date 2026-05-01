@@ -115,9 +115,10 @@ When a player renames, the change is synced to global high scores via three mech
 ### Lobby Presence and Notifications
 The lobby follows a chess.com-style model where anyone who visits the page is online, and anyone not currently in an MP game is available to be invited:
 - **Auto-subscribe on page load** — all players subscribe to the lobby presence channel in the background via `joinLobbyChannel()` on `window.onload`, regardless of whether the lobby modal is open.
-- **Badge count** — counts all online players (excluding self) who are in the lobby presence state.
-- **Toast notifications** — fires when a new player joins the lobby, unless the current player is already in an MP game. Hybrid deduplication: (1) a 5-second grace period after `joinLobbyChannel()` starts suppresses all join toasts during initial subscription churn, and (2) a per-key cooldown map (`g_lobbyJoinCooldowns`) suppresses toasts for keys seen within the last 30s. Timestamps are refreshed on `sync` and `join`, deleted on `leave`, and both the map and subscription timestamp are cleared in `leaveLobby()`/`forceRejoinLobby()`.
-- **Instant leave tracking** — when a player starts an MP game, `leaveLobby()` broadcasts `lobby_leave` with their user ID. Other clients handle this broadcast via `g_lobbyExplicitLeaves` (a Set) to immediately remove the player from the lobby list instead of waiting for Supabase's ~5-second presence timeout.
+- **Badge count (modal closed)** — uses Supabase presence as a fast approximate hint.
+- **Badge count (modal open)** — exact count from DB-backed lobby list. Always matches the rendered player list.
+- **Lobby availability (DB source of truth)** — `refreshPlayersInGames()` queries the `invites` table for all `started`/`accepted` rows (global, not scoped to current user) and builds `g_playersInGames`. `getMergedLobbyState()` filters these IDs from presence state. Refreshes on modal open, `presence.sync`, invite INSERT/UPDATE/DELETE, and every 15s while modal is open.
+- **Toast notifications** — fires when a new player joins the lobby, unless the current player is already in an MP game. A 5-second grace period after `joinLobbyChannel()` starts suppresses all join toasts during initial subscription churn. This is UX smoothing, not correctness.
 
 ### Invite Queue System
 The invite system replaces the old broadcast-based invites with a persistent Supabase `invites` table + Realtime subscriptions.
@@ -125,17 +126,18 @@ The invite system replaces the old broadcast-based invites with a persistent Sup
 **Client state:**
 - `g_pendingInvites` — `gameId -> {from_id, from_name, created_at}` for incoming invites.
 - `g_myInvites` — `gameId -> {to_id, to_name, sent_at}` for outgoing invites.
-- `g_inviteSub` — Realtime channel listening for INSERT/UPDATE on `to_id=eq.me`.
+- `g_inviteSub` — Realtime channel listening for INSERT/UPDATE/**DELETE** on `to_id=eq.me`.
 - `g_myInviteSub` — Realtime channel listening for UPDATE on `from_id=eq.me` with `status='accepted'`.
 
 **Invite lifecycle:**
 1. **Send:** `sendInvite(opponentId, opponentName)` checks for existing pending invites, inserts a row with `status='pending'`, and stores in `g_myInvites`.
 2. **Receive:** Realtime INSERT on recipient's `g_inviteSub` populates `g_pendingInvites` and shows toast: `"<name> has invited you to play! Go to lobby to accept"`.
-3. **Accept:** `acceptInvite(gameId)` updates the row to `status='accepted'` (filtered by `status='pending'` to avoid accepting stale auto-declined invites) and starts the game as non-host.
+3. **Accept:** `acceptInvite(gameId)` first **re-queries the DB** to verify the invite is still `pending`, then updates it to `status='accepted'`. Uses the DB row as source of truth for `from_id`/`from_name`. Starts the game as non-host.
 4. **Auto-start (inviter):** Realtime UPDATE on `g_myInviteSub` triggers `startMultiplayerGame()` as host.
 5. **Auto-decline:** When a player starts an MP game, `startMultiplayerGame()` calls `cancelMyInvites()`, which **hard-deletes** all pending outgoing invites (no soft-delete accumulation).
-6. **Cleanup:** `cleanupStaleInvites(currentGameId)` hard-deletes any `started`/`accepted`/`cancelled` invite rows belonging to the current user (excluding the active game). Called from `startMultiplayerGame()` (rematch/crash recovery) and `reconcileInvites()` (page-load safety net).
-7. **Unload purge:** `beforeunload`/`pagehide` delete the invite row for the active game so tab closure doesn't leave stale `started` rows.
+6. **Invite deleted:** Realtime DELETE on recipient's `g_inviteSub` removes the invite from `g_pendingInvites` immediately. The Accept button disappears without waiting for a page reload.
+7. **Cleanup:** `cleanupStaleInvites(currentGameId)` hard-deletes any `started`/`accepted`/`cancelled` invite rows (global, not scoped to current user). Called from `startMultiplayerGame()` (rematch/crash recovery) and `reconcileInvites()` (page-load safety net).
+8. **Unload purge:** `beforeunload`/`pagehide` delete the invite row for the active game so tab closure doesn't leave stale `started` rows.
 
 **Key rules:**
 - SP game start does NOT cancel invites; MP game start DOES.
@@ -145,10 +147,12 @@ The invite system replaces the old broadcast-based invites with a persistent Sup
 
 **Critical implementation notes:**
 - NEVER call `g_bui.restart()` during MP game initialization (`initializeHostGame`, `handleGameStateBroadcast type='init'`). The `restart()` method unconditionally calls `cleanupMultiplayerSession()` when `g_isMultiplayer === true`, destroying the active game channel. Instead, use direct `init('board')` + explicitly set `g_isMultiplayer = true` afterward.
-- Stale invite rows are prevented by: (1) `cleanupStaleInvites()` purging old `started`/`accepted`/`cancelled` rows on game start and page load, (2) `deleteGameInvite()` called on game end and page unload, (3) 5-minute freshness guard in `reconcileInvites()` for accepted invites.
+- Stale invite rows are prevented by: (1) `cleanupStaleInvites()` purging old `started`/`accepted`/`cancelled` rows globally on game start and page load, (2) `deleteGameInvite()` called on game end and page unload, (3) 5-minute freshness guard in `reconcileInvites()` for accepted invites.
 - Stale `pending` invites can cause phantom Accept buttons. Mitigate with 24-hour TTL in `reconcileInvites()` — pending invites older than 24h are skipped and not added to `g_pendingInvites`/`g_myInvites`.
 - Always validate session data before resuming (e.g., check `opponentName` is not null/empty) to reject corrupted sessions from buggy prior runs.
 - When fixing bugs that affect game initialization, clear localStorage and delete stale Supabase invite rows before testing.
+- **DB is the source of truth for lobby availability.** Presence is advisory only. `refreshPlayersInGames()` queries all `started`/`accepted` invites globally and filters them from the lobby list. This prevents players in active games from appearing as inviteable.
+- **Broadcast is advisory transport.** Critical state (invites, game init) must be confirmed via DB queries or handshake ACKs. Never rely on a single broadcast for correctness.
 
 ### Session Persistence
 Multiplayer sessions use `localStorage['session_mp']` for persistence, while single-player uses `localStorage['session']`. Key patterns:
@@ -159,14 +163,22 @@ Multiplayer sessions use `localStorage['session_mp']` for persistence, while sin
 - **Skip identical saves:** In `saveMultiplayerSession()`, compare serialized JSON before writing to reduce disk I/O.
 - **Resume connection watchdog:** After re-joining a game channel on resume, use a timer to show user feedback if connection is slow (toast at 5s, prompt at 20s).
 
+### Game Init Handshake
+To avoid the race condition where the host broadcasts `init` before the guest is subscribed:
+- **Guest** (non-host): After `SUBSCRIBED`, broadcasts `{type: 'ready', gameId, fromId}`. Sets a 5s timeout; if no `init` received, broadcasts `{type: 'request_init'}`.
+- **Host**: On receiving `ready`, calls `initializeHostGame()` once, caches `g_cachedInitPayload`, and broadcasts `init`.
+- **Guest**: On receiving `init`, validates `gameId`, checks `initId` not seen, applies game state, and broadcasts `{type: 'init_ack'}`.
+- **Host**: On receiving `request_init`, re-broadcasts the cached `init` payload (idempotent).
+- The init payload includes: `gameId`, `initId`, `letpool`, `myRack`, `oppRack`, `hostGoesFirst`, `stateVersion`.
+- `g_cachedInitPayload`, `g_seenInitIds`, and `g_initTimeout` are cleared during `cleanupMultiplayerSession()`, rematch, and channel teardown.
+
 ### Multiplayer Rematch
 - After a natural game-over (empty rack or max passes), the game enters a **post-game state** for `g_wait_mp_rematch` ms (default 60s).
 - In post-game state, the game channel stays alive and `cleanupMultiplayerSession()` is deferred.
-- Clicking **Play Again** calls `initiateRematch()` which:
-  1. Generates a new `gameId`.
-  2. Broadcasts a `rematch` event with the new `gameId` on the current game channel.
-  3. Calls `startMultiplayerGame()` as host.
-- The opponent receives the `rematch` broadcast and joins the same new game.
-- If both click simultaneously, the lexicographically smaller `gameId` wins (deterministic tie-breaking via `g_myRematchGameId < payload.gameId`).
+- Clicking **Play Again** calls `initiateRematch()`:
+  - Deterministic host = lexicographically smaller `playerId`.
+  - **Host only**: generates a new `gameId`, broadcasts `rematch` event, calls `startMultiplayerGame()`.
+  - **Non-host**: waits for host's `rematch` broadcast (or joins immediately if already received).
+- Both players subscribe to the new game channel and run the `ready` → `init` → `init_ack` handshake.
 - Forfeit / disconnect / inactivity still call `cleanupMultiplayerSession()` immediately (no rematch offered).
 - Key state variables: `g_postGameTimer`, `g_myRematchGameId`, `enterPostGameState()`, `leavePostGameState()`, `initiateRematch()`.
