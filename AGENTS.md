@@ -116,7 +116,7 @@ When a player renames, the change is synced to global high scores via three mech
 The lobby follows a chess.com-style model where anyone who visits the page is online, and anyone not currently in an MP game is available to be invited:
 - **Auto-subscribe on page load** — all players subscribe to the lobby presence channel in the background via `joinLobbyChannel()` on `window.onload`, regardless of whether the lobby modal is open.
 - **Badge count** — counts all online players (excluding self) who are in the lobby presence state.
-- **Toast notifications** — fires when a new player joins the lobby, unless the current player is already in an MP game. Deduplicated by both a `g_seenLobbyKeys` Set (seeded on each `presence.sync`, cleared on `leave`/`leaveLobby()`/`forceRejoinLobby()`) and a 3-second grace period after every `sync` event to suppress stale join events on page reloads and reconnections.
+- **Toast notifications** — fires when a new player joins the lobby, unless the current player is already in an MP game. Deduplicated by a per-key cooldown map (`g_lobbyJoinCooldowns`) that tracks the last-seen timestamp for each presence key. A toast is only shown if the key has been absent for >30s. Timestamps are refreshed on `sync` and `join`, deleted on `leave`, and the map is cleared in `leaveLobby()`/`forceRejoinLobby()`.
 
 ### Invite Queue System
 The invite system replaces the old broadcast-based invites with a persistent Supabase `invites` table + Realtime subscriptions.

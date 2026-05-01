@@ -119,9 +119,8 @@ let g_lobbyRejoining = false;
 let g_lastLobbyTrackAt = 0;
 let g_lastForceRejoinAt = 0;
 let g_lobbyRenderTimer = null;
-let g_seenLobbyKeys = new Set();   // tracks presence keys already seen (deduplicates join toasts)
-let g_lastPresenceSyncAt = 0;
-const PRESENCE_SYNC_GRACE_MS = 3000; // suppress join toasts this long after any sync
+let g_lobbyJoinCooldowns = {};     // key -> lastSeenTimestamp (deduplicates join toasts)
+const LOBBY_JOIN_COOLDOWN_MS = 30000; // suppress join toast for same key this long
 
 // Channel lifecycle guards
 let g_activeChannelType = null;   // 'lobby' | 'game'
@@ -707,7 +706,6 @@ function joinLobbyChannel() {
   g_activeGameId = null;
   g_channelSubscribed = false;
   g_channelSubscribing = true;
-  g_lastPresenceSyncAt = Date.now(); // start grace period now so pre-sync joins are suppressed
 
   g_channel = window.supabaseClient.channel('lobby', {
     config: {
@@ -720,12 +718,12 @@ function joinLobbyChannel() {
   g_channel
     .on('presence', { event: 'sync' }, () => {
       if (DEBUG) console.log('Presence sync event received');
-      g_lastPresenceSyncAt = Date.now();
-      // Seed the dedupe set with every key currently in presence state so
-      // that any subsequent join events for existing members are ignored.
+      // Refresh cooldown timestamps for every key currently in presence state so
+      // that any subsequent join events for existing members are suppressed.
       var state = g_channel.presenceState();
+      var now = Date.now();
       for (var id in state) {
-        if (id !== g_lobbyUserId) g_seenLobbyKeys.add(id);
+        if (id !== g_lobbyUserId) g_lobbyJoinCooldowns[id] = now;
       }
       renderLobbyPlayers();
     })
@@ -733,19 +731,22 @@ function joinLobbyChannel() {
       if (DEBUG) console.log('Presence join event received:', payload);
       renderLobbyPlayers();
 
-      // Toast: notify when another player comes online.
-      // Ignore joins that arrive within the grace period after a sync (covers
-      // page reloads and reconnections where existing members may re-fire join).
-      var withinGrace = (Date.now() - g_lastPresenceSyncAt) <= PRESENCE_SYNC_GRACE_MS;
-      if (payload && payload.key && payload.key !== g_lobbyUserId && !withinGrace && !g_seenLobbyKeys.has(payload.key)) {
-        g_seenLobbyKeys.add(payload.key);
-        var newUser = payload.newPresences && payload.newPresences.length > 0
-          ? payload.newPresences[payload.newPresences.length - 1]
-          : null;
-        if (newUser && newUser.lookingForGame && newUser.name) {
-          if (typeof g_isMultiplayer === 'undefined' || !g_isMultiplayer) {
-            g_bui.toast(`<strong>${newUser.name}</strong> ${t('has joined the lobby')}`, 3000);
+      // Toast: notify when another player comes online (deduped via per-key cooldown)
+      if (payload && payload.key && payload.key !== g_lobbyUserId) {
+        var now = Date.now();
+        var lastSeen = g_lobbyJoinCooldowns[payload.key];
+        if (!lastSeen || (now - lastSeen) > LOBBY_JOIN_COOLDOWN_MS) {
+          g_lobbyJoinCooldowns[payload.key] = now;
+          var newUser = payload.newPresences && payload.newPresences.length > 0
+            ? payload.newPresences[payload.newPresences.length - 1]
+            : null;
+          if (newUser && newUser.lookingForGame && newUser.name) {
+            if (typeof g_isMultiplayer === 'undefined' || !g_isMultiplayer) {
+              g_bui.toast(`<strong>${newUser.name}</strong> ${t('has joined the lobby')}`, 3000);
+            }
           }
+        } else {
+          g_lobbyJoinCooldowns[payload.key] = now;
         }
       }
     })
@@ -756,7 +757,7 @@ function joinLobbyChannel() {
     .on('presence', { event: 'leave' }, (payload) => {
       if (DEBUG) console.log('Presence leave event received:', payload);
       // Allow a true rejoin later to trigger a toast again
-      if (payload && payload.key) g_seenLobbyKeys.delete(payload.key);
+      if (payload && payload.key) delete g_lobbyJoinCooldowns[payload.key];
       renderLobbyPlayers();
     })
     .on('broadcast', { event: 'lobby_ping' }, ({ payload }) => {
@@ -812,8 +813,7 @@ function forceRejoinLobby() {
   g_activeGameId = null;
   g_channelSubscribed = false;
   g_channelSubscribing = false;
-  g_seenLobbyKeys.clear();
-  g_lastPresenceSyncAt = 0;
+  g_lobbyJoinCooldowns = {};
   // Small delay to let the old channel's presence expire before rejoining
   setTimeout(function() {
     g_lobbyRejoining = false;
@@ -1195,8 +1195,7 @@ window.cancelMyInvites = async function() {
 window.leaveLobby = async function() {
   g_pendingInvites = {};
   g_myInvites = {};
-  g_seenLobbyKeys.clear();
-  g_lastPresenceSyncAt = 0;
+  g_lobbyJoinCooldowns = {};
   if (g_inviteSub) {
     g_inviteSub.unsubscribe();
     g_inviteSub = null;

@@ -176,6 +176,7 @@ function init(iddiv, skipRacks) {
     setSinglePlayerTurn(false);
     setTimeout(function() {
       // Trigger computer move by simulating a player pass
+      if (g_isMultiplayer) return; // rematch init: SP pass must not leak into MP
       g_playerPassed = true;
       onPlayerMove();
       g_passes = 0; // Reset - computer's first turn is not a real pass
@@ -316,7 +317,9 @@ function announceWinner() {
   if (isForfeit) {
     playAgainBtn = '<button class="button" onclick="hideModal();g_bui.restart()">' + t('Play Computer') + '</button>';
   } else if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
-    playAgainBtn = '<button class="button" onclick="hideModal();initiateRematch()">' + t('Play Again') + '</button>';
+    playAgainBtn =
+      '<button class="button secondary" onclick="hideModal();g_bui.restart()">' + t('Leave') + '</button>' +
+      '&nbsp;&nbsp;<button class="button" onclick="hideModal();initiateRematch()">' + t('Play Again') + '</button>';
   } else {
     playAgainBtn = '<button class="button" onclick="hideModal();g_bui.restart()">' + t('Play Again') + '</button>';
   }
