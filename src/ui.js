@@ -729,7 +729,6 @@ function RedipsUI() {
     html += '<table class="opponent"><tr>';
     if (!g_isMobile) {
       html += '<td class="mark">' +
-        //'<button id="toggle" class="button secondary" onclick="g_bui.toggleORV()"></button>' +
         g_cache['html'].h1 +
         '</td>';
     }
@@ -811,9 +810,6 @@ function RedipsUI() {
         }
       }
     }
-
-    // Hide opponent's rack
-    //if (DEBUG) self.toggleORV();
 
     // Initialize REDIPS framework
     self.rd = REDIPS.drag;
@@ -1859,18 +1855,6 @@ function RedipsUI() {
 
     return toast;
   };
-
-  // Toggle opponent rack visibility
-  /*
-  self.toggleORV = function() {
-    if (!el('toggle')) return;
-    self.showOpRack = 1 - self.showOpRack;
-    el('toggle').innerHTML = self.showOpRack ? t('Hide computer&rsquo;s rack') : t('Show computer&rsquo;s rack');
-    for (var i = 0; i < self.racksize; ++i) {
-      el(self.oppRackId + i).classList.toggle('on', self.showOpRack);
-    }
-  };
-  */
 
   self.wordInfo = function(word) {
     if (!window.g_defs) {
