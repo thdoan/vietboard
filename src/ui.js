@@ -1428,11 +1428,10 @@ function RedipsUI() {
   };
 
   self.playSound = function() {
+    // Silently ignore autoplay restrictions before first user interaction
     try {
-      g_cache['sound'].play();
-    } catch (e) {
-      // Silently ignore autoplay restrictions before first user interaction
-    }
+      g_cache['sound']?.play()?.catch(() => {});
+    } catch (err) {}
   };
 
   self.prompt = function(msg, button, sClass) {

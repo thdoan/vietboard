@@ -409,8 +409,8 @@ async function repairMissingSessions() {
             repaired[item.sessionId] = true;
             needsSave = true;
             if (DEBUG) console.log('Repaired session to Supabase:', item.sessionId);
-          } catch (e) {
-            console.warn('Failed to repair session:', item.sessionId, e);
+          } catch (err) {
+            console.warn('Failed to repair session:', item.sessionId, err);
           }
         }
       }
@@ -513,7 +513,7 @@ async function saveGlobalHighScores() {
                   console.warn('Failed to backfill session to Supabase:', e);
                 });
               }
-            } catch (e) {
+            } catch (err) {
               // Skip malformed session JSON
             }
           }
@@ -1136,7 +1136,7 @@ window.sendInvite = async function(opponentId, opponentName) {
       // Already invited this player
       return;
     }
-  } catch (e) {
+  } catch (err) {
     // Continue anyway
   }
 
@@ -2565,8 +2565,8 @@ document.addEventListener('appReady', function() {
   var mpData = null;
   try {
     mpData = JSON.parse(localStorage['session_mp']);
-  } catch (e) {
-    console.error('Failed to parse session_mp:', e);
+  } catch (err) {
+    console.error('Failed to parse session_mp:', err);
   }
 
   var now = Date.now();

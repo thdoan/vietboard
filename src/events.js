@@ -108,7 +108,7 @@ window.onload = function() {
     try {
       mpSession = JSON.parse(localStorage['session_mp'] || 'null');
       hasMultiplayerSession = !!(mpSession && mpSession.gameId && !mpSession.isGameOver);
-    } catch (e) {
+    } catch (err) {
       hasMultiplayerSession = false;
     }
 
