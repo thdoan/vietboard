@@ -11,6 +11,7 @@
   --rgb-gray: 173 173 173; /* #adadad */
   --rgb-highlight: 254 254 186; /* #fefeba */
   --rgb-red: 255 68 68; /* #f44 */
+  --rgb-tile-ghost: 231 171 131; /* #e7ab83 */
   --rgb-tile-opponent: 205 92 92; /* #cd5c5c (indianred) */
   --rgb-tile-player: 73 155 51; /* #499b33 */
   --rgb-white: 255 255 255;
@@ -604,15 +605,10 @@ table.board td:after,
   padding: 2px;
 }
 #drag .opponent td .drag {
-  background-color: #e7ab83;
-  color: #e7ab83;
+  background-color: rgb(var(--rgb-tile-ghost));
+  color: rgb(var(--rgb-tile-ghost));
   -webkit-transition: background-color 0.3s, color 0.3s;
   transition: background-color 0.3s, color 0.3s;
-}
-#drag .opponent td.on .drag,
-#drag .opponent td .drag[style] {
-  background-color: rgb(var(--rgb-white));
-  color: rgb(var(--rgb-black));
 }
 
 /* Drag objects (tiles) */
@@ -693,7 +689,7 @@ table.board td .drag,
   position: fixed;
   top: 0;
   left: 0;
-  opacity: 0.6;
+  background-color: rgb(var(--rgb-tile-ghost));
   pointer-events: none;
   z-index: 9999;
 }
@@ -1036,7 +1032,7 @@ html:not(.mobile) #modal-container.wide {
 }
 
 .wordinfo #modal-content {
-  background-color: rgb(var(--rgb-white));
+  background: rgb(var(--rgb-white));
   padding: 0 0 1rem 0;
 }
 #dict {
