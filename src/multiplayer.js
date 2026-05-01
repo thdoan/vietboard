@@ -131,6 +131,11 @@ let g_cachedInitPayload = null;        // host caches init state for idempotent 
 let g_initTimeout = null;
 let g_seenInitIds = new Set();
 
+let g_initRetryCount = 0;
+let g_initRetryTimer = null;
+const MAX_INIT_RETRIES = 3;
+const INIT_RETRY_DELAY_MS = 5000;
+
 let g_lastCleanupAt = 0;               // throttle cleanupStaleInvites()
 
 // Channel lifecycle guards
@@ -973,7 +978,7 @@ function _doRenderLobbyPlayers(state) {
     if (incomingGameId) {
       actionButton = `<button class="button small primary" onclick="event.stopPropagation();acceptInvite('${incomingGameId}')">${t('Accept')}</button>`;
     } else if (outgoingGameId) {
-      actionButton = `<span class="lobby-pending">${t('Invited...')}</span>`;
+      actionButton = `<span class="lobby-pending">${t('Connecting...')}</span>`;
     } else {
       actionButton = `<button class="button small" onclick="event.stopPropagation();sendInvite('${id}','${safeName}')">${t('Invite')}</button>`;
     }
@@ -1077,6 +1082,7 @@ function subscribeToMyInvites() {
       if (!payload.new || (payload.new.status !== 'accepted' && payload.new.status !== 'started')) return;
       if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) return;
 
+      g_bui.toast(t('Connecting with') + ' ' + (payload.new.to_name || t('Player')) + '...', 4000);
       delete g_myInvites[payload.new.game_id];
       startMultiplayerGame(payload.new.game_id, payload.new.to_id, payload.new.to_name || t('Player'), true);
     })
@@ -1393,6 +1399,31 @@ async function cleanupStaleInvites(currentGameId) {
   }
 }
 
+function scheduleInitRetry() {
+  if (g_initRetryTimer) clearTimeout(g_initRetryTimer);
+  if (g_initRetryCount >= MAX_INIT_RETRIES) {
+    g_initRetryTimer = null;
+    g_bui.toast(t('Connection failed'), 4000);
+    sendBroadcastNow('connection_failed', { gameId: g_gameId, fromId: g_lobbyUserId });
+    deleteGameInvite(g_gameId);
+    cleanupMultiplayerSession();
+    return;
+  }
+  g_initRetryTimer = setTimeout(function() {
+    if (g_cachedInitPayload) return; // success
+    sendBroadcastNow('request_init', { gameId: g_gameId, fromId: g_lobbyUserId });
+    g_initRetryCount++;
+    if (g_initRetryCount >= MAX_INIT_RETRIES) {
+      g_bui.toast(t('Connection failed'), 4000);
+      sendBroadcastNow('connection_failed', { gameId: g_gameId, fromId: g_lobbyUserId });
+      deleteGameInvite(g_gameId);
+      cleanupMultiplayerSession();
+    } else {
+      scheduleInitRetry();
+    }
+  }, INIT_RETRY_DELAY_MS);
+}
+
 function joinGameChannel(gameId, isHost) {
   if (g_activeChannelType === 'game' && g_activeGameId === gameId && (g_channelSubscribed || g_channelSubscribing)) {
     return;
@@ -1468,21 +1499,38 @@ function joinGameChannel(gameId, isHost) {
       handleReactionBroadcast(payload);
     })
     .on('broadcast', { event: 'ready' }, ({ payload }) => {
-      // Host receives ready from guest
+      // Legacy fallback: host receives ready from guest
+      if (isHost && payload && payload.gameId === g_gameId && payload.fromId !== g_lobbyUserId) {
+        initializeHostGame();
+      }
+    })
+    .on('broadcast', { event: 'hello' }, ({ payload }) => {
+      // Host initializes on guest hello
       if (isHost && payload && payload.gameId === g_gameId && payload.fromId !== g_lobbyUserId) {
         initializeHostGame();
       }
     })
     .on('broadcast', { event: 'request_init' }, ({ payload }) => {
-      // Host re-sends cached init
-      if (isHost && payload && payload.gameId === g_gameId && g_cachedInitPayload) {
-        broadcastGameState(g_cachedInitPayload);
+      // Host re-sends cached init, or initializes on-demand if not yet done
+      if (isHost && payload && payload.gameId === g_gameId && payload.fromId !== g_lobbyUserId) {
+        if (!g_cachedInitPayload) {
+          initializeHostGame();
+        } else {
+          broadcastGameState(g_cachedInitPayload);
+        }
       }
     })
     .on('broadcast', { event: 'init_ack' }, ({ payload }) => {
       // Host receives ACK (for logging/debugging)
       if (isHost && payload && payload.gameId === g_gameId) {
         if (DEBUG) console.log('Guest ACKed init:', payload.initId);
+      }
+    })
+    .on('broadcast', { event: 'connection_failed' }, ({ payload }) => {
+      if (payload && payload.gameId === g_gameId && payload.fromId !== g_lobbyUserId) {
+        g_bui.toast(t('Connection failed'), 4000);
+        deleteGameInvite(g_gameId);
+        cleanupMultiplayerSession();
       }
     })
     .subscribe(async (status) => {
@@ -1503,14 +1551,14 @@ function joinGameChannel(gameId, isHost) {
         }
         await g_channel.track({ name: g_myName, id: g_lobbyUserId, isHost });
         startIdleTimer();
+
+        // Both host and guest announce presence
+        sendBroadcastNow('hello', { gameId: g_gameId, fromId: g_lobbyUserId, role: isHost ? 'host' : 'guest' });
+
         if (!isHost) {
-          // Guest: send ready and set timeout for retry
-          sendBroadcastNow('ready', { gameId: g_gameId, fromId: g_lobbyUserId });
-          g_initTimeout = setTimeout(function() {
-            if (!g_cachedInitPayload) {
-              sendBroadcastNow('request_init', { gameId: g_gameId, fromId: g_lobbyUserId });
-            }
-          }, 5000);
+          // Guest: start retry timer for init
+          g_initRetryCount = 0;
+          scheduleInitRetry();
         }
       } else if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') && g_isMultiplayer && !g_isGameOver) {
         g_channelSubscribed = false;
@@ -1651,6 +1699,11 @@ function cleanupMultiplayerSession() {
     clearTimeout(g_initTimeout);
     g_initTimeout = null;
   }
+  if (g_initRetryTimer) {
+    clearTimeout(g_initRetryTimer);
+    g_initRetryTimer = null;
+  }
+  g_initRetryCount = 0;
 
   g_activeChannelType = null;
   g_activeGameId = null;
@@ -2208,11 +2261,16 @@ function handleGameStateBroadcast(payload) {
     if (payload.initId && g_seenInitIds.has(payload.initId)) return;
     if (payload.initId) g_seenInitIds.add(payload.initId);
 
-    // Clear guest init timeout
+    // Clear guest init timeout and retry state
     if (g_initTimeout) {
       clearTimeout(g_initTimeout);
       g_initTimeout = null;
     }
+    if (g_initRetryTimer) {
+      clearTimeout(g_initRetryTimer);
+      g_initRetryTimer = null;
+    }
+    g_initRetryCount = 0;
 
     // Send ACK back to host
     sendBroadcastNow('init_ack', { gameId: g_gameId, initId: payload.initId });

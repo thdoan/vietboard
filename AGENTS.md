@@ -164,13 +164,15 @@ Multiplayer sessions use `localStorage['session_mp']` for persistence, while sin
 - **Resume connection watchdog:** After re-joining a game channel on resume, use a timer to show user feedback if connection is slow (toast at 5s, prompt at 20s).
 
 ### Game Init Handshake
-To avoid the race condition where the host broadcasts `init` before the guest is subscribed:
-- **Guest** (non-host): After `SUBSCRIBED`, broadcasts `{type: 'ready', gameId, fromId}`. Sets a 5s timeout; if no `init` received, broadcasts `{type: 'request_init'}`.
-- **Host**: On receiving `ready`, calls `initializeHostGame()` once, caches `g_cachedInitPayload`, and broadcasts `init`.
-- **Guest**: On receiving `init`, validates `gameId`, checks `initId` not seen, applies game state, and broadcasts `{type: 'init_ack'}`.
-- **Host**: On receiving `request_init`, re-broadcasts the cached `init` payload (idempotent).
+To avoid the race condition where the host broadcasts `init` before the guest is subscribed, a bidirectional `hello → init` protocol is used:
+
+- **Both players**: On `SUBSCRIBED`, broadcast `{type: 'hello', gameId, fromId, role}`.
+- **Guest** (non-host): Starts a retry timer (5s × 3 attempts = 15s max). On each tick, broadcasts `{type: 'request_init', gameId, fromId}` if `init` not yet received.
+- **Host**: On receiving `hello` from guest, calls `initializeHostGame()` once, caches `g_cachedInitPayload`, and broadcasts `init`. Also handles `request_init` by initializing on-demand if not yet done, or re-broadcasting cached `init` if already initialized.
+- **Guest**: On receiving `init`, validates `gameId`, checks `initId` not seen, clears retry timer, applies game state, and broadcasts `{type: 'init_ack'}`.
+- **Give-up**: After 3 retries, guest shows "Connection failed" toast, sends `{type: 'connection_failed'}`, deletes the invite row, and returns to SP. Host receiving `connection_failed` does the same.
 - The init payload includes: `gameId`, `initId`, `letpool`, `myRack`, `oppRack`, `hostGoesFirst`, `stateVersion`.
-- `g_cachedInitPayload`, `g_seenInitIds`, and `g_initTimeout` are cleared during `cleanupMultiplayerSession()`, rematch, and channel teardown.
+- `g_cachedInitPayload`, `g_seenInitIds`, `g_initTimeout`, `g_initRetryTimer`, and `g_initRetryCount` are cleared during `cleanupMultiplayerSession()`, rematch, and channel teardown.
 
 ### Multiplayer Rematch
 - After a natural game-over (empty rack or max passes), the game enters a **post-game state** for `g_wait_mp_rematch` ms (default 60s).
