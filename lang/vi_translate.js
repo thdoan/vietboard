@@ -47,6 +47,7 @@ var translation_map = {
   'It is not your turn!': 'Chưa tới lượt của bạn!',
   'It&rsquo;s a tie!': 'Hòa!',
   'last score:': 'điểm lượt cuối:',
+  'Leave': 'Thoát',
   'Level:': 'Cấp độ:',
   'Listen to pronunciation': 'Hãy nghe phát âm',
   'Loading...': 'Đang tải...',
