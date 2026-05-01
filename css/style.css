@@ -649,14 +649,13 @@ table.board td .drag,
 .t1 {
   border: 2px solid rgb(var(--rgb-tile-player));
 }
+#drag :is(.board, .player) .drag.t1:not(.off) {
+  cursor: move;
+}
 
 /* Tile border for opponent */
 .t2 {
   border: 2px solid rgb(var(--rgb-tile-opponent));
-}
-
-.human-computer .drag.t1:not(.off) {
-  cursor: move;
 }
 
 #redips_clone {
