@@ -1137,7 +1137,7 @@ html:not(.mobile) #modal-container.wide {
 }
 .lobby-player .lobby-pending {
   color: rgb(var(--rgb-white) / 0.6);
-  font-size: 12px;
+  font-size: 12.33px;
   font-style: italic;
   padding: var(--row-padding);
 }
