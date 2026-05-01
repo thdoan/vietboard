@@ -120,6 +120,7 @@ let g_lastLobbyTrackAt = 0;
 let g_lastForceRejoinAt = 0;
 let g_lobbyRenderTimer = null;
 let g_lobbyJoinCooldowns = {};     // key -> lastSeenTimestamp (deduplicates join toasts)
+let g_lobbyExplicitLeaves = new Set(); // keys that explicitly left via broadcast (pending Supabase presence expiry)
 const LOBBY_JOIN_COOLDOWN_MS = 30000; // suppress join toast for same key this long
 const LOBBY_JOIN_GRACE_MS = 5000;     // suppress ALL join toasts this long after subscription starts
 
@@ -764,7 +765,16 @@ function joinLobbyChannel() {
     .on('presence', { event: 'leave' }, (payload) => {
       if (DEBUG) console.log('Presence leave event received:', payload);
       // Allow a true rejoin later to trigger a toast again
-      if (payload && payload.key) delete g_lobbyJoinCooldowns[payload.key];
+      if (payload && payload.key) {
+        delete g_lobbyJoinCooldowns[payload.key];
+        g_lobbyExplicitLeaves.delete(payload.key);
+      }
+      renderLobbyPlayers();
+    })
+    .on('broadcast', { event: 'lobby_leave' }, ({ payload }) => {
+      if (!payload || !payload.id || payload.id === g_lobbyUserId) return;
+      g_lobbyExplicitLeaves.add(payload.id);
+      delete g_lobbyHeartbeats[payload.id];
       renderLobbyPlayers();
     })
     .on('broadcast', { event: 'lobby_ping' }, ({ payload }) => {
@@ -820,6 +830,7 @@ function forceRejoinLobby() {
   g_channelSubscribed = false;
   g_channelSubscribing = false;
   g_lobbyJoinCooldowns = {};
+  g_lobbyExplicitLeaves.clear();
   g_lobbySubscribedAt = 0;
   // Small delay to let the old channel's presence expire before rejoining
   setTimeout(function() {
@@ -850,7 +861,7 @@ function getMergedLobbyState() {
   if (g_channel && g_activeChannelType === 'lobby') {
     var pstate = g_channel.presenceState();
     for (var id in pstate) {
-      if (id === g_lobbyUserId) continue;
+      if (id === g_lobbyUserId || g_lobbyExplicitLeaves.has(id)) continue;
       var metas = pstate[id];
       var user = metas.length > 0 ? metas[metas.length - 1] : null;
       if (user && user.lookingForGame) {
@@ -860,7 +871,7 @@ function getMergedLobbyState() {
   }
   var now = Date.now();
   for (var id in g_lobbyHeartbeats) {
-    if (id === g_lobbyUserId) continue;
+    if (id === g_lobbyUserId || g_lobbyExplicitLeaves.has(id)) continue;
     var hb = g_lobbyHeartbeats[id];
     if (now - hb.lastPing > LOBBY_HEARTBEAT_STALE_MS) continue;
     merged[id] = { name: hb.name };
@@ -1203,6 +1214,7 @@ window.leaveLobby = async function() {
   g_pendingInvites = {};
   g_myInvites = {};
   g_lobbyJoinCooldowns = {};
+  g_lobbyExplicitLeaves.clear();
   g_lobbySubscribedAt = 0;
   if (g_inviteSub) {
     g_inviteSub.unsubscribe();
