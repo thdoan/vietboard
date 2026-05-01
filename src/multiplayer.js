@@ -27,6 +27,7 @@ window.supabaseClient = null;
 var g_isMultiplayer = false;
 var g_gameId = null;
 var g_isMyTurn = false;
+var g_isHost = false;
 var g_opponentId = null;
 var g_opponentName = null;
 let g_lobbyUserId = localStorage.getItem('lobby_user_id');
@@ -1376,6 +1377,7 @@ async function startMultiplayerGame(gameId, opponentId, opponentName, isHost) {
   g_opponentId = opponentId || null;
   g_opponentName = opponentName;
   g_isMultiplayer = true;
+  g_isHost = isHost;
   g_myRematchGameId = null;
   g_lastEmojiSentAt = 0;
   localStorage['session_mode'] = 'mp';
@@ -1472,7 +1474,7 @@ function scheduleInitRetry() {
   }, INIT_RETRY_DELAY_MS);
 }
 
-function joinGameChannel(gameId, isHost) {
+function joinGameChannel(gameId, isHost, onSubscribed) {
   if (g_activeChannelType === 'game' && g_activeGameId === gameId && (g_channelSubscribed || g_channelSubscribing)) {
     return;
   }
@@ -1518,15 +1520,20 @@ function joinGameChannel(gameId, isHost) {
           opponentName = metas[0].name;
         }
       }
+      var wasDisconnected = !g_opponentPresenceState && g_opponentDisconnectSeconds > 0;
       g_opponentPresenceState = opponentFound;
       if (opponentFound) {
         g_opponentDisconnectSeconds = 0;
         g_opponentId = opponentId || g_opponentId;
         if (opponentName) g_opponentName = opponentName;
+        if (wasDisconnected) {
+          g_lastRemoteDragSeq = -1; // reset drag tracking after reconnect
+        }
       }
     })
     .on('presence', { event: 'leave' }, ({ leftPresences }) => {
       if (DEBUG) console.log('Opponent left presence', leftPresences);
+      cleanupOpponentPreviews();
     })
     .on('broadcast', { event: 'gamestate' }, (payload) => {
       handleGameStateBroadcast(payload.payload);
@@ -1553,9 +1560,11 @@ function joinGameChannel(gameId, isHost) {
       }
     })
     .on('broadcast', { event: 'hello' }, ({ payload }) => {
-      // Host initializes on guest hello
-      if (isHost && payload && payload.gameId === g_gameId && payload.fromId !== g_lobbyUserId) {
-        initializeHostGame();
+      if (payload && payload.gameId === g_gameId && payload.fromId !== g_lobbyUserId) {
+        // Opponent rejoined — clear any stale preview tiles
+        cleanupOpponentPreviews();
+        // Host initializes on guest hello
+        if (isHost) initializeHostGame();
       }
     })
     .on('broadcast', { event: 'request_init' }, ({ payload }) => {
@@ -1604,6 +1613,10 @@ function joinGameChannel(gameId, isHost) {
         // Both host and guest announce presence
         sendBroadcastNow('hello', { gameId: g_gameId, fromId: g_lobbyUserId, role: isHost ? 'host' : 'guest' });
 
+        if (typeof onSubscribed === 'function') {
+          onSubscribed();
+        }
+
         if (!isHost) {
           // Guest: start retry timer for init
           g_initRetryCount = 0;
@@ -1616,7 +1629,7 @@ function joinGameChannel(gameId, isHost) {
           g_reconnectTimer = setTimeout(function() {
             g_reconnectTimer = null;
             if (g_isMultiplayer && g_gameId && !g_isGameOver) {
-              joinGameChannel(g_gameId, false);
+              joinGameChannel(g_gameId, g_isHost);
             }
           }, 1500);
         }
@@ -1730,6 +1743,7 @@ function cleanupMultiplayerSession() {
   }
 
   g_isMultiplayer = false;
+  g_isHost = false;
   g_isMyTurn = true;
   g_gameId = null;
   g_opponentName = null;
@@ -1771,8 +1785,8 @@ function cleanupMultiplayerSession() {
 window.confirmRestartMultiplayer = function() {
   g_bui.prompt(
     t('Restarting will forfeit this game.'),
-    '<button class="button secondary" onclick="hideModal()">' + t('Cancel') + '</button>'
-      + '&nbsp;&nbsp;<button class="button" onclick="hideModal();finalizeMultiplayerGame(\'forfeit\', true);g_bui.restart();if (g_isMobile) hideGameInfo()">' + t('Forfeit &amp; Restart') + '</button>'
+    '<button class="button secondary" onclick="hideModal()">' + t('Cancel') + '</button>' + SPACER +
+    '<button class="button" onclick="hideModal();finalizeMultiplayerGame(\'forfeit\', true);g_bui.restart();if (g_isMobile) hideGameInfo()">' + t('Forfeit &amp; Restart') + '</button>'
   );
 };
 
@@ -2188,15 +2202,26 @@ function cleanupDragGhosts() {
   }
 }
 
+function cleanupOpponentPreviews() {
+  for (var x = 0; x < g_boardwidth; ++x) {
+    for (var y = 0; y < g_boardheight; ++y) {
+      var cell = el('c' + x + '_' + y);
+      if (cell && cell.innerHTML !== '' && !cell.holds) {
+        cell.innerHTML = '';
+      }
+    }
+  }
+}
+
 function renderOpponentRackTileBack(cell) {
   if (!cell) return;
-  cell.innerHTML = '<div class="drag t2">&nbsp;&nbsp;</div>';
+  cell.innerHTML = '<div class="drag t2">' + SPACER + '</div>';
 }
 
 function renderOpponentBoardTile(cell, letter, points) {
   if (!cell) return;
   var displayLetter = letter;
-  if (displayLetter === '*' || displayLetter === ' ') displayLetter = '&nbsp;&nbsp;';
+  if (displayLetter === '*' || displayLetter === ' ') displayLetter = SPACER;
   else displayLetter = String(displayLetter || '').toUpperCase();
   var p = parseInt(points);
   var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
@@ -2282,7 +2307,7 @@ function handleDragBroadcast(payload) {
     document.body.appendChild(g_dragGhost);
   }
 
-  g_dragGhost.innerHTML = '&nbsp;&nbsp;';
+  g_dragGhost.innerHTML = SPACER;
   var localPos = localizeDragPosition(payload);
   if (localPos) {
     var gw = 50;
@@ -2567,6 +2592,13 @@ function handleMoveBroadcast(payload) {
     g_stateVersion = Math.max(g_stateVersion, payload.stateVersion || 0);
     g_lastAppliedMoveTimestamp = Date.now();
 
+    // Connection is alive — clear any guest init retry timer
+    if (g_initRetryTimer) {
+      clearTimeout(g_initRetryTimer);
+      g_initRetryTimer = null;
+    }
+    g_initRetryCount = 0;
+
     // Clean up any stray ghost tiles before applying the move
     cleanupDragGhosts();
 
@@ -2644,7 +2676,7 @@ function handleMoveBroadcast(payload) {
               var points = (g_boardpoints[x] && g_boardpoints[x][y]) || 0;
               var p = parseInt(points);
               var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
-              var html = '<div class="drag ' + tClass + '">' + (char !== ' ' ? displayChar : '&nbsp;&nbsp;') + pointsHtml + '</div>';
+              var html = '<div class="drag ' + tClass + '">' + (char !== ' ' ? displayChar : SPACER) + pointsHtml + '</div>';
               cell.innerHTML = html;
               var holdsObj = { 'letter': char, 'points': p };
               cell.holds = holdsObj;
@@ -2790,6 +2822,7 @@ function saveMultiplayerSession() {
 
     var snapshot = {
       gameId: g_gameId,
+      opponentId: g_opponentId,
       opponentName: g_opponentName,
       isMyTurn: g_isMyTurn,
       letpool: g_letpool,
@@ -2803,6 +2836,7 @@ function saveMultiplayerSession() {
       boardEmpty: g_board_empty,
       stateVersion: g_stateVersion,
       isGameOver: g_isGameOver,
+      isHost: g_isHost,
       history: g_history,
       savedAt: now,
       lastMoveAt: inferredLastMoveAt
@@ -2859,6 +2893,7 @@ document.addEventListener('appReady', function() {
 
   try {
     g_gameId = mpData.gameId;
+    g_opponentId = mpData.opponentId || null;
     g_opponentName = mpData.opponentName;
     g_isMultiplayer = true;
     g_isMyTurn = mpData.isMyTurn;
@@ -2900,20 +2935,21 @@ document.addEventListener('appReady', function() {
 
         for (var y = 0; y < g_boardheight; ++y) {
           var cell = el('c' + x + '_' + y);
+          if (!cell) continue;
+          cell.innerHTML = '';
+          cell.holds = '';
           var char = boardColumn[y];
-          if (char && char !== '' && typeof char !== 'undefined' && cell && cell.innerHTML === '') {
+          if (char && char !== '' && typeof char !== 'undefined') {
             var displayChar = char.toUpperCase();
             var tClass = boardTypeColumn[y] === 1 ? 't1' : 't2';
             var points = (g_boardpoints[x] && g_boardpoints[x][y]) || 0;
             var p = parseInt(points);
             var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
-            var html = '<div class="drag ' + tClass + '">' + (char !== ' ' ? displayChar : '&nbsp;&nbsp;') + pointsHtml + '</div>';
+            var html = '<div class="drag ' + tClass + '">' + (char !== ' ' ? displayChar : SPACER) + pointsHtml + '</div>';
             cell.innerHTML = html;
             var holdsObj = { 'letter': char, 'points': p };
             cell.holds = holdsObj;
             if (cell.firstChild) cell.firstChild.holds = holdsObj;
-          } else if (cell && (!char || char === '')) {
-            cell.holds = '';
           }
         }
       }
@@ -2922,8 +2958,12 @@ document.addEventListener('appReady', function() {
     updateTurnIndicator();
     updateGameInfoLabels();
 
-    // Rejoin channel
-    joinGameChannel(g_gameId, false);
+    // Rejoin channel — restore isHost so reloaded host can reinitialize on guest hello
+    var resumedIsHost = !!mpData.isHost;
+    joinGameChannel(g_gameId, resumedIsHost, function() {
+      // Request latest state only after channel is confirmed subscribed
+      broadcastGameState({ type: 'request_state' });
+    });
 
     // Connection watchdog: show reconnecting toast if not subscribed quickly
     g_resumeConnectionTimer = setTimeout(function() {
@@ -2941,8 +2981,7 @@ document.addEventListener('appReady', function() {
       }
     }, 20000);
 
-    // Request latest state just in case we missed a move while refreshing
-    broadcastGameState({ type: 'request_state' });
+    // request_state is now sent inside the joinGameChannel onSubscribed callback
   } catch (err) {
     console.error('Error restoring multiplayer session:', err);
     localStorage.removeItem('session_mp');
@@ -3001,7 +3040,13 @@ handleGameStateBroadcast = function(payload) {
     }
     if (payload.stateVersion && payload.stateVersion < g_stateVersion && hasLocalBoard) return;
 
-    // We received a sync from the other player
+    // We received a sync from the other player — connection is alive
+    if (g_initRetryTimer) {
+      clearTimeout(g_initRetryTimer);
+      g_initRetryTimer = null;
+    }
+    g_initRetryCount = 0;
+
     g_board = normalizeBoardMatrix(payload.board, '');
     g_boardpoints = normalizeBoardMatrix(payload.boardp, 0);
     g_boardtypes = normalizeBoardMatrix(payload.boardt, 0);
@@ -3043,7 +3088,7 @@ handleGameStateBroadcast = function(payload) {
           var points = (g_boardpoints[x] && g_boardpoints[x][y]) || 0;
           var p = parseInt(points);
           var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
-          var html = '<div class="drag ' + tClass + '">' + (char !== ' ' ? displayChar : '&nbsp;&nbsp;') + pointsHtml + '</div>';
+          var html = '<div class="drag ' + tClass + '">' + (char !== ' ' ? displayChar : SPACER) + pointsHtml + '</div>';
           cell.innerHTML = html;
           var holdsObj = { 'letter': char, 'points': p };
           cell.holds = holdsObj;
@@ -3210,7 +3255,6 @@ document.addEventListener('visibilitychange', handleVisibilityChange);
 window.addEventListener('pagehide', function() {
   if (g_isMultiplayer) {
     saveMultiplayerSession();
-    if (g_gameId) deleteGameInvite(g_gameId);
   }
   if (g_idleTimer) {
     clearInterval(g_idleTimer);
@@ -3221,7 +3265,6 @@ window.addEventListener('pagehide', function() {
 window.addEventListener('beforeunload', function() {
   if (g_isMultiplayer) {
     saveMultiplayerSession();
-    if (g_gameId) deleteGameInvite(g_gameId);
   }
 });
 window.addEventListener('pageshow', function(e) {
@@ -3229,7 +3272,7 @@ window.addEventListener('pageshow', function(e) {
     if (g_isMultiplayer && g_gameId && !g_isGameOver) {
       setTimeout(function() {
         if (!g_channelSubscribed && !g_channelSubscribing) {
-          joinGameChannel(g_gameId, false);
+          joinGameChannel(g_gameId, g_isHost);
         }
       }, 100);
     } else {

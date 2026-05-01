@@ -517,7 +517,7 @@ function RedipsUI() {
         var info = tileInfos[count++];
         var div = info.div;
         // Joker tile - remove previously selected letter from tile?
-        if (div.holds.points === 0) div.innerHTML = '&nbsp;&nbsp;';
+        if (div.holds.points === 0) div.innerHTML = SPACER;
         rcell.appendChild(div);
         rcell.holds = self.hcopy(div.holds);
 
@@ -633,8 +633,8 @@ function RedipsUI() {
     window.confirmRestartLocal = function() {
       g_bui.prompt(
         t('Restarting will forfeit this game.'),
-        '<button class="button secondary" onclick="hideModal()">' + t('Cancel') + '</button>'
-          + '&nbsp;&nbsp;<button class="button" onclick="hideModal();if (typeof finalizeGameScores === \'function\') finalizeGameScores();g_bui.restart();if (g_isMobile) hideGameInfo()">' + t('Restart') + '</button>'
+        '<button class="button secondary" onclick="hideModal()">' + t('Cancel') + '</button>' + SPACER +
+        '<button class="button" onclick="hideModal();if (typeof finalizeGameScores === \'function\') finalizeGameScores();g_bui.restart();if (g_isMobile) hideGameInfo()">' + t('Restart') + '</button>'
       );
     };
 
@@ -748,7 +748,7 @@ function RedipsUI() {
         html += mult + '>';
         if (g_board[j] && g_board[j][i]) {
           html += '<div class="drag t' + g_boardtypes[j][i] + '">' +
-            (g_board[j][i] === ' ' ? '&nbsp;&nbsp;' : g_board[j][i].toUpperCase()) +
+            (g_board[j][i] === ' ' ? SPACER : g_board[j][i].toUpperCase()) +
             (g_boardpoints[j][i] ? '<sup><small>' + g_boardpoints[j][i] + '</small></sup>' : '') +
             '</div>';
         }
@@ -1154,7 +1154,7 @@ function RedipsUI() {
     cell.holds = self.hcopy(holds);
     var html = '';
     //html += '<div class="drag t1">';
-    html += (ltr !== ' ' && ltr !== '*') ? ltr.toUpperCase() : '&nbsp;&nbsp;';
+    html += (ltr !== ' ' && ltr !== '*') ? ltr.toUpperCase() : SPACER;
     //html += '</div>';
     //cell.innerHTML = html;
     var div = cell.firstChild;
@@ -1272,7 +1272,7 @@ function RedipsUI() {
           orack = orack.substr(0, jpos) + '_' + orack.substr(jpos + 1);
           // Expose joker letter value in new rack
           newrack = newrack.substr(0, jpos) + l + newrack.substr(jpos + 1);
-          var ltrStr = (l !== ' ') ? l.toUpperCase() : '&nbsp;&nbsp;';
+          var ltrStr = (l !== ' ') ? l.toUpperCase() : SPACER;
           var pVal = placement.lscr;
           var rcell = el(getOppCellId(jpos));
           if (rcell.firstChild) {
@@ -1282,7 +1282,7 @@ function RedipsUI() {
       } else {
         usedIndices.add(lpos);
         orack = orack.substr(0, lpos) + '_' + orack.substr(lpos + 1);
-        var ltrStr = (l !== ' ') ? l.toUpperCase() : '&nbsp;&nbsp;';
+        var ltrStr = (l !== ' ') ? l.toUpperCase() : SPACER;
         var pVal = placement.lscr;
         var rcell = el(getOppCellId(lpos));
         if (rcell.firstChild) {
@@ -1509,9 +1509,6 @@ function RedipsUI() {
     //console.log('setLetters', letters);
     self.racks[player] = letters;
     var cells = [];
-
-    // TODO: sanity checks on values of player
-
     var ifprfx = (player === 1) ? self.plrRackId : self.oppRackId;
     var upper = letters.toUpperCase();
     var isOpponent = (player === 2);
@@ -1528,7 +1525,7 @@ function RedipsUI() {
       if (ltr !== '' && ltr !== '.') {
         cells.push(rcell);
         var html = '<div class="drag t' + player + '">';
-        var hideOpponentLetter = isMP;
+        var hideOpponentLetter = isOpponent;
         var holds = {
           'letter': ltr,
           'points': self.scores[ltr] || 0
@@ -1536,20 +1533,20 @@ function RedipsUI() {
         rcell.holds = holds;
         if (ltr === '*') {
           // Joker: blank face, no points
-          html += '&nbsp;&nbsp;';
+          html += SPACER;
         } else if (ltr === ' ') {
           // Space tile: blank face with points (e.g., 10)
           if (hideOpponentLetter) {
-            html += '&nbsp;&nbsp;';
+            html += SPACER;
           } else {
-            html += '&nbsp;&nbsp;<sup><small>' + self.scores[ltr] + '</small></sup>';
+            html += SPACER + '<sup><small>' + self.scores[ltr] + '</small></sup>';
           }
         } else {
           if (hideOpponentLetter) {
-            html += '&nbsp;&nbsp;';
+            html += SPACER;
           } else {
             var char = upper.charAt(i);
-            html += (char !== ' ' ? char : '&nbsp;&nbsp;') + '<sup><small>' + self.scores[ltr] + '</small></sup>';
+            html += (char !== ' ' ? char : SPACER) + '<sup><small>' + self.scores[ltr] + '</small></sup>';
           }
         }
         html += '</div>';
