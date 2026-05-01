@@ -1525,7 +1525,7 @@ function RedipsUI() {
       if (ltr !== '' && ltr !== '.') {
         cells.push(rcell);
         var html = '<div class="drag t' + player + '">';
-        var hideOpponentLetter = isOpponent;
+        var hideOpponentLetter = isOpponent && !(typeof DEBUG !== 'undefined' && DEBUG);
         var holds = {
           'letter': ltr,
           'points': self.scores[ltr] || 0
