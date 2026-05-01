@@ -121,6 +121,7 @@ let g_lastForceRejoinAt = 0;
 let g_lobbyRenderTimer = null;
 let g_lobbyJoinCooldowns = {};     // key -> lastSeenTimestamp (deduplicates join toasts)
 const LOBBY_JOIN_COOLDOWN_MS = 30000; // suppress join toast for same key this long
+const LOBBY_JOIN_GRACE_MS = 5000;     // suppress ALL join toasts this long after subscription starts
 
 // Channel lifecycle guards
 let g_activeChannelType = null;   // 'lobby' | 'game'
@@ -706,6 +707,7 @@ function joinLobbyChannel() {
   g_activeGameId = null;
   g_channelSubscribed = false;
   g_channelSubscribing = true;
+  g_lobbySubscribedAt = Date.now(); // start grace period before any events can fire
 
   g_channel = window.supabaseClient.channel('lobby', {
     config: {
@@ -731,11 +733,16 @@ function joinLobbyChannel() {
       if (DEBUG) console.log('Presence join event received:', payload);
       renderLobbyPlayers();
 
-      // Toast: notify when another player comes online (deduped via per-key cooldown)
+      // Toast: notify when another player comes online.
+      // Hybrid dedupe: 5s grace period after subscription starts (covers page
+      // loads where join fires before sync) + 30s per-key cooldown (covers
+      // reconnections where sync fires first and seeds the map).
       if (payload && payload.key && payload.key !== g_lobbyUserId) {
         var now = Date.now();
+        var withinGrace = (now - g_lobbySubscribedAt) <= LOBBY_JOIN_GRACE_MS;
         var lastSeen = g_lobbyJoinCooldowns[payload.key];
-        if (!lastSeen || (now - lastSeen) > LOBBY_JOIN_COOLDOWN_MS) {
+        var isNew = !lastSeen || (now - lastSeen) > LOBBY_JOIN_COOLDOWN_MS;
+        if (!withinGrace && isNew) {
           g_lobbyJoinCooldowns[payload.key] = now;
           var newUser = payload.newPresences && payload.newPresences.length > 0
             ? payload.newPresences[payload.newPresences.length - 1]
@@ -771,7 +778,6 @@ function joinLobbyChannel() {
     })
     .subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
-        g_lobbySubscribedAt = Date.now();
         g_channelSubscribed = true;
         g_channelSubscribing = false;
         await g_channel.track({ name: g_myName, lookingForGame: true, id: g_lobbyUserId });
@@ -814,6 +820,7 @@ function forceRejoinLobby() {
   g_channelSubscribed = false;
   g_channelSubscribing = false;
   g_lobbyJoinCooldowns = {};
+  g_lobbySubscribedAt = 0;
   // Small delay to let the old channel's presence expire before rejoining
   setTimeout(function() {
     g_lobbyRejoining = false;
@@ -1196,6 +1203,7 @@ window.leaveLobby = async function() {
   g_pendingInvites = {};
   g_myInvites = {};
   g_lobbyJoinCooldowns = {};
+  g_lobbySubscribedAt = 0;
   if (g_inviteSub) {
     g_inviteSub.unsubscribe();
     g_inviteSub = null;
