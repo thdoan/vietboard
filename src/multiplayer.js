@@ -126,6 +126,7 @@ let g_lobbyRenderTimer = null;
 let g_playersInGames = new Set();      // player IDs with started/accepted invites (DB source of truth)
 let g_lobbyRefreshTimer = null;
 let g_lastSyncKeys = new Set();        // keys from previous presence sync (true-delta join toasts)
+let g_lastLobbyRefreshAt = 0;          // throttle refreshPlayersInGames in background heartbeat
 
 let g_cachedInitPayload = null;        // host caches init state for idempotent re-send
 let g_initTimeout = null;
@@ -3096,6 +3097,10 @@ function startLobbyHeartbeat() {
       if (now - g_lobbyHeartbeats[id].lastPing > LOBBY_HEARTBEAT_STALE_MS) {
         delete g_lobbyHeartbeats[id];
       }
+    }
+    if (!g_isMultiplayer && now - g_lastLobbyRefreshAt >= 15000) {
+      g_lastLobbyRefreshAt = now;
+      refreshPlayersInGames();
     }
     updateLobbyBadgeFromMergedState();
   }, LOBBY_HEARTBEAT_INTERVAL_MS);
