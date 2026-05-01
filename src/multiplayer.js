@@ -136,6 +136,7 @@ let g_initRetryTimer = null;
 const MAX_INIT_RETRIES = 3;
 const INIT_RETRY_DELAY_MS = 5000;
 
+let g_connectingInvites = new Set();   // gameIds in "connecting" state after accept
 let g_lastCleanupAt = 0;               // throttle cleanupStaleInvites()
 
 // Channel lifecycle guards
@@ -975,10 +976,14 @@ function _doRenderLobbyPlayers(state) {
     }
 
     var actionButton = '';
-    if (incomingGameId) {
-      actionButton = `<button class="button small primary" onclick="event.stopPropagation();acceptInvite('${incomingGameId}')">${t('Accept')}</button>`;
-    } else if (outgoingGameId) {
+    if (incomingGameId && g_connectingInvites.has(incomingGameId)) {
       actionButton = `<span class="lobby-pending">${t('Connecting...')}</span>`;
+    } else if (incomingGameId) {
+      actionButton = `<button class="button small primary" onclick="event.stopPropagation();acceptInvite('${incomingGameId}')">${t('Accept')}</button>`;
+    } else if (outgoingGameId && g_connectingInvites.has(outgoingGameId)) {
+      actionButton = `<span class="lobby-pending">${t('Connecting...')}</span>`;
+    } else if (outgoingGameId) {
+      actionButton = `<span class="lobby-pending">${t('Invited...')}</span>`;
     } else {
       actionButton = `<button class="button small" onclick="event.stopPropagation();sendInvite('${id}','${safeName}')">${t('Invite')}</button>`;
     }
@@ -1083,6 +1088,8 @@ function subscribeToMyInvites() {
       if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) return;
 
       g_bui.toast(t('Connecting with') + ' ' + (payload.new.to_name || t('Player')) + '...', 4000);
+      g_connectingInvites.add(payload.new.game_id);
+      renderLobbyPlayers();
       delete g_myInvites[payload.new.game_id];
       startMultiplayerGame(payload.new.game_id, payload.new.to_id, payload.new.to_name || t('Player'), true);
     })
@@ -1252,6 +1259,8 @@ window.acceptInvite = async function(gameId) {
     return;
   }
 
+  g_connectingInvites.add(gameId);
+  renderLobbyPlayers();
   delete g_pendingInvites[gameId];
   startMultiplayerGame(gameId, invite.from_id, invite.from_name, false);
 }
@@ -1529,6 +1538,7 @@ function joinGameChannel(gameId, isHost) {
     .on('broadcast', { event: 'connection_failed' }, ({ payload }) => {
       if (payload && payload.gameId === g_gameId && payload.fromId !== g_lobbyUserId) {
         g_bui.toast(t('Connection failed'), 4000);
+        g_connectingInvites.delete(g_gameId);
         deleteGameInvite(g_gameId);
         cleanupMultiplayerSession();
       }
@@ -1704,6 +1714,7 @@ function cleanupMultiplayerSession() {
     g_initRetryTimer = null;
   }
   g_initRetryCount = 0;
+  g_connectingInvites.clear();
 
   g_activeChannelType = null;
   g_activeGameId = null;
@@ -2271,6 +2282,9 @@ function handleGameStateBroadcast(payload) {
       g_initRetryTimer = null;
     }
     g_initRetryCount = 0;
+
+    // Clear connecting state now that handshake succeeded
+    g_connectingInvites.delete(g_gameId);
 
     // Send ACK back to host
     sendBroadcastNow('init_ack', { gameId: g_gameId, initId: payload.initId });
