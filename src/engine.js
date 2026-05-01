@@ -48,6 +48,7 @@ var g_wmults = [1, 1, 1, 2, 3]; // Word multipliers by index
 var g_allLettersBonus = 50;     // Bonus when all letters in rack are played
 
 const COMPUTER_PLAYER_ID = 'computer';
+const SPACER = '&nbsp;&nbsp;';
 
 // Computer play level
 var g_playlevel = g_bui.getPlayLevel();
@@ -318,8 +319,8 @@ function announceWinner() {
     playAgainBtn = '<button class="button" onclick="hideModal();g_bui.restart()">' + t('Play Computer') + '</button>';
   } else if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
     playAgainBtn =
-      '<button class="button secondary" onclick="hideModal();g_bui.restart()">' + t('Leave') + '</button>' +
-      '&nbsp;&nbsp;<button class="button" onclick="hideModal();initiateRematch()">' + t('Play Again') + '</button>';
+      '<button class="button secondary" onclick="hideModal();g_bui.restart()">' + t('Leave') + '</button>' + SPACER +
+      '<button class="button" onclick="hideModal();initiateRematch()">' + t('Play Again') + '</button>';
   } else {
     playAgainBtn = '<button class="button" onclick="hideModal();g_bui.restart()">' + t('Play Again') + '</button>';
   }
