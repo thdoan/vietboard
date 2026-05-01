@@ -1074,7 +1074,7 @@ function subscribeToMyInvites() {
       table: 'invites',
       filter: 'from_id=eq.' + g_lobbyUserId
     }, (payload) => {
-      if (!payload.new || payload.new.status !== 'accepted') return;
+      if (!payload.new || (payload.new.status !== 'accepted' && payload.new.status !== 'started')) return;
       if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) return;
 
       delete g_myInvites[payload.new.game_id];
