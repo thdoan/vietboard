@@ -876,10 +876,48 @@ async function refreshPlayersInGames() {
   }
 }
 
+async function cleanupStalePendingInvites() {
+  if (!window.supabaseClient) return;
+  var gameIds = Object.keys(g_pendingInvites).concat(Object.keys(g_myInvites));
+  if (!gameIds.length) return;
+  try {
+    var { data, error } = await window.supabaseClient
+      .from('invites')
+      .select('game_id, status')
+      .in('game_id', gameIds)
+      .eq('app_key', _dk(_hk));
+    if (error) throw error;
+    var foundPending = new Set();
+    if (data) data.forEach(function(row) {
+      if (row.status === 'pending') foundPending.add(row.game_id);
+    });
+    var changed = false;
+    for (var gid in g_pendingInvites) {
+      if (!foundPending.has(gid)) {
+        delete g_pendingInvites[gid];
+        changed = true;
+      }
+    }
+    for (var gid in g_myInvites) {
+      if (!foundPending.has(gid)) {
+        delete g_myInvites[gid];
+        changed = true;
+      }
+    }
+    if (changed) renderLobbyPlayers();
+  } catch (err) {
+    if (DEBUG) console.warn('Failed to cleanup stale pending invites:', err);
+  }
+}
+
 function startLobbyRefresh() {
   stopLobbyRefresh();
   refreshPlayersInGames();
-  g_lobbyRefreshTimer = setInterval(refreshPlayersInGames, 15000);
+  cleanupStalePendingInvites();
+  g_lobbyRefreshTimer = setInterval(function() {
+    refreshPlayersInGames();
+    cleanupStalePendingInvites();
+  }, 15000);
 }
 
 function stopLobbyRefresh() {
