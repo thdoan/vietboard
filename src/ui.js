@@ -483,13 +483,6 @@ function RedipsUI() {
     if (self.animTiles === 0) {
       // Last opponent tile animated to its position; return original
       // show/hide state of tiles set to visible before animation.
-      /*
-      if (self.showOpRack === 0) {
-        for (var i = 0; i < self.displayedcells.length; ++i) {
-          //self.displayedcells[i].style.display = 'none';
-        }
-      }
-      */
       self.animCallback();
     }
   };
@@ -1218,27 +1211,6 @@ function RedipsUI() {
       el('swaptable').title = t('Select the letters you want to swap');
     }
   };
-
-  /*
-  self.opponentPlay = function(x, y, lt, lts) {
-    // TODO: add animation, etc.
-    var cell = el(self.boardId + x + '_' + y);
-    cell.holds = {
-      'letter': lt,
-      'points': lts
-    };
-
-    var ltru = lt.toUpperCase();
-    var html = '<div class="drag t2">' + ltru;
-
-    if (lts === 0) lts = '&nbsp;';
-
-    html += '<sup><small>' + lts + '</small></sup>';
-    html += '</div>';
-    cell.innerHTML = html;
-    cell.style.backgroundColor = '#ff0'; // Yellow
-  };
-  */
 
   self.playOpponentMove = function(placements, callback) {
     // Placements is an array of letter placement information for the
