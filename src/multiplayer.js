@@ -126,7 +126,6 @@ let g_lobbyRenderTimer = null;
 let g_playersInGames = new Set();      // player IDs with started/accepted invites (DB source of truth)
 let g_lobbyRefreshTimer = null;
 let g_lastSyncKeys = new Set();        // keys from previous presence sync (true-delta join toasts)
-let g_lastRenderedLobbyKey = '';       // hash of last rendered lobby state (DOM diff)
 
 let g_cachedInitPayload = null;        // host caches init state for idempotent re-send
 let g_initTimeout = null;
@@ -933,11 +932,6 @@ function renderLobbyPlayers(state) {
 }
 
 function _doRenderLobbyPlayers(state) {
-  // Diff before render: skip DOM update if state is unchanged
-  var stateKey = Object.keys(state).sort().join(',');
-  if (stateKey === g_lastRenderedLobbyKey) return;
-  g_lastRenderedLobbyKey = stateKey;
-
   var html = '';
   var count = 0;
   for (var id in state) {
