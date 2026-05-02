@@ -21,9 +21,10 @@
   --border-radius-sm: 6px;
   --border-radius: 8px;
   --border-radius-lg: 10px;
-  /* Buttons */
+  /* Sizes */
   --btn-height: 40px;
-  /* Tiles */
+  --header-btn-size: 48px;
+  --header-height: calc(var(--header-btn-size) + 8px);
   --tile-size: 32px;
 }
 
@@ -306,6 +307,12 @@ button svg {
   fill: none;
   filter: drop-shadow(0 0.3vmin 0.3vmin rgb(var(--rgb-black)));
 }
+html.mobile button svg {
+  filter: drop-shadow(0 1vmin 2vmin rgb(var(--rgb-black) / 0.8));
+}
+html.mobile #restart svg {
+  filter: drop-shadow(0 1vmin 1vmin rgb(var(--rgb-black)));
+}
 button svg.hover-on {
   display: none;
 }
@@ -317,6 +324,12 @@ button:hover svg.hover-on {
 }
 button:active svg {
   filter: drop-shadow(0 0 0.3vmin rgb(var(--rgb-black))) !important;
+}
+html.mobile button:active svg {
+  filter: drop-shadow(0 0 2vmin rgb(var(--rgb-black) / 0.8)) !important;
+}
+html.mobile #restart:active svg {
+  filter: drop-shadow(0 0 1vmin rgb(var(--rgb-black))) !important;
 }
 button svg .person-1 {
   transform-box: view-box;
@@ -760,8 +773,7 @@ table.board td .drag,
   padding: 2px 2px 0 2px;
 }
 #score header {
-  --header-btn-size: 48px;
-  height: calc(var(--header-btn-size) + 8px);
+  height: var(--header-height);
   align-items: center;
   background: rgb(var(--rgb-gray-dark));
   display: none;
@@ -779,8 +791,13 @@ table.board td .drag,
   margin: 14px;
 }
 #score header .icons {
+  position: absolute;
+  top: 0.5rem;
+  left: 0;
+  width: 100%;
   display: flex;
-  gap: 2vmin;
+  justify-content: space-evenly;
+  transform: translateX(-100%);
 }
 #score header .icon {
   width: calc(var(--btn-height) + 2vmin);
@@ -1247,8 +1264,11 @@ html.mobile body {
 }
 html.mobile #app {
   position: static;
+  background: url(../pics/rack_bg.jpg);
+  background-size: contain;
   -webkit-box-shadow: 0 3px 15px rgb(var(--rgb-black) / 0.5);
   box-shadow: 0 3px 15px rgb(var(--rgb-black) / 0.5);
+  padding-top: var(--header-height);
 }
 html.mobile #app:after,
 html.error #app:after {
