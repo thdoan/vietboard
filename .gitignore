@@ -1,8 +1,10 @@
-/build
-/node_modules
-/play
-desktop.ini
+.beads/
+build/
+node_modules/
+play/
+
 *.log
+desktop.ini
 
 # Beads / Dolt files (added by bd init)
 .dolt/
