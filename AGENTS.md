@@ -184,3 +184,44 @@ To avoid the race condition where the host broadcasts `init` before the guest is
 - Both players subscribe to the new game channel and run the `ready` → `init` → `init_ack` handshake.
 - Forfeit / disconnect / inactivity still call `cleanupMultiplayerSession()` immediately (no rematch offered).
 - Key state variables: `g_postGameTimer`, `g_myRematchGameId`, `enterPostGameState()`, `leavePostGameState()`, `initiateRematch()`.
+
+<!-- BEGIN BEADS INTEGRATION -->
+## Beads Issue Tracker
+
+This project uses **bd (Beads)** for lightweight local issue tracking and persistent project notes.
+
+Run this when you need Beads context or command help:
+
+```bash
+bd prime
+```
+
+### Quick Reference
+
+```bash
+bd ready                 # Find available work
+bd show <id>             # View issue details
+bd update <id> --claim   # Mark issue as in progress
+bd close <id>            # Complete issue
+bd remember              # Store durable project knowledge
+```
+
+### Rules
+
+- Use `bd` for project task tracking when a task needs to persist beyond the current session.
+- Do not create markdown TODO files or MEMORY.md files unless explicitly asked.
+- Use `bd remember` for durable project learnings, gotchas, and implementation notes.
+- Keep Beads local/non-invasive unless explicitly asked to export, sync, or commit Beads data.
+
+## Session Completion
+
+When ending a work session:
+
+1. Create or update Beads issues for any follow-up work.
+2. Run relevant quality checks if code changed.
+3. Close completed Beads issues.
+4. Commit code changes when appropriate.
+5. Leave the working tree clean, or clearly explain any intentional uncommitted changes.
+
+Do **not** push, export, sync, or modify Beads git settings unless explicitly asked.
+<!-- END BEADS INTEGRATION -->
