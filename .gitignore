@@ -3,6 +3,7 @@ build/
 node_modules/
 play/
 
+.*.md
 *.log
 desktop.ini
 
