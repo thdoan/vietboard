@@ -101,21 +101,26 @@ window.onload = function() {
   // Check browser support
   if (g_isSupported) {
     // Restore exact previous mode/session from localStorage
-    // Prioritize multiplayer sessions unconditionally to avoid falling back to
-    // single-player when the tab is unloaded and reloaded (e.g. Firefox for Android).
-    var mpSession = null;
-    var hasMultiplayerSession = false;
-    try {
-      mpSession = JSON.parse(localStorage['session_mp'] || 'null');
-      hasMultiplayerSession = !!(mpSession && mpSession.gameId && !mpSession.isGameOver);
-    } catch (err) {
-      hasMultiplayerSession = false;
+    // Phase 3: Use session_mode as the lightweight signal for MP detection.
+    // session_mp is no longer written for MP committed state (DB is SSOT).
+    var hasMultiplayerSession = localStorage['session_mode'] === 'mp';
+
+    // Backward compatibility: fall back to parsing session_mp if session_mode
+    // is not set (transition from old versions).
+    if (!hasMultiplayerSession) {
+      try {
+        var mpSession = JSON.parse(localStorage['session_mp'] || 'null');
+        hasMultiplayerSession = !!(mpSession && mpSession.gameId && !mpSession.isGameOver);
+      } catch (err) {
+        hasMultiplayerSession = false;
+      }
     }
 
     var hasSinglePlayerSession = !!localStorage['session'];
 
     if (hasMultiplayerSession) {
       init('board', true);
+      g_isMultiplayer = true; // prevent SP first-turn timeout from firing during MP resume
     } else if (hasSinglePlayerSession) {
       load(localStorage['session']);
     } else {

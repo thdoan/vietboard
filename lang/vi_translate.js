@@ -81,6 +81,7 @@ var translation_map = {
   'Reconnecting...': 'Đang kết nối lại...',
   'Restart': 'Khởi động lại',
   'Restarting will forfeit this game.': 'Khởi động lại sẽ thua cuộc.',
+  'Resuming game...': 'Đang tiếp tục trò chơi...',
   'Return to Game': 'Trở lại với trò chơi',
   's...': ' giây...',
   'Score': 'Điểm',

@@ -32,6 +32,8 @@ var g_letscore;                 // Score for each letter
 var g_matches_cache;            // To speed up regex matches
 var g_pscore;                   // Player score
 var g_oscore;                   // Opponent (computer) score
+var g_playerLastScore = 0;      // Player's last move score
+var g_opponentLastScore = 0;    // Opponent's last move score
 var g_passes;                   // Number of consecutive passes
 var g_board_empty;              // First move flag
 var g_isGameOver = false;       // Game over flag
@@ -131,6 +133,7 @@ function init(iddiv, skipRacks) {
   g_passes = 0;
   g_board_empty = true;
   g_isGameOver = false;
+  var wasMultiplayer = g_isMultiplayer;
   g_isMultiplayer = false;
   g_history = [];
   if (typeof g_mpGameEndReason !== 'undefined') g_mpGameEndReason = '';
@@ -172,8 +175,10 @@ function init(iddiv, skipRacks) {
   g_bui.setTilesLeft(g_letpool.length);
 
   // Coin flip for first turn in single-player
+  // Phase 3: Skip SP first-turn logic if we were already in MP mode
+  // (e.g. reload/resume). The MP resume path will restore turn state from DB.
   var computerGoesFirst = Math.random() < 0.5;
-  if (computerGoesFirst) {
+  if (computerGoesFirst && !wasMultiplayer) {
     setSinglePlayerTurn(false);
     setTimeout(function() {
       // Trigger computer move by simulating a player pass
@@ -1351,6 +1356,7 @@ function onPlayerMove() {
     if (pstr.length === g_racksize) g_pscore += g_allLettersBonus;
 
     g_pscore += pinfo.score;
+    g_playerLastScore = pinfo.score;
     g_bui.setPlayerScore(pinfo.score, g_pscore);
 
     g_bui.addToHistory(pinfo.words, 1);
@@ -1395,6 +1401,7 @@ function onPlayerMove() {
     var score = play_word.score;
     g_oscore += score;
     if (play_word.seq.length === g_racksize) g_oscore += g_allLettersBonus;
+    g_opponentLastScore = score;
     g_bui.setOpponentScore(score, g_oscore);
 
     g_board_empty = false;

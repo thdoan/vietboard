@@ -6,7 +6,6 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Oju2rh1kaNFcvlPfnssF7A_4YpvQKCH'; // N
 const SUPABASE_HIGHSCORES_TABLE = 'highscores';
 const SUPABASE_HIGHSCORES_ID = 'vietboard';
 
-// Obfuscated app key for Supabase RLS (xor 0xAB)
 const _hk = '\xdd\xc9\xf4\xca\xdb\xdb\xc0\xce\xd2\xf4\x9c\xc0\x92\xc6\x99\xdb\xf3\xda\xe7\x9f\xc5\xf9\x93\xdc\xff\x9e\xc1\xf2\x98\xdd\xe9\x9d\xc8\xe3\x9a\xca\xed\x9b\xcf\xee';
 function _dk(s) {
   var k = 0xAB;
@@ -109,9 +108,13 @@ let g_idleSeconds = 0;
 let g_postGameTimer = null;
 let g_myRematchGameId = null;
 let g_lastEmojiSentAt = 0;
-let g_mpGameEndReason = '';
+var g_mpGameEndReason = '';
 let g_mpAutoSaveTimer = null;
-  let g_channelSubscribed = false;
+let g_dbVersion = 0; // DB-as-SSOT: tracks games.version for optimistic concurrency
+let g_lastDBGameState = null; // Last game state snapshot written to DB (centralized dedup)
+let g_dbWriteInProgress = false; // Guard to prevent syncGameStateFromDB from clobbering in-flight writes
+let g_resumeToast = null;
+let g_channelSubscribed = false;
 let g_resumeConnectionTimer = null;
 let g_resumeFailTimer = null;
 let g_lobbySubscribedAt = 0;
@@ -154,7 +157,7 @@ let g_pendingInvites = {};   // gameId -> {from_id, from_name, created_at}
 let g_myInvites = {};        // gameId -> {to_id, to_name, sent_at}
 
 // Hybrid heartbeat for reliable lobby lists on mobile
-let g_lobbyHeartbeats = {};  // opponentId -> {name, lastPing}
+var g_lobbyHeartbeats = {};  // opponentId -> {name, lastPing}
 let g_lobbyHeartbeatTimer = null;
 const LOBBY_HEARTBEAT_INTERVAL_MS = 5000;
 const LOBBY_HEARTBEAT_STALE_MS = 15000;
@@ -1302,6 +1305,7 @@ window.acceptInvite = async function(gameId) {
   g_connectingInvites.add(gameId);
   renderLobbyPlayers();
   delete g_pendingInvites[gameId];
+  g_bui.toast(t('Connecting with') + ' ' + (invite.from_name || t('Player')) + '...', 4000);
   startMultiplayerGame(gameId, invite.from_id, invite.from_name, false);
 }
 
@@ -1474,7 +1478,7 @@ function scheduleInitRetry() {
   }, INIT_RETRY_DELAY_MS);
 }
 
-function joinGameChannel(gameId, isHost, onSubscribed) {
+function joinGameChannel(gameId, isHost, onSubscribed, skipInitRetry) {
   if (g_activeChannelType === 'game' && g_activeGameId === gameId && (g_channelSubscribed || g_channelSubscribing)) {
     return;
   }
@@ -1533,7 +1537,6 @@ function joinGameChannel(gameId, isHost, onSubscribed) {
     })
     .on('presence', { event: 'leave' }, ({ leftPresences }) => {
       if (DEBUG) console.log('Opponent left presence', leftPresences);
-      cleanupOpponentPreviews();
     })
     .on('broadcast', { event: 'gamestate' }, (payload) => {
       handleGameStateBroadcast(payload.payload);
@@ -1561,18 +1564,16 @@ function joinGameChannel(gameId, isHost, onSubscribed) {
     })
     .on('broadcast', { event: 'hello' }, ({ payload }) => {
       if (payload && payload.gameId === g_gameId && payload.fromId !== g_lobbyUserId) {
-        // Opponent rejoined — clear any stale preview tiles
-        cleanupOpponentPreviews();
-        // Host initializes on guest hello
-        if (isHost) initializeHostGame();
+        // Host initializes on guest hello, but only if game hasn't started yet
+        if (isHost && g_stateVersion <= 1) initializeHostGame();
       }
     })
     .on('broadcast', { event: 'request_init' }, ({ payload }) => {
       // Host re-sends cached init, or initializes on-demand if not yet done
       if (isHost && payload && payload.gameId === g_gameId && payload.fromId !== g_lobbyUserId) {
-        if (!g_cachedInitPayload) {
+        if (!g_cachedInitPayload && g_stateVersion <= 1) {
           initializeHostGame();
-        } else {
+        } else if (g_cachedInitPayload) {
           broadcastGameState(g_cachedInitPayload);
         }
       }
@@ -1617,8 +1618,8 @@ function joinGameChannel(gameId, isHost, onSubscribed) {
           onSubscribed();
         }
 
-        if (!isHost) {
-          // Guest: start retry timer for init
+        if (!isHost && g_stateVersion <= 1 && !skipInitRetry) {
+          // Guest: start retry timer for init (only on first join, not reload)
           g_initRetryCount = 0;
           scheduleInitRetry();
         }
@@ -1629,7 +1630,7 @@ function joinGameChannel(gameId, isHost, onSubscribed) {
           g_reconnectTimer = setTimeout(function() {
             g_reconnectTimer = null;
             if (g_isMultiplayer && g_gameId && !g_isGameOver) {
-              joinGameChannel(g_gameId, g_isHost);
+              joinGameChannel(g_gameId, g_isHost, null, true);
             }
           }, 1500);
         }
@@ -1650,7 +1651,7 @@ function applyNonGameButtonPolicy() {
   var lobbyBtn = document.getElementById('lobby');
   if (lobbyBtn) {
     lobbyBtn.disabled = false;
-    lobbyBtn.title = t('Multiplayer Lobby');
+    lobbyBtn.parentElement.title = t('Multiplayer Lobby');
   }
 
   var restartBtn = document.getElementById('restart');
@@ -1732,14 +1733,16 @@ function cleanupMultiplayerSession() {
     g_channel.unsubscribe();
     g_channel = null;
   }
+  unsubscribeFromGameStateChanges();
 
   localStorage.removeItem('session_mp');
   localStorage['session_mode'] = 'sp';
 
-  // Purge the invite row for this game so it can never cause stale-state issues
+  // Purge the invite row and game state for this game so it can never cause stale-state issues
   var endedGameId = g_gameId;
   if (endedGameId) {
     deleteGameInvite(endedGameId);
+    deleteGameStateFromDB(endedGameId);
   }
 
   g_isMultiplayer = false;
@@ -1750,6 +1753,8 @@ function cleanupMultiplayerSession() {
   g_opponentPresenceState = false;
   g_opponentDisconnectSeconds = 0;
   g_stateVersion = 0;
+  g_dbVersion = 0;
+  g_lastDBWriteAt = 0;
   g_lastMoveAt = 0;
   g_lastRemoteDragSeq = -1;
   g_dragSeq = 0;
@@ -1801,6 +1806,12 @@ window.initiateRematch = function() {
 
   leavePostGameState();
 
+  // Clean up old game state before starting rematch
+  var oldGameId = g_gameId;
+  if (oldGameId) {
+    deleteGameStateFromDB(oldGameId);
+  }
+
   // Deterministic host: lexicographically smaller playerId generates the gameId
   var isHost = g_lobbyUserId < g_opponentId;
 
@@ -1834,9 +1845,10 @@ function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
     stateVersion: g_stateVersion
   });
 
-  // Purge invite row immediately on game end so it can never cause stale-state issues
+  // Purge invite row and game state immediately on game end so it can never cause stale-state issues
   if (g_gameId) {
     deleteGameInvite(g_gameId);
+    deleteGameStateFromDB(g_gameId);
   }
 
   if (!skipLocalAnnounce) {
@@ -1940,6 +1952,12 @@ function initializeHostGame() {
     broadcastGameState(g_cachedInitPayload);
     g_lastMoveAt = Date.now();
     saveMultiplayerSession();
+
+    // Phase 1: Write initial state to DB and subscribe to changes
+    createGameStateInDB().then(function() {
+      subscribeToGameStateChanges();
+    });
+
     updateTurnIndicator();
     updateGameInfoLabels();
   }, 100);
@@ -2151,7 +2169,10 @@ function sendDragEnd() {
 }
 
 function sendDragPreview(fromId, toId, holds) {
-  if (!g_isMultiplayer || !g_channel || !g_isMyTurn) return;
+  if (!g_isMultiplayer || !g_channel || !g_isMyTurn) {
+    if (DEBUG) console.log('[DRAG] sendDragPreview skipped: mp=' + g_isMultiplayer + ' ch=' + !!g_channel + ' turn=' + g_isMyTurn);
+    return;
+  }
 
   g_channel.send({
     type: 'broadcast',
@@ -2229,19 +2250,30 @@ function renderOpponentBoardTile(cell, letter, points) {
 }
 
 function applyDragPreview(payload) {
-  if (!payload || !payload.toId) return;
+  if (!payload || !payload.toId) {
+    if (DEBUG) console.log('[DRAG] applyDragPreview skipped: missing payload or toId');
+    return;
+  }
 
   var toId = mapRemoteRackCellId(payload.toId);
   var toCell = el(toId);
 
-  if (!toCell) return;
+  if (!toCell) {
+    if (DEBUG) console.log('[DRAG] applyDragPreview skipped: cell not found for', toId);
+    return;
+  }
+
+  if (DEBUG) console.log('[DRAG] applyDragPreview rendering at', toId, 'letter:', payload.letter);
 
   // Clear source cell if provided (extra safety)
   if (payload.fromId) {
     var fromId = mapRemoteRackCellId(payload.fromId);
     if (fromId !== toId) {
       var fromCell = el(fromId);
-      if (fromCell) fromCell.innerHTML = '';
+      if (fromCell) {
+        fromCell.innerHTML = '';
+        fromCell.holds = '';
+      }
     }
   }
 
@@ -2249,6 +2281,14 @@ function applyDragPreview(payload) {
     // Board cell: render the real letter so the opponent sees what was placed
     var p = (typeof payload.points === 'number') ? payload.points : (g_letscore[payload.letter] || 0);
     renderOpponentBoardTile(toCell, payload.letter || '', p);
+    // Update g_board so state_sync includes preview tiles
+    var coords = toId.substr(1).split('_');
+    var bx = parseInt(coords[0]), by = parseInt(coords[1]);
+    if (!isNaN(bx) && !isNaN(by)) {
+      g_board[bx][by] = payload.letter || '';
+      g_boardpoints[bx][by] = p;
+      g_boardtypes[bx][by] = 2; // opponent tile
+    }
   } else if (toId && toId.startsWith('op')) {
     // Opponent rack cell: still show blank back
     renderOpponentRackTileBack(toCell);
@@ -2263,10 +2303,22 @@ function applyDragSourceClear(payload) {
   var sourceId = mapRemoteRackCellId(id);
   var sourceCell = el(sourceId);
   if (sourceCell) sourceCell.innerHTML = '';
+  if (sourceId && sourceId.charAt(0) === 'c') {
+    var coords = sourceId.substr(1).split('_');
+    var bx = parseInt(coords[0]), by = parseInt(coords[1]);
+    if (!isNaN(bx) && !isNaN(by)) {
+      g_board[bx][by] = '';
+      g_boardpoints[bx][by] = 0;
+      g_boardtypes[bx][by] = 0;
+    }
+  }
 }
 
 function handleDragBroadcast(payload) {
-  if (!g_isMultiplayer || !payload) return;
+  if (!g_isMultiplayer || !payload) {
+    if (DEBUG) console.log('[DRAG] handleDragBroadcast skipped: mp=' + g_isMultiplayer);
+    return;
+  }
 
   if (typeof payload.seq === 'number') {
     if (payload.seq <= g_lastRemoteDragSeq) return;
@@ -2274,6 +2326,7 @@ function handleDragBroadcast(payload) {
   }
 
   if (payload.action === 'preview') {
+    if (DEBUG) console.log('[DRAG] Received preview broadcast:', payload.fromId, '->', payload.toId, 'letter:', payload.letter);
     applyDragPreview(payload);
     return;
   }
@@ -2333,6 +2386,7 @@ function handleGameStateBroadcast(payload) {
   if (payload.type === 'init') {
     // Validate gameId and dedupe initId
     if (payload.gameId !== g_gameId) return;
+    if (g_stateVersion > 1) return; // game already started, ignore stale init
     if (payload.initId && g_seenInitIds.has(payload.initId)) return;
     if (payload.initId) g_seenInitIds.add(payload.initId);
 
@@ -2373,6 +2427,13 @@ function handleGameStateBroadcast(payload) {
       g_isMyTurn = !payload.hostGoesFirst;
       localStorage['session_mode'] = 'mp';
       saveMultiplayerSession();
+
+      // Initialize DB game state tracking for guest (host does this in createGameStateInDB)
+      g_lastDBGameState = JSON.stringify(buildGameStateSnapshot());
+
+      // Phase 1: Subscribe to DB state changes for this game
+      subscribeToGameStateChanges();
+
       updateTurnIndicator();
       updateGameInfoLabels();
     }, 100);
@@ -2407,7 +2468,23 @@ function handleGameStateBroadcast(payload) {
         g_bui.toast(t('Opponent') + ' ' + t('changed bonuses layout to') + ' ' + (payload.layout === 'default' ? 'Default' : payload.layout));
       }
     }
+  } else if (payload.type === 'game_ended') {
+    if (g_isGameOver) return;
+    g_isGameOver = true;
+    g_mpGameEndReason = payload.reason || '';
+    if (payload.reason === 'forfeit') {
+      g_bui.prompt(t('Opponent has left the game.'));
+    }
+    announceWinner();
+    if (payload.reason === 'passes' || payload.reason === 'ended') {
+      enterPostGameState();
+    } else {
+      cleanupMultiplayerSession();
+    }
   }
+
+  // Phase 3: Any broadcast from opponent indicates activity — reset idle timer
+  resetIdleTimer();
 }
 
 function updateTurnIndicator() {
@@ -2447,12 +2524,12 @@ function updateTurnIndicator() {
   // Lobby: disabled once game starts
   const lobbyBtn = document.getElementById('lobby');
   if (lobbyBtn) {
-    if (g_isMultiplayer && !g_board_empty) {
+    if (g_isMultiplayer) {
       lobbyBtn.disabled = true;
-      lobbyBtn.title = t('Finish the current game before joining the lobby');
+      lobbyBtn.parentElement.title = t('Finish the current game before joining the lobby');
     } else {
       lobbyBtn.disabled = false;
-      lobbyBtn.title = t('Multiplayer Lobby');
+      lobbyBtn.parentElement.title = t('Multiplayer Lobby');
     }
   }
 }
@@ -2534,6 +2611,7 @@ function onMultiplayerMove(passed) {
 
   // We made a valid move. Now broadcast it to the opponent!
   g_pscore += scoreEarned;
+  g_playerLastScore = scoreEarned;
   g_bui.setPlayerScore(scoreEarned, g_pscore);
 
   if (pinfo && pinfo.words && pinfo.words.length > 0) {
@@ -2566,6 +2644,9 @@ function onMultiplayerMove(passed) {
   updateTurnIndicator();
   updateGameInfoLabels();
   broadcastGameState(moveData);
+
+  // Clear cached init so it can't be re-broadcast mid-game
+  g_cachedInitPayload = null;
 
   g_lastMoveAt = Date.now();
   saveMultiplayerSession();
@@ -2601,6 +2682,38 @@ function handleMoveBroadcast(payload) {
 
     // Clean up any stray ghost tiles before applying the move
     cleanupDragGhosts();
+
+    // Helper: re-render entire board from committed g_board
+    var syncBoardUI = function() {
+      for (var x = 0; x < g_boardwidth; ++x) {
+        var boardColumn = g_board[x];
+        var boardTypeColumn = g_boardtypes[x];
+        if (!Array.isArray(boardColumn) || !Array.isArray(boardTypeColumn)) continue;
+        for (var y = 0; y < g_boardheight; ++y) {
+          var cell = el('c' + x + '_' + y);
+          var char = boardColumn[y];
+          if (char && char !== '' && cell) {
+            var displayChar = char.toUpperCase();
+            var tClass = 't' + (boardTypeColumn[y] || 2);
+            var points = (g_boardpoints[x] && g_boardpoints[x][y]) || 0;
+            var p = parseInt(points);
+            var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
+            var html = '<div class="drag ' + tClass + '">' + (char !== ' ' ? displayChar : SPACER) + pointsHtml + '</div>';
+            cell.innerHTML = html;
+            var holdsObj = { 'letter': char, 'points': p };
+            cell.holds = holdsObj;
+            if (cell.firstChild) cell.firstChild.holds = holdsObj;
+          } else if (cell && (!char || char === '')) {
+            cell.holds = '';
+            cell.innerHTML = '';
+          }
+        }
+      }
+      g_bui.makeTilesFixed();
+      // Sync racks from committed state alongside board
+      g_bui.setPlayerRack(g_bui.racks[1] || '');
+      g_bui.setOpponentRack(g_bui.racks[2] || '');
+    };
 
     // Apply opponent's move
     if (!payload.passed) {
@@ -2660,39 +2773,10 @@ function handleMoveBroadcast(payload) {
         }
       }
 
-      var syncBoardUI = function() {
-        for (var x = 0; x < g_boardwidth; ++x) {
-          var boardColumn = g_board[x];
-          var boardTypeColumn = g_boardtypes[x];
-          if (!Array.isArray(boardColumn) || !Array.isArray(boardTypeColumn)) continue;
-
-          for (var y = 0; y < g_boardheight; ++y) {
-            var cell = el('c' + x + '_' + y);
-            var char = boardColumn[y];
-            if (char && char !== '' && cell) {
-              var displayChar = char.toUpperCase();
-              // Direct mapping: type 1 → t1 (green, my tiles), type 2 → t2 (red, opponent tiles)
-              var tClass = 't' + (boardTypeColumn[y] || 2);
-              var points = (g_boardpoints[x] && g_boardpoints[x][y]) || 0;
-              var p = parseInt(points);
-              var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
-              var html = '<div class="drag ' + tClass + '">' + (char !== ' ' ? displayChar : SPACER) + pointsHtml + '</div>';
-              cell.innerHTML = html;
-              var holdsObj = { 'letter': char, 'points': p };
-              cell.holds = holdsObj;
-              if (cell.firstChild) cell.firstChild.holds = holdsObj;
-            } else if (cell && (!char || char === '')) {
-              cell.holds = '';
-              cell.innerHTML = '';
-            }
-          }
-        }
-        g_bui.makeTilesFixed();
-      };
-
       function onOpponentMoveDone() {
         g_bui.setOpponentRack(payload.rackAfter);
         g_oscore += payload.score;
+        g_opponentLastScore = payload.score;
         g_bui.setOpponentScore(payload.score, g_oscore);
         g_letpool = payload.letpool;
         g_bui.setTilesLeft(g_letpool.length);
@@ -2722,6 +2806,9 @@ function handleMoveBroadcast(payload) {
 
         g_lastMoveAt = Date.now();
         saveMultiplayerSession();
+
+        // Phase 3: Sync from DB to ensure we have the authoritative state after opponent move
+        syncGameStateFromDB();
       }
 
       if (diffWord.length > 0) {
@@ -2748,10 +2835,15 @@ function handleMoveBroadcast(payload) {
       }
     }
 
+    // Re-render board from committed g_board for both moves and passes.
+    // This clears any phantom preview tiles left over from earlier drag broadcasts.
+    if (typeof syncBoardUI === 'function') syncBoardUI();
+
     // Extra safety: clear any ghost tiles that survived the move processing
     cleanupDragGhosts();
 
     g_oscore += payload.score;
+    g_opponentLastScore = payload.score;
     g_bui.setOpponentScore(payload.score, g_oscore);
     g_bui.setOpponentRack(payload.rackAfter);
     g_letpool = Array.isArray(payload.letpool) ? payload.letpool : (Array.isArray(g_letpool) ? g_letpool : []);
@@ -2793,6 +2885,12 @@ function handleMoveBroadcast(payload) {
 
     g_lastMoveAt = Date.now();
     saveMultiplayerSession();
+
+    // Phase 3: Sync from DB to ensure we have the authoritative state after opponent move
+    syncGameStateFromDB();
+
+    // Opponent activity resets idle timer
+    resetIdleTimer();
   }
 }
 
@@ -2804,287 +2902,281 @@ function saveMultiplayerSession() {
       if (DEBUG) console.warn('Skipping save of corrupted MP session: missing opponentName or gameId');
       return;
     }
-    var now = Date.now();
-    var inferredLastMoveAt = g_lastMoveAt || 0;
-    var previousSnapshot = null;
 
-    try {
-      previousSnapshot = JSON.parse(localStorage['session_mp'] || '{}');
-    } catch (err) {
-      previousSnapshot = null;
-    }
-
-    if (!inferredLastMoveAt && previousSnapshot && typeof previousSnapshot.lastMoveAt === 'number') {
-      inferredLastMoveAt = previousSnapshot.lastMoveAt;
-    }
-
-    if (!inferredLastMoveAt) inferredLastMoveAt = now;
-
-    var snapshot = {
-      gameId: g_gameId,
-      opponentId: g_opponentId,
-      opponentName: g_opponentName,
-      isMyTurn: g_isMyTurn,
-      letpool: g_letpool,
-      pscore: g_pscore,
-      oscore: g_oscore,
-      myRack: g_bui.getPlayerRack(),
-      oppRack: g_bui.getOpponentRack(),
-      board: g_board,
-      boardp: g_boardpoints,
-      boardt: g_boardtypes,
-      boardEmpty: g_board_empty,
-      stateVersion: g_stateVersion,
-      isGameOver: g_isGameOver,
-      isHost: g_isHost,
-      history: g_history,
-      savedAt: now,
-      lastMoveAt: inferredLastMoveAt
-    };
-
-    var snapshotJson = JSON.stringify(snapshot);
-    // Skip write if identical to last saved snapshot to reduce disk I/O
-    if (previousSnapshot && JSON.stringify(previousSnapshot) === snapshotJson) {
-      return;
-    }
-
+    // Phase 3: Do NOT write committed MP state to localStorage.
+    // DB is the single source of truth for multiplayer game state.
     localStorage['session_mode'] = 'mp';
-    localStorage['session_mp'] = snapshotJson;
+
+    // Phase 2: Sync to DB, but only if game state actually changed
+    var currentGameState = buildGameStateSnapshot();
+    var currentGameStateJson = JSON.stringify(currentGameState);
+    if (DEBUG && g_dbVersion > 0) {
+      if (!g_lastDBGameState) {
+        console.log('[DB-DIAG] g_lastDBGameState is null');
+      } else {
+        var diffAt = -1;
+        for (var di = 0; di < Math.min(currentGameStateJson.length, g_lastDBGameState.length); di++) {
+          if (currentGameStateJson.charAt(di) !== g_lastDBGameState.charAt(di)) {
+            diffAt = di;
+            break;
+          }
+        }
+        if (diffAt >= 0) {
+          console.log('[DB-DIAG] Diff at position', diffAt);
+          console.log('[DB-DIAG] NEW:', currentGameStateJson.substring(Math.max(0, diffAt - 30), diffAt + 30));
+          console.log('[DB-DIAG] OLD:', g_lastDBGameState.substring(Math.max(0, diffAt - 30), diffAt + 30));
+        } else if (currentGameStateJson.length !== g_lastDBGameState.length) {
+          console.log('[DB-DIAG] Same prefix but different length:', currentGameStateJson.length, 'vs', g_lastDBGameState.length);
+        } else {
+          console.log('[DB-DIAG] Strings are identical');
+        }
+      }
+    }
+    if (g_dbVersion > 0 && currentGameStateJson !== g_lastDBGameState) {
+      if (DEBUG) console.log('[DB-DIAG] Writing to DB because state changed');
+      g_dbWriteInProgress = true;
+      updateGameStateInDB(g_dbVersion).then(function(success) {
+        if (success) {
+          g_dbVersion += 1;
+          g_lastDBGameState = currentGameStateJson;
+          if (DEBUG) console.log('[DB] saveMultiplayerSession synced, new version:', g_dbVersion);
+        } else {
+          if (DEBUG) console.warn('[DB] saveMultiplayerSession sync failed (version conflict), fetching current version...');
+          // Fetch current version so next save has correct expected version
+          fetchGameStateFromDB().then(function(dbData) {
+            if (dbData && typeof dbData.version === 'number') {
+              g_dbVersion = dbData.version;
+              if (DEBUG) console.log('[DB] Updated g_dbVersion to:', g_dbVersion);
+            }
+          });
+        }
+      }).then(function() {
+        g_dbWriteInProgress = false;
+      }, function() {
+        g_dbWriteInProgress = false;
+      });
+    } else if (g_dbVersion > 0 && DEBUG) {
+      console.log('[DB] Game state unchanged, skipping DB write');
+    }
   }
 }
 
-document.addEventListener('appReady', function() {
-  // Check if we have a multiplayer session to resume
-  if (!localStorage['session_mp']) return;
+// -----------------------------------------------------------------------------
+// DB-as-SSOT: Game State Sync Functions
+// -----------------------------------------------------------------------------
 
-  var mpData = null;
-  try {
-    mpData = JSON.parse(localStorage['session_mp']);
-  } catch (err) {
-    console.error('Failed to parse session_mp:', err);
+function buildGameStateSnapshot() {
+  // Perspective-neutral: player1 = host, player2 = guest
+  // Writer puts their own data in the correct slot based on g_isHost
+
+  // Convert local boardTypes (1=me, 2=opponent) to neutral (1=host, 2=guest)
+  var neutralBoardTypes = [];
+  for (var x = 0; x < g_boardwidth; ++x) {
+    neutralBoardTypes[x] = [];
+    for (var y = 0; y < g_boardheight; ++y) {
+      var localType = g_boardtypes[x][y];
+      if (localType === 1) {
+        neutralBoardTypes[x][y] = g_isHost ? 1 : 2;
+      } else if (localType === 2) {
+        neutralBoardTypes[x][y] = g_isHost ? 2 : 1;
+      } else {
+        neutralBoardTypes[x][y] = 0;
+      }
+    }
   }
 
-  var now = Date.now();
-  var idleMs = typeof g_wait_mp_idle !== 'undefined' ? g_wait_mp_idle : 3600000;
-  var MAX_RESUME_AGE_MS = idleMs + 5 * 60 * 1000; // idle timeout + 5 min buffer
-  var hasRecentSnapshot = mpData && typeof mpData.savedAt === 'number' && (now - mpData.savedAt) <= MAX_RESUME_AGE_MS;
-  var hasRecentMove = mpData && typeof mpData.lastMoveAt === 'number' && (now - mpData.lastMoveAt) <= MAX_RESUME_AGE_MS;
-  var hasUsableState = mpData &&
-    typeof mpData.gameId === 'string' && mpData.gameId !== '' &&
-    typeof mpData.stateVersion === 'number' && mpData.stateVersion > 0 &&
-    typeof mpData.myRack === 'string' &&
-    typeof mpData.oppRack === 'string' &&
-    Array.isArray(mpData.letpool) &&
-    typeof mpData.opponentName === 'string' && mpData.opponentName !== '';
-
-  if (!hasUsableState || (!hasRecentSnapshot && !hasRecentMove)) {
-    localStorage.removeItem('session_mp');
-    if (localStorage['session_mode'] === 'mp') localStorage['session_mode'] = 'sp';
-    return;
-  }
-
-  if (mpData.isGameOver) {
-    localStorage.removeItem('session_mp');
-    cleanupMultiplayerSession();
-    return;
-  }
-
-  if (DEBUG) console.log('Resuming multiplayer session for game:', mpData.gameId);
-
-  try {
-    g_gameId = mpData.gameId;
-    g_opponentId = mpData.opponentId || null;
-    g_opponentName = mpData.opponentName;
-    g_isMultiplayer = true;
-    g_isMyTurn = mpData.isMyTurn;
-    g_letpool = Array.isArray(mpData.letpool) ? mpData.letpool : (Array.isArray(g_letpool) ? g_letpool : []);
-    g_pscore = typeof mpData.pscore === 'number' ? mpData.pscore : g_pscore;
-    g_oscore = typeof mpData.oscore === 'number' ? mpData.oscore : g_oscore;
-    g_board = normalizeBoardMatrix(mpData.board, '');
-    g_boardpoints = normalizeBoardMatrix(mpData.boardp, 0);
-    g_boardtypes = normalizeBoardMatrix(mpData.boardt, 0);
-    g_board_empty = mpData.boardEmpty;
-    g_stateVersion = mpData.stateVersion || 0;
-    g_isGameOver = !!mpData.isGameOver;
-
-    // Restore words-played history
-    g_history = Array.isArray(mpData.history) ? mpData.history : [];
-    var histHtml = '<table>';
+  // Convert local history (0=me, 1=opponent) to neutral player IDs
+  var neutralHistory = [];
+  if (Array.isArray(g_history)) {
     for (var i = 0; i < g_history.length; ++i) {
       var entry = g_history[i];
-      histHtml += g_bui.renderWordPlayed(entry[0], entry[1]);
+      var localPlayer = entry[1];
+      var playerId = (localPlayer === 0) ? g_lobbyUserId : g_opponentId;
+      neutralHistory.push([entry[0], playerId]);
+    }
+  }
+
+  return {
+    turnPlayerId: g_isMyTurn ? g_lobbyUserId : (g_opponentId || ''),
+    board: g_board,
+    boardPoints: g_boardpoints,
+    boardTypes: neutralBoardTypes,
+    boardEmpty: g_board_empty,
+    letpool: g_letpool,
+    player1Id: g_isHost ? g_lobbyUserId : (g_opponentId || ''),
+    player2Id: g_isHost ? (g_opponentId || '') : g_lobbyUserId,
+    player1Rack: g_isHost ? (g_bui.racks[1] || '') : (g_bui.racks[2] || ''),
+    player2Rack: g_isHost ? (g_bui.racks[2] || '') : (g_bui.racks[1] || ''),
+    player1Score: g_isHost ? g_pscore : g_oscore,
+    player2Score: g_isHost ? g_oscore : g_pscore,
+    player1LastScore: g_isHost ? g_playerLastScore : g_opponentLastScore,
+    player2LastScore: g_isHost ? g_opponentLastScore : g_playerLastScore,
+    history: neutralHistory,
+    passes: g_passes,
+    turnNumber: g_stateVersion
+  };
+}
+
+function createGameStateInDB() {
+  if (!window.supabaseClient || !g_gameId) return Promise.resolve(false);
+  var state = buildGameStateSnapshot();
+  return window.supabaseClient
+    .rpc('create_game_state', {
+      p_game_id: g_gameId,
+      p_app_key: _dk(_hk),
+      p_player_a_id: g_isHost ? g_lobbyUserId : (g_opponentId || ''),
+      p_player_b_id: g_isHost ? (g_opponentId || '') : g_lobbyUserId,
+      p_initial_state: state
+    })
+    .then(function(result) {
+      if (result.error) {
+        if (DEBUG) console.warn('[DB] create_game_state error:', result.error);
+        return false;
+      }
+      if (result.data) {
+        g_dbVersion = 1;
+        g_lastDBGameState = JSON.stringify(state);
+        if (DEBUG) console.log('[DB] create_game_state success, version set to:', g_dbVersion);
+      }
+      return result.data;
+    })
+    .catch(function(err) {
+      if (DEBUG) console.warn('[DB] create_game_state failed:', err);
+      return false;
+    });
+}
+
+function updateGameStateInDB(expectedVersion) {
+  if (!window.supabaseClient || !g_gameId) return Promise.resolve(false);
+  var state = buildGameStateSnapshot();
+  return window.supabaseClient
+    .rpc('update_game_state', {
+      p_game_id: g_gameId,
+      p_app_key: _dk(_hk),
+      p_expected_version: expectedVersion,
+      p_new_state: state
+    })
+    .then(function(result) {
+      if (result.error) {
+        if (DEBUG) console.warn('[DB] update_game_state error:', result.error);
+        return false;
+      }
+      if (DEBUG) console.log('[DB] update_game_state result:', result.data);
+      return result.data;
+    })
+    .catch(function(err) {
+      if (DEBUG) console.warn('[DB] update_game_state failed:', err);
+      return false;
+    });
+}
+
+function fetchGameStateFromDB() {
+  if (!window.supabaseClient || !g_gameId) return Promise.resolve(null);
+  return window.supabaseClient
+    .from('games')
+    .select('state, version, updated_at')
+    .eq('id', g_gameId)
+    .single()
+    .then(function(result) {
+      if (result.error) {
+        if (DEBUG) console.warn('[DB] fetch game state error:', result.error);
+        return null;
+      }
+      if (DEBUG) console.log('[DB] fetched game state version:', result.data.version);
+      return result.data;
+    })
+    .catch(function(err) {
+      if (DEBUG) console.warn('[DB] fetch game state failed:', err);
+      return null;
+    });
+}
+
+function applyGameStateFromDB(dbState) {
+  if (!dbState || !dbState.state) return;
+  var s = dbState.state;
+
+  // Apply committed state from DB
+  if (s.board) g_board = normalizeBoardMatrix(s.board, '');
+  if (s.boardPoints) g_boardpoints = normalizeBoardMatrix(s.boardPoints, 0);
+  if (typeof s.boardEmpty === 'boolean') g_board_empty = s.boardEmpty;
+  if (Array.isArray(s.letpool)) g_letpool = s.letpool;
+  if (typeof s.passes === 'number') g_passes = s.passes;
+  if (typeof s.turnNumber === 'number') g_stateVersion = s.turnNumber;
+
+  // Scores (perspective-neutral: player1 = host, player2 = guest)
+  if (g_isHost) {
+    if (typeof s.player1Score === 'number') g_pscore = s.player1Score;
+    if (typeof s.player2Score === 'number') g_oscore = s.player2Score;
+    if (typeof s.player1LastScore === 'number') g_playerLastScore = s.player1LastScore;
+    if (typeof s.player2LastScore === 'number') g_opponentLastScore = s.player2LastScore;
+  } else {
+    if (typeof s.player2Score === 'number') g_pscore = s.player2Score;
+    if (typeof s.player1Score === 'number') g_oscore = s.player1Score;
+    if (typeof s.player2LastScore === 'number') g_playerLastScore = s.player2LastScore;
+    if (typeof s.player1LastScore === 'number') g_opponentLastScore = s.player1LastScore;
+  }
+
+  // Racks (perspective-neutral: player1 = host, player2 = guest)
+  if (g_bui) {
+    if (g_isHost) {
+      if (typeof s.player1Rack === 'string') g_bui.setPlayerRack(s.player1Rack);
+      if (typeof s.player2Rack === 'string') g_bui.setOpponentRack(s.player2Rack);
+    } else {
+      if (typeof s.player2Rack === 'string') g_bui.setPlayerRack(s.player2Rack);
+      if (typeof s.player1Rack === 'string') g_bui.setOpponentRack(s.player1Rack);
+    }
+  }
+
+  // History (neutral: playerId → local: 0=me, 1=opponent)
+  if (Array.isArray(s.history)) {
+    g_history = [];
+    for (var i = 0; i < s.history.length; ++i) {
+      var entry = s.history[i];
+      var playerId = entry[1];
+      var localPlayer = (playerId === g_lobbyUserId) ? 0 : 1;
+      g_history.push([entry[0], localPlayer]);
+    }
+    var histHtml = '<table>';
+    for (var i = 0; i < g_history.length; ++i) {
+      histHtml += g_bui.renderWordPlayed(g_history[i][0], g_history[i][1]);
     }
     histHtml += '</table>';
     el('history').innerHTML = histHtml;
     g_bui.hlines = histHtml;
     g_bui.hcount = g_history.length;
+  }
 
-    // Apply restored rack and board state immediately
-    if (DEBUG) console.log('Applying restored rack and board state...');
-    g_bui.setPlayerRack(String(mpData.myRack || ''));
-    g_bui.setOpponentRack(String(mpData.oppRack || ''));
-    g_bui.setPlayerScore(0, g_pscore);
-    g_bui.setOpponentScore(0, g_oscore);
-    g_bui.setTilesLeft((g_letpool || []).length);
-
-    if (Array.isArray(g_board) && Array.isArray(g_boardtypes)) {
-      for (var x = 0; x < g_boardwidth; ++x) {
-        var boardColumn = g_board[x];
-        var boardTypeColumn = g_boardtypes[x];
-        if (!Array.isArray(boardColumn) || !Array.isArray(boardTypeColumn)) continue;
-
-        for (var y = 0; y < g_boardheight; ++y) {
-          var cell = el('c' + x + '_' + y);
-          if (!cell) continue;
-          cell.innerHTML = '';
-          cell.holds = '';
-          var char = boardColumn[y];
-          if (char && char !== '' && typeof char !== 'undefined') {
-            var displayChar = char.toUpperCase();
-            var tClass = boardTypeColumn[y] === 1 ? 't1' : 't2';
-            var points = (g_boardpoints[x] && g_boardpoints[x][y]) || 0;
-            var p = parseInt(points);
-            var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
-            var html = '<div class="drag ' + tClass + '">' + (char !== ' ' ? displayChar : SPACER) + pointsHtml + '</div>';
-            cell.innerHTML = html;
-            var holdsObj = { 'letter': char, 'points': p };
-            cell.holds = holdsObj;
-            if (cell.firstChild) cell.firstChild.holds = holdsObj;
-          }
+  // Convert neutral boardTypes (1=host, 2=guest) to local (1=me, 2=opponent)
+  if (s.boardTypes) {
+    var localBoardTypes = normalizeBoardMatrix(s.boardTypes, 0);
+    for (var x = 0; x < g_boardwidth; ++x) {
+      for (var y = 0; y < g_boardheight; ++y) {
+        var neutralType = localBoardTypes[x][y];
+        if (neutralType === 1) {
+          localBoardTypes[x][y] = g_isHost ? 1 : 2;
+        } else if (neutralType === 2) {
+          localBoardTypes[x][y] = g_isHost ? 2 : 1;
         }
       }
     }
-    g_bui.makeTilesFixed();
-    updateTurnIndicator();
-    updateGameInfoLabels();
-
-    // Rejoin channel — restore isHost so reloaded host can reinitialize on guest hello
-    var resumedIsHost = !!mpData.isHost;
-    joinGameChannel(g_gameId, resumedIsHost, function() {
-      // Request latest state only after channel is confirmed subscribed
-      broadcastGameState({ type: 'request_state' });
-    });
-
-    // Connection watchdog: show reconnecting toast if not subscribed quickly
-    g_resumeConnectionTimer = setTimeout(function() {
-      if (!g_channelSubscribed) {
-        if (g_bui) g_bui.toast(t('Reconnecting...'), 3000);
-      }
-    }, 5000);
-
-    g_resumeFailTimer = setTimeout(function() {
-      if (!g_channelSubscribed) {
-        g_bui.prompt(
-          t('Unable to reconnect to game.'),
-          '<button class="button" onclick="hideModal();cleanupMultiplayerSession();init(\'board\')">' + t('Play Computer') + '</button>'
-        );
-      }
-    }, 20000);
-
-    // request_state is now sent inside the joinGameChannel onSubscribed callback
-  } catch (err) {
-    console.error('Error restoring multiplayer session:', err);
-    localStorage.removeItem('session_mp');
-    if (localStorage['session_mode'] === 'mp') localStorage['session_mode'] = 'sp';
-    // Fall back to fresh single-player board so user is never stuck
-    init('board');
-  }
-});
-
-// Add to handleGameStateBroadcast to handle request_state
-const originalHandleMoveBroadcast2 = handleGameStateBroadcast;
-handleGameStateBroadcast = function(payload) {
-  originalHandleMoveBroadcast2(payload);
-
-  if (payload.type === 'game_ended') {
-    if (g_isGameOver) return;
-    g_isGameOver = true;
-    g_mpGameEndReason = payload.reason || '';
-    if (payload.reason === 'forfeit') {
-      g_bui.prompt(t('Opponent has left the game.'));
-    }
-    announceWinner();
-    if (payload.reason === 'passes' || payload.reason === 'ended') {
-      enterPostGameState();
-    } else {
-      cleanupMultiplayerSession();
-    }
-    return;
+    g_boardtypes = localBoardTypes;
   }
 
-  if (payload.type === 'request_state') {
-    // The other player just refreshed and is asking for the authoritative state
-    // Send them our current state view so they can catch up if they missed anything
-    broadcastGameState({
-      type: 'state_sync',
-      board: g_board,
-      boardp: g_boardpoints,
-      boardt: g_boardtypes,
-      boardEmpty: g_board_empty,
-      pscore: g_oscore, // Our oscore is their pscore
-      oscore: g_pscore, // Our pscore is their oscore
-      myRack: g_bui.racks[2] || '', // Use committed opponent rack (which is their player rack)
-      oppRack: g_bui.racks[1] || '', // Use committed player rack (which is their opponent rack)
-      letpool: g_letpool,
-      isMyTurn: !g_isMyTurn,
-      stateVersion: g_stateVersion,
-      lastMoveAt: g_lastMoveAt || Date.now()
-    });
-  } else if (payload.type === 'state_sync') {
-    var hasLocalBoard = false;
-    for (var sx = 0; sx < g_boardwidth; ++sx) {
-      for (var sy = 0; sy < g_boardheight; ++sy) {
-        if (g_board[sx] && g_board[sx][sy]) { hasLocalBoard = true; break; }
-      }
-      if (hasLocalBoard) break;
-    }
-    if (payload.stateVersion && payload.stateVersion < g_stateVersion && hasLocalBoard) return;
-
-    // We received a sync from the other player — connection is alive
-    if (g_initRetryTimer) {
-      clearTimeout(g_initRetryTimer);
-      g_initRetryTimer = null;
-    }
-    g_initRetryCount = 0;
-
-    g_board = normalizeBoardMatrix(payload.board, '');
-    g_boardpoints = normalizeBoardMatrix(payload.boardp, 0);
-    g_boardtypes = normalizeBoardMatrix(payload.boardt, 0);
-    g_board_empty = payload.boardEmpty;
-    if (!g_board_empty) {
-      var elUp = el('a.link.up');
-      var elDown = el('a.link.down');
-      if (elUp) elUp.classList.add('disabled');
-      if (elDown) elDown.classList.add('disabled');
-      var elLayout = el('bonuseslayout');
-      if (elLayout) elLayout.disabled = true;
-    }
-    g_pscore = payload.pscore;
-    g_oscore = payload.oscore;
-    g_letpool = Array.isArray(payload.letpool) ? payload.letpool : (Array.isArray(g_letpool) ? g_letpool : []);
-    g_isMyTurn = payload.isMyTurn;
-    g_stateVersion = Math.max(g_stateVersion, payload.stateVersion || 0);
-    if (typeof payload.lastMoveAt === 'number') g_lastMoveAt = payload.lastMoveAt;
-
-    g_bui.setPlayerRack(String(payload.myRack || ''));
-    g_bui.setOpponentRack(String(payload.oppRack || ''));
-    g_bui.setPlayerScore(0, g_pscore);
-    g_bui.setOpponentScore(0, g_oscore);
-    g_bui.setTilesLeft((g_letpool || []).length);
-
+  // Render committed board tiles from g_board onto the DOM
+  if (Array.isArray(g_board) && Array.isArray(g_boardtypes)) {
     for (var x = 0; x < g_boardwidth; ++x) {
       var boardColumn = g_board[x];
       var boardTypeColumn = g_boardtypes[x];
       if (!Array.isArray(boardColumn) || !Array.isArray(boardTypeColumn)) continue;
-
       for (var y = 0; y < g_boardheight; ++y) {
         var cell = el('c' + x + '_' + y);
         if (!cell) continue;
         cell.innerHTML = '';
+        cell.holds = '';
         var char = boardColumn[y];
         if (char && char !== '' && typeof char !== 'undefined') {
           var displayChar = char.toUpperCase();
-          var tClass = boardTypeColumn[y] === 1 ? 't2' : 't1';
+          var tClass = boardTypeColumn[y] === 1 ? 't1' : 't2';
           var points = (g_boardpoints[x] && g_boardpoints[x][y]) || 0;
           var p = parseInt(points);
           var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
@@ -3093,17 +3185,397 @@ handleGameStateBroadcast = function(payload) {
           var holdsObj = { 'letter': char, 'points': p };
           cell.holds = holdsObj;
           if (cell.firstChild) cell.firstChild.holds = holdsObj;
-        } else {
-          cell.holds = '';
         }
       }
     }
-    g_bui.makeTilesFixed();
+  }
+
+  // Turn
+  if (s.turnPlayerId) {
+    g_isMyTurn = (s.turnPlayerId === g_lobbyUserId);
+  }
+}
+
+// Subscribe to realtime updates on games table
+var g_gameStateSubscription = null;
+
+function detectStateMismatches(dbState) {
+  if (!dbState || !dbState.state) return [];
+  var s = dbState.state;
+  var mismatches = [];
+
+  // Compare board
+  if (s.board && JSON.stringify(s.board) !== JSON.stringify(g_board)) {
+    mismatches.push('board');
+  }
+  // Compare scores
+  if (typeof s.player1Score === 'number' && s.player1Score !== g_pscore) {
+    mismatches.push('player1Score: DB=' + s.player1Score + ' local=' + g_pscore);
+  }
+  if (typeof s.player2Score === 'number' && s.player2Score !== g_oscore) {
+    mismatches.push('player2Score: DB=' + s.player2Score + ' local=' + g_oscore);
+  }
+  // Compare turn
+  if (s.turnPlayerId) {
+    var dbIsMyTurn = (s.turnPlayerId === g_lobbyUserId);
+    if (dbIsMyTurn !== g_isMyTurn) {
+      mismatches.push('turn: DB=' + s.turnPlayerId + ' localMyTurn=' + g_isMyTurn);
+    }
+  }
+  // Compare racks
+  if (g_bui) {
+    if (typeof s.player1Rack === 'string' && s.player1Rack !== g_bui.racks[1]) {
+      mismatches.push('player1Rack');
+    }
+    if (typeof s.player2Rack === 'string' && s.player2Rack !== g_bui.racks[2]) {
+      mismatches.push('player2Rack');
+    }
+  }
+
+  return mismatches;
+}
+
+function subscribeToGameStateChanges() {
+  if (!window.supabaseClient || !g_gameId || g_gameStateSubscription) return;
+
+  g_gameStateSubscription = window.supabaseClient
+    .channel('game_state:' + g_gameId)
+    .on('postgres_changes', {
+      event: 'UPDATE',
+      schema: 'public',
+      table: 'games',
+      filter: 'id=eq.' + g_gameId
+    }, function(payload) {
+      if (DEBUG) console.log('[DB] Realtime update received for game:', g_gameId);
+      // Phase 2: Fetch and compare, log mismatches but don't apply yet
+      fetchGameStateFromDB().then(function(dbData) {
+        if (dbData) {
+          var mismatches = detectStateMismatches(dbData);
+          if (mismatches.length > 0) {
+            if (DEBUG) console.warn('[DB] State mismatches detected:', mismatches.join(', '));
+          } else {
+            if (DEBUG) console.log('[DB] State matches DB perfectly');
+          }
+          // Update dbVersion tracker from DB
+          if (typeof dbData.version === 'number') {
+            g_dbVersion = Math.max(g_dbVersion, dbData.version);
+          }
+          // Update snapshot tracker so auto-save knows current state matches DB
+          g_lastDBGameState = JSON.stringify(buildGameStateSnapshot());
+        }
+      });
+    })
+    .subscribe(function(status) {
+      if (DEBUG) console.log('[DB] Game state subscription status:', status);
+    });
+}
+
+function unsubscribeFromGameStateChanges() {
+  if (g_gameStateSubscription) {
+    g_gameStateSubscription.unsubscribe();
+    g_gameStateSubscription = null;
+  }
+}
+
+function cleanupStaleGamesFromClient(maxAgeHours) {
+  if (!window.supabaseClient) return Promise.resolve(0);
+  return window.supabaseClient
+    .rpc('cleanup_stale_games', { p_max_age_hours: maxAgeHours || 24 })
+    .then(function(result) {
+      if (result.error) {
+        if (DEBUG) console.warn('[DB] cleanup_stale_games error:', result.error);
+        return 0;
+      }
+      if (DEBUG && result.data > 0) console.log('[DB] cleaned up stale games:', result.data);
+      return result.data || 0;
+    })
+    .catch(function(err) {
+      if (DEBUG) console.warn('[DB] cleanup_stale_games failed:', err);
+      return 0;
+    });
+}
+
+function deleteGameStateFromDB(gameId) {
+  if (!window.supabaseClient || !gameId) return Promise.resolve(false);
+  return window.supabaseClient
+    .rpc('delete_game_state', {
+      p_game_id: gameId,
+      p_app_key: _dk(_hk)
+    })
+    .then(function(result) {
+      if (result.error) {
+        if (DEBUG) console.warn('[DB] delete game state error:', result.error);
+        return false;
+      }
+      if (DEBUG) console.log('[DB] deleted game state for:', gameId);
+      return result.data;
+    })
+    .catch(function(err) {
+      if (DEBUG) console.warn('[DB] delete game state failed:', err);
+      return false;
+    });
+}
+
+function syncGameStateFromDB() {
+  if (!window.supabaseClient || !g_gameId || !g_isMultiplayer) return Promise.resolve(false);
+  if (g_dbWriteInProgress) {
+    if (DEBUG) console.log('[DB] Write in progress, skipping sync to avoid clobbering local state');
+    return Promise.resolve(false);
+  }
+  if (DEBUG) console.log('[DB] Syncing game state from DB for:', g_gameId);
+
+  return fetchGameStateFromDB().then(function(dbData) {
+    if (!dbData || !dbData.state) {
+      if (DEBUG) console.warn('[DB] No state found in DB for game:', g_gameId);
+      return false;
+    }
+
+    // Update version tracking
+    if (typeof dbData.version === 'number') {
+      g_dbVersion = dbData.version;
+    }
+
+    // Apply committed state from DB
+    applyGameStateFromDB(dbData);
+
+    // Update lastDBSnapshot using LOCAL snapshot format
+    // (DB JSONB may have different property ordering than local objects)
+    // Re-render UI
+    if (g_bui) {
+      g_bui.makeTilesFixed();
+      g_bui.setPlayerRack(g_bui.racks[1] || '');
+      g_bui.setOpponentRack(g_bui.racks[2] || '');
+      g_bui.setPlayerScore(g_playerLastScore || 0, g_pscore);
+      g_bui.setOpponentScore(g_opponentLastScore || 0, g_oscore);
+      g_bui.setTilesLeft((g_letpool || []).length);
+    }
     updateTurnIndicator();
     updateGameInfoLabels();
-    saveMultiplayerSession();
+
+    if (DEBUG) console.log('[DB] State synced from DB, version:', g_dbVersion);
+    return true;
+  }).catch(function(err) {
+    if (DEBUG) console.warn('[DB] syncGameStateFromDB failed:', err);
+    return false;
+  });
+}
+
+function checkActiveInvite() {
+  if (!window.supabaseClient) return Promise.resolve(null);
+  return window.supabaseClient
+    .from('invites')
+    .select('*')
+    .eq('app_key', _dk(_hk))
+    .in('status', ['started', 'accepted'])
+    .or('from_id.eq.' + g_lobbyUserId + ',to_id.eq.' + g_lobbyUserId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .then(function(result) {
+      if (result.error) throw result.error;
+      return (result.data && result.data[0]) || null;
+    })
+    .catch(function(err) {
+      if (DEBUG) console.warn('checkActiveInvite failed:', err);
+      return null;
+    });
+}
+
+function dismissResumeToast() {
+  if (g_resumeToast && g_resumeToast.parentNode) {
+    g_resumeToast.classList.remove('show');
+    g_resumeToast.classList.add('hide');
+    // Force removal if transition doesn't fire (e.g. display:none parent)
+    setTimeout(function() {
+      if (g_resumeToast && g_resumeToast.parentNode) {
+        g_resumeToast.parentNode.removeChild(g_resumeToast);
+      }
+      g_resumeToast = null;
+    }, 500);
   }
-};
+  g_resumeToast = null;
+}
+
+function resumeFromInvite(invite) {
+  if (!invite || !invite.game_id) return;
+  if (DEBUG) console.log('Resuming from invite DB:', invite.game_id);
+
+  var isHost = invite.from_id === g_lobbyUserId;
+  g_gameId = invite.game_id;
+  g_opponentId = isHost ? invite.to_id : invite.from_id;
+  g_opponentName = isHost ? (invite.to_name || t('Opponent')) : (invite.from_name || t('Opponent'));
+  g_isMultiplayer = true;
+  g_isHost = isHost;
+
+  // Show loading toast while syncing
+  if (g_bui) g_resumeToast = g_bui.toast(t('Resuming game...'), 0);
+
+  // Cold start: init empty board, then rejoin channel
+  init('board', true);
+  g_isMultiplayer = true; // init() resets this — restore before anything MP-related
+  updateGameInfoLabels();
+
+  joinGameChannel(g_gameId, isHost, function() {
+    // Phase 3: Fetch authoritative state from DB instead of requesting via socket
+    syncGameStateFromDB().then(function(synced) {
+      if (synced) {
+        if (DEBUG) console.log('[DB] resumeFromInvite synced from DB');
+        dismissResumeToast();
+      }
+    });
+    // 15s fallback: dismiss toast even if sync never completes
+    setTimeout(function() {
+      dismissResumeToast();
+    }, 15000);
+  }, true);
+}
+
+document.addEventListener('appReady', function() {
+  var mpData = null;
+  try {
+    mpData = JSON.parse(localStorage['session_mp'] || 'null');
+  } catch (err) {
+    mpData = null;
+  }
+
+  var hasLocalSession = !!(mpData && mpData.gameId && !mpData.isGameOver);
+  var now = Date.now();
+  var idleMs = typeof g_wait_mp_idle !== 'undefined' ? g_wait_mp_idle : 3600000;
+  var MAX_RESUME_AGE_MS = idleMs + 5 * 60 * 1000;
+
+  // Fast path: localStorage resume
+  if (hasLocalSession) {
+    var hasRecentSnapshot = typeof mpData.savedAt === 'number' && (now - mpData.savedAt) <= MAX_RESUME_AGE_MS;
+    var hasRecentMove = typeof mpData.lastMoveAt === 'number' && (now - mpData.lastMoveAt) <= MAX_RESUME_AGE_MS;
+    var hasUsableState = typeof mpData.stateVersion === 'number' && mpData.stateVersion > 0 &&
+      typeof mpData.myRack === 'string' && typeof mpData.oppRack === 'string' &&
+      Array.isArray(mpData.letpool) && typeof mpData.opponentName === 'string' && mpData.opponentName !== '';
+
+    if (hasUsableState && (hasRecentSnapshot || hasRecentMove)) {
+      if (DEBUG) console.log('Resuming multiplayer session for game:', mpData.gameId);
+      try {
+        g_gameId = mpData.gameId;
+        g_opponentId = mpData.opponentId || null;
+        g_opponentName = mpData.opponentName;
+        g_isMultiplayer = true;
+        g_isMyTurn = mpData.isMyTurn;
+        g_letpool = Array.isArray(mpData.letpool) ? mpData.letpool : (Array.isArray(g_letpool) ? g_letpool : []);
+        g_pscore = typeof mpData.pscore === 'number' ? mpData.pscore : g_pscore;
+        g_oscore = typeof mpData.oscore === 'number' ? mpData.oscore : g_oscore;
+        g_board = normalizeBoardMatrix(mpData.board, '');
+        g_boardpoints = normalizeBoardMatrix(mpData.boardp, 0);
+        g_boardtypes = normalizeBoardMatrix(mpData.boardt, 0);
+        g_board_empty = mpData.boardEmpty;
+        g_stateVersion = mpData.stateVersion || 0;
+        g_isGameOver = !!mpData.isGameOver;
+
+        g_history = Array.isArray(mpData.history) ? mpData.history : [];
+        var histHtml = '<table>';
+        for (var i = 0; i < g_history.length; ++i) {
+          histHtml += g_bui.renderWordPlayed(g_history[i][0], g_history[i][1]);
+        }
+        histHtml += '</table>';
+        el('history').innerHTML = histHtml;
+        g_bui.hlines = histHtml;
+        g_bui.hcount = g_history.length;
+
+        if (DEBUG) console.log('[resume] restoring myRack:', JSON.stringify(mpData.myRack));
+        g_bui.setPlayerRack(String(mpData.myRack || ''));
+        g_bui.setOpponentRack(String(mpData.oppRack || ''));
+        g_bui.setPlayerScore(0, g_pscore);
+        g_bui.setOpponentScore(0, g_oscore);
+        g_bui.setTilesLeft((g_letpool || []).length);
+
+        if (Array.isArray(g_board) && Array.isArray(g_boardtypes)) {
+          for (var x = 0; x < g_boardwidth; ++x) {
+            var boardColumn = g_board[x];
+            var boardTypeColumn = g_boardtypes[x];
+            if (!Array.isArray(boardColumn) || !Array.isArray(boardTypeColumn)) continue;
+            for (var y = 0; y < g_boardheight; ++y) {
+              var cell = el('c' + x + '_' + y);
+              if (!cell) continue;
+              cell.innerHTML = '';
+              cell.holds = '';
+              var char = boardColumn[y];
+              if (char && char !== '' && typeof char !== 'undefined') {
+                var displayChar = char.toUpperCase();
+                var tClass = boardTypeColumn[y] === 1 ? 't1' : 't2';
+                var points = (g_boardpoints[x] && g_boardpoints[x][y]) || 0;
+                var p = parseInt(points);
+                var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
+                var html = '<div class="drag ' + tClass + '">' + (char !== ' ' ? displayChar : SPACER) + pointsHtml + '</div>';
+                cell.innerHTML = html;
+                var holdsObj = { 'letter': char, 'points': p };
+                cell.holds = holdsObj;
+                if (cell.firstChild) cell.firstChild.holds = holdsObj;
+              }
+            }
+          }
+        }
+        g_bui.newplays = mpData.newplays || {};
+        g_bui.makeTilesFixed();
+        updateTurnIndicator();
+        updateGameInfoLabels();
+
+        var resumedIsHost = !!mpData.isHost;
+        joinGameChannel(g_gameId, resumedIsHost, function() {
+          // Phase 3: Fetch authoritative state from DB instead of requesting via socket
+          syncGameStateFromDB().then(function(synced) {
+            if (synced) {
+              // Phase 3: Purge stale localStorage snapshot now that DB is authoritative
+              localStorage.removeItem('session_mp');
+              if (DEBUG) console.log('[DB] Reconnected and synced from DB, purged session_mp');
+            } else if (DEBUG) {
+              console.warn('[DB] Failed to sync from DB on reconnect');
+            }
+          });
+        }, true);
+
+        g_resumeConnectionTimer = setTimeout(function() {
+          if (!g_channelSubscribed) {
+            if (g_bui) g_bui.toast(t('Reconnecting...'), 3000);
+          }
+        }, 5000);
+
+        g_resumeFailTimer = setTimeout(function() {
+          if (!g_channelSubscribed) {
+            g_bui.prompt(
+              t('Unable to reconnect to game.'),
+              '<button class="button" onclick="hideModal();cleanupMultiplayerSession();init(\'board\')">' + t('Play Computer') + '</button>'
+            );
+          }
+        }, 20000);
+      } catch (err) {
+        console.error('Error restoring multiplayer session:', err);
+        localStorage.removeItem('session_mp');
+        hasLocalSession = false;
+      }
+    } else {
+      localStorage.removeItem('session_mp');
+      if (localStorage['session_mode'] === 'mp') localStorage['session_mode'] = 'sp';
+      hasLocalSession = false;
+    }
+  }
+
+  // Async validation / recovery from invite DB
+  if (typeof checkActiveInvite === 'function') {
+    checkActiveInvite().then(function(invite) {
+      if (!invite && hasLocalSession) {
+        // DB says no active game, but localStorage thinks there is
+        if (DEBUG) console.log('Stale session_mp, cleaning up');
+        cleanupMultiplayerSession();
+        init('board');
+      } else if (invite && !hasLocalSession) {
+        // DB found active game, but localStorage was cleared
+        if (DEBUG) console.log('Recovered MP session from invite DB');
+        resumeFromInvite(invite);
+      }
+      // Both match: nothing to do (already resumed)
+      // Mismatch: trust localStorage for now
+    });
+  }
+});
+
+
 
 // -----------------------------------------------------------------------------
 // PERIODIC AUTO-SAVE
@@ -3245,6 +3717,8 @@ function handleVisibilityChange() {
       resetIdleTimer();
       startIdleTimer();
       startMpAutoSaveTimer();
+      // Phase 3: Fetch authoritative state from DB when tab becomes visible
+      syncGameStateFromDB();
     }
     if (!g_isMultiplayer) {
       ensureLobbyConnection();
@@ -3265,6 +3739,19 @@ window.addEventListener('pagehide', function() {
 window.addEventListener('beforeunload', function() {
   if (g_isMultiplayer) {
     saveMultiplayerSession();
+    // Attempt to clean up game state from DB on tab close
+    // (fire-and-forget; may not complete before unload)
+    if (g_gameId) {
+      deleteGameStateFromDB(g_gameId);
+    }
+  }
+});
+
+// Phase 3: Sync from DB when network comes back online
+window.addEventListener('online', function() {
+  if (g_isMultiplayer && !g_isGameOver) {
+    if (DEBUG) console.log('[DB] Network came online, syncing game state...');
+    syncGameStateFromDB();
   }
 });
 window.addEventListener('pageshow', function(e) {
@@ -3272,7 +3759,7 @@ window.addEventListener('pageshow', function(e) {
     if (g_isMultiplayer && g_gameId && !g_isGameOver) {
       setTimeout(function() {
         if (!g_channelSubscribed && !g_channelSubscribing) {
-          joinGameChannel(g_gameId, g_isHost);
+          joinGameChannel(g_gameId, g_isHost, null, true);
         }
       }, 100);
     } else {
@@ -3281,18 +3768,16 @@ window.addEventListener('pageshow', function(e) {
   }
 });
 
-// Add to handleGameStateBroadcast to reset timer on opponent activity
-const originalHandleMoveBroadcast3 = handleGameStateBroadcast;
-handleGameStateBroadcast = function(payload) {
-  originalHandleMoveBroadcast3(payload);
-  resetIdleTimer();
-};
+
 
 function getOpponentDisplayName() {
   return (typeof g_opponentName !== 'undefined' && g_opponentName) ? g_opponentName : t('Opponent');
 }
 
 function updateGameInfoLabels() {
+  var boardEl = el('board');
+  if (boardEl) boardEl.className = g_isMultiplayer ? 'mp' : 'sp';
+
   const lblLast = document.getElementById('label-loscore');
   const lblTotal = document.getElementById('label-oscore');
   if (g_isMultiplayer && g_opponentName) {

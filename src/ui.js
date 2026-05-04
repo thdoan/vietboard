@@ -421,8 +421,6 @@ function RedipsUI() {
   self.acceptPlayerPlacement = function() {
     self.newplays = {};
     self.makeTilesFixed();
-    el('clear').textContent = t('Shuffle');
-    el('clear').onclick = onPlayerShuffle;
   };
 
   self.addToHistory = function(words, player) {
@@ -526,11 +524,33 @@ function RedipsUI() {
         }
       }
     }
+    if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
+      for (var i = 0; i < tileInfos.length; ++i) {
+        var sid = tileInfos[i].sourceId;
+        if (sid.charAt(0) === 'c') {
+          var scoords = sid.substr(1).split('_');
+          var sx = parseInt(scoords[0]), sy = parseInt(scoords[1]);
+          if (!isNaN(sx) && !isNaN(sy)) {
+            g_board[sx][sy] = '';
+            g_boardpoints[sx][sy] = 0;
+            g_boardtypes[sx][sy] = 0;
+          }
+        }
+      }
+      for (var i = 0; i < self.racksize; ++i) {
+        var rid = self.plrRackId + i;
+        var rcell = el(rid);
+        if (rcell && rcell.holds && rcell.holds.letter) {
+          self.racks[1] = self.racks[1].substr(0, i) + rcell.holds.letter + self.racks[1].substr(i + 1);
+        }
+      }
+    }
     if (cellId) delete self.newplays[cellId];
     else self.newplays = {};
-    if (Object.keys(self.newplays).length === 0) {
-      el('clear').textContent = t('Shuffle');
-      el('clear').onclick = onPlayerShuffle;
+    self.makeTilesFixed();
+    // Save session immediately so cleared state survives reload
+    if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof saveMultiplayerSession === 'function') {
+      saveMultiplayerSession();
     }
   };
 
@@ -606,8 +626,8 @@ function RedipsUI() {
   <span title="${t('Restart')}">
     <button id="restart" class="icon" onclick="confirmRestartIfNeeded()">
       <svg viewBox="0 0 24 24">
-        <path stroke="#191919" stroke-linecap="round" stroke-linejoin="round" d="m1.67773 9.56396 2.74753 4.12124 3.2054 -3.6634" stroke-width="1"></path>
-        <path stroke="#191919" stroke-linecap="round" stroke-linejoin="round" d="M4.45398 13.6275c-0.41241 -2.2446 0.04262 -4.56211 1.27306 -6.48418 1.23045 -1.92207 3.14454 -3.3055 5.35556 -3.87081 2.2111 -0.56531 4.5543 -0.27032 6.5563 0.82546 2.002 1.09569 3.5134 2.91042 4.229 5.07751 0.7155 2.16712 0.5819 4.52502 -0.3739 6.59742 -0.9559 2.0723 -2.6627 3.7046 -4.7756 4.5672 -2.1129 0.8625 -4.4744 0.8909 -6.6075 0.0794 -2.13307 -0.8114 -3.87859 -2.4022 -4.88399 -4.4511" stroke-width="1"></path>
+        <path stroke="#191919" stroke-linecap="round" stroke-linejoin="round" d="m1.67773 9.56396 2.74753 4.12124 3.2054 -3.6634" stroke-width="1.5"></path>
+        <path stroke="#191919" stroke-linecap="round" stroke-linejoin="round" d="M4.45398 13.6275c-0.41241 -2.2446 0.04262 -4.56211 1.27306 -6.48418 1.23045 -1.92207 3.14454 -3.3055 5.35556 -3.87081 2.2111 -0.56531 4.5543 -0.27032 6.5563 0.82546 2.002 1.09569 3.5134 2.91042 4.229 5.07751 0.7155 2.16712 0.5819 4.52502 -0.3739 6.59742 -0.9559 2.0723 -2.6627 3.7046 -4.7756 4.5672 -2.1129 0.8625 -4.4744 0.8909 -6.6075 0.0794 -2.13307 -0.8114 -3.87859 -2.4022 -4.88399 -4.4511" stroke-width="1.5"></path>
       </svg>
     </button>
   </span>
@@ -640,7 +660,8 @@ function RedipsUI() {
 
     // Gameboard
     var isDisabled = !g_board_empty || isHighScore;
-    var html = '<div id="board" class="human-computer"></div>';
+    var boardClass = (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) ? 'mp' : 'sp';
+    var html = '<div id="board" class="' + boardClass + '"></div>';
     // Game info
     html +=
       '<div id="score"><div class="container"><header>' +
@@ -1032,12 +1053,39 @@ function RedipsUI() {
       if (id.charAt(0) === self.boardId) {
         // Tile dropped on playing board
         self.playSound();
-        el('clear').textContent = t('Clear');
-        el('clear').onclick = onPlayerClear;
         if (holds && holds.points === 0) { // Joker
           isJokerOnBoard = true;
         } else {
           self.newplays[id] = self.hcopy(holds);
+        }
+        if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
+          // Clear old board position if moving from one board cell to another
+          if (sourceId.charAt(0) === self.boardId && sourceId !== id) {
+            delete self.newplays[sourceId];
+            var scoords = sourceId.substr(1).split('_');
+            var sx = parseInt(scoords[0]), sy = parseInt(scoords[1]);
+            if (!isNaN(sx) && !isNaN(sy)) {
+              g_board[sx][sy] = '';
+              g_boardpoints[sx][sy] = 0;
+              g_boardtypes[sx][sy] = 0;
+            }
+          }
+          // Set new board position
+          if (id.charAt(0) === self.boardId) {
+            var coords = id.substr(1).split('_');
+            var bx = parseInt(coords[0]), by = parseInt(coords[1]);
+            if (!isNaN(bx) && !isNaN(by)) {
+              g_board[bx][by] = holds.letter;
+              g_boardpoints[bx][by] = holds.points || 0;
+              g_boardtypes[bx][by] = 1; // my tile
+            }
+          }
+          if (sourceId.charAt(0) === 'p') {
+            var ridx = parseInt(sourceId.substr(2));
+            if (!isNaN(ridx) && self.racks[1]) {
+              self.racks[1] = self.racks[1].substr(0, ridx) + '.' + self.racks[1].substr(ridx + 1);
+            }
+          }
         }
       } else if (id.charAt(0) === 'p') {
         // Tile dropped on player rack
@@ -1050,9 +1098,21 @@ function RedipsUI() {
             'points': 0
           };
         }
-        if (Object.keys(self.newplays).length === 0) {
-          el('clear').textContent = t('Shuffle');
-          el('clear').onclick = onPlayerShuffle;
+        if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
+          if (sourceId.charAt(0) === self.boardId) {
+            delete self.newplays[sourceId];
+            var scoords = sourceId.substr(1).split('_');
+            var sx = parseInt(scoords[0]), sy = parseInt(scoords[1]);
+            if (!isNaN(sx) && !isNaN(sy)) {
+              g_board[sx][sy] = '';
+              g_boardpoints[sx][sy] = 0;
+              g_boardtypes[sx][sy] = 0;
+            }
+            var ridx = parseInt(id.substr(2));
+            if (!isNaN(ridx) && self.racks[1]) {
+              self.racks[1] = self.racks[1].substr(0, ridx) + holds.letter + self.racks[1].substr(ridx + 1);
+            }
+          }
         }
       }
 
@@ -1063,6 +1123,10 @@ function RedipsUI() {
       if (typeof sendDragEnd === 'function') sendDragEnd();
       stopMultiplayerDragSync();
       if (typeof cleanupDragGhosts === 'function') cleanupDragGhosts();
+      self.makeTilesFixed();
+      if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof saveMultiplayerSession === 'function') {
+        saveMultiplayerSession();
+      }
 
       if (isJokerOnBoard) {
         self.showLettersModal(id);
@@ -1091,6 +1155,24 @@ function RedipsUI() {
       if (typeof sendDragEnd === 'function') sendDragEnd();
       stopMultiplayerDragSync();
       if (typeof cleanupDragGhosts === 'function') cleanupDragGhosts();
+
+      // Restore source cell state if drag was cancelled and tile returned
+      var sourceCell = self.rd.td.source;
+      var id = sourceCell.id;
+      if (id.charAt(0) === self.boardId && sourceCell.firstChild && sourceCell.firstChild.holds) {
+        sourceCell.holds = self.hcopy(sourceCell.firstChild.holds);
+        self.newplays[id] = self.hcopy(sourceCell.firstChild.holds);
+          if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
+            var scoords = id.substr(1).split('_');
+            var sx = parseInt(scoords[0]), sy = parseInt(scoords[1]);
+            if (!isNaN(sx) && !isNaN(sy)) {
+              g_board[sx][sy] = sourceCell.firstChild.holds.letter;
+              g_boardpoints[sx][sy] = sourceCell.firstChild.holds.points || 0;
+              g_boardtypes[sx][sy] = 1;
+            }
+          }
+          self.makeTilesFixed();
+      }
     };
 
     self.rd.event.moved = function() {
@@ -1101,7 +1183,19 @@ function RedipsUI() {
 
       self.rd.td.source.holds = '';
       // Tile lifted from playing board
-      if (id.charAt(0) === self.boardId) delete self.newplays[id];
+      if (id.charAt(0) === self.boardId) {
+        delete self.newplays[id];
+        if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
+          var scoords = id.substr(1).split('_');
+          var sx = parseInt(scoords[0]), sy = parseInt(scoords[1]);
+          if (!isNaN(sx) && !isNaN(sy)) {
+            g_board[sx][sy] = '';
+            g_boardpoints[sx][sy] = 0;
+            g_boardtypes[sx][sy] = 0;
+          }
+        }
+      }
+      self.makeTilesFixed();
 
       if (typeof sendDragPosition === 'function' && self.rd.obj) {
         var rect = self.rd.obj.getBoundingClientRect();
@@ -1142,6 +1236,26 @@ function RedipsUI() {
       var divp = el(self.plrRackId + i).firstChild;
       if (divp) self.rd.enableDrag(true, divp);
     }
+    // Re-enable drag on player's preview tiles on the board
+    if (self.newplays) {
+      for (var nid in self.newplays) {
+        var ncell = el(nid);
+        if (ncell && ncell.firstChild) {
+          self.rd.enableDrag(true, ncell.firstChild);
+        }
+      }
+    }
+    // Sync Clear/Shuffle button to match preview state
+    var elClear = el('clear');
+    if (elClear) {
+      if (Object.keys(self.newplays).length > 0) {
+        elClear.textContent = t('Clear');
+        elClear.onclick = onPlayerClear;
+      } else {
+        elClear.textContent = t('Shuffle');
+        elClear.onclick = onPlayerShuffle;
+      }
+    }
   };
 
   self.onSelLetter = function(ltr) {
@@ -1150,6 +1264,16 @@ function RedipsUI() {
       'points': 0
     };
     self.newplays[self.bdropCellId] = holds;
+    // Update g_board for the resolved joker
+    if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
+      var bcoords = self.bdropCellId.substr(1).split('_');
+      var bx = parseInt(bcoords[0]), by = parseInt(bcoords[1]);
+      if (!isNaN(bx) && !isNaN(by)) {
+        g_board[bx][by] = ltr;
+        g_boardpoints[bx][by] = 0;
+        g_boardtypes[bx][by] = 1;
+      }
+    }
     var cell = el(self.bdropCellId);
     cell.holds = self.hcopy(holds);
     var html = '';
@@ -1168,6 +1292,7 @@ function RedipsUI() {
     if (typeof sendDragEnd === 'function') sendDragEnd();
 
     hideModal();
+    self.makeTilesFixed();
     return self.bdropCellId;
   };
 
@@ -1507,6 +1632,9 @@ function RedipsUI() {
 
   self.setLetters = function(player, letters) {
     //console.log('setLetters', letters);
+    if (DEBUG && typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
+      console.log('[setLetters] player:', player, 'letters:', JSON.stringify(letters));
+    }
     self.racks[player] = letters;
     var cells = [];
     var ifprfx = (player === 1) ? self.plrRackId : self.oppRackId;
