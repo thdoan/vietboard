@@ -115,6 +115,7 @@ let g_lastDBGameState = null; // Last game state snapshot written to DB (central
 let g_dbWriteInProgress = false; // Guard to prevent syncGameStateFromDB from clobbering in-flight writes
 let g_resumeToast = null;
 let g_connectingToast = null;
+let g_gameStateInitialized = false;
 let g_channelSubscribed = false;
 let g_resumeConnectionTimer = null;
 let g_resumeFailTimer = null;
@@ -1757,6 +1758,7 @@ function cleanupMultiplayerSession() {
   g_isMultiplayer = false;
   g_isHost = false;
   g_isMyTurn = true;
+  g_gameStateInitialized = false;
   g_gameId = null;
   g_opponentName = null;
   g_opponentPresenceState = false;
@@ -1931,6 +1933,7 @@ function initializeHostGame() {
   g_bui = new RedipsUI();
   init('board');
   g_isMultiplayer = true;
+  g_gameStateInitialized = true;
   resetMultiplayerGameState();
 
   // Wait a tick for letpool to be built, then sync it
@@ -2431,7 +2434,7 @@ function handleGameStateBroadcast(payload) {
   if (payload.type === 'init') {
     // Validate gameId and dedupe initId
     if (payload.gameId !== g_gameId) return;
-    if (g_stateVersion > 1) return; // game already started, ignore stale init
+    if (g_gameStateInitialized) return; // already initialized via init or DB sync
     if (payload.initId && g_seenInitIds.has(payload.initId)) return;
     if (payload.initId) g_seenInitIds.add(payload.initId);
 
@@ -2459,6 +2462,7 @@ function handleGameStateBroadcast(payload) {
     g_bui = new RedipsUI();
     init('board');
     g_isMultiplayer = true; // init() clears this, re-enable it
+    g_gameStateInitialized = true;
     resetMultiplayerGameState();
 
     setTimeout(() => {
@@ -3250,6 +3254,8 @@ function applyGameStateFromDB(dbState) {
   if (s.turnPlayerId) {
     g_isMyTurn = (s.turnPlayerId === g_lobbyUserId);
   }
+
+  g_gameStateInitialized = true;
 }
 
 // Subscribe to realtime updates on games table
