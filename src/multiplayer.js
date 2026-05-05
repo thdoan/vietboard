@@ -1800,7 +1800,7 @@ window.confirmRestartMultiplayer = function() {
   g_bui.prompt(
     t('Restarting will forfeit this game.'),
     '<button class="button secondary" onclick="hideModal()">' + t('Cancel') + '</button>' + SPACER +
-    '<button class="button" onclick="hideModal();finalizeMultiplayerGame(\'forfeit\', true);g_bui.restart();if (g_isMobile) hideGameInfo()">' + t('Forfeit &amp; Restart') + '</button>'
+    '<button class="button" onclick="hideModal();finalizeMultiplayerGame(\'forfeit\', true);g_bui.restart()">' + t('Forfeit &amp; Restart') + '</button>'
   );
 };
 
@@ -1930,7 +1930,6 @@ function initializeHostGame() {
   localStorage.removeItem('session');
   g_bui = new RedipsUI();
   init('board');
-  if (g_isMobile) hideGameInfo();
   g_isMultiplayer = true;
   resetMultiplayerGameState();
 
@@ -2459,7 +2458,6 @@ function handleGameStateBroadcast(payload) {
     localStorage.removeItem('session');
     g_bui = new RedipsUI();
     init('board');
-    if (g_isMobile) hideGameInfo();
     g_isMultiplayer = true; // init() clears this, re-enable it
     resetMultiplayerGameState();
 
@@ -3573,7 +3571,7 @@ document.addEventListener('appReady', function() {
           if (!g_channelSubscribed) {
             g_bui.prompt(
               t('Unable to reconnect to game.'),
-              '<button class="button" onclick="hideModal();cleanupMultiplayerSession();init(\'board\');if (g_isMobile) hideGameInfo()">' + t('Play Computer') + '</button>'
+              '<button class="button" onclick="hideModal();cleanupMultiplayerSession();init(\'board\')">' + t('Play Computer') + '</button>'
             );
           }
         }, 20000);

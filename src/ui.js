@@ -639,14 +639,13 @@ function RedipsUI() {
       } else {
         g_bui.restart();
       }
-      if (g_isMobile) hideGameInfo();
     };
 
     window.confirmRestartLocal = function() {
       g_bui.prompt(
         t('Restarting will forfeit this game.'),
         '<button class="button secondary" onclick="hideModal()">' + t('Cancel') + '</button>' + SPACER +
-        '<button class="button" onclick="hideModal();if (typeof finalizeGameScores === \'function\') finalizeGameScores();g_bui.restart();if (g_isMobile) hideGameInfo()">' + t('Restart') + '</button>'
+        '<button class="button" onclick="hideModal();if (typeof finalizeGameScores === \'function\') finalizeGameScores();g_bui.restart()">' + t('Restart') + '</button>'
       );
     };
 

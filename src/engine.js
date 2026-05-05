@@ -135,6 +135,7 @@ function init(iddiv, skipRacks) {
   g_isGameOver = false;
   var wasMultiplayer = g_isMultiplayer;
   g_isMultiplayer = false;
+  if (g_isMobile) hideGameInfo();
   g_history = [];
   if (typeof g_mpGameEndReason !== 'undefined') g_mpGameEndReason = '';
   g_rackEmptiedBy = '';
