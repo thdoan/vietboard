@@ -974,8 +974,14 @@ function updateLobbyBadgeFromMergedState() {
   updateLobbyBadge();
 }
 
+function showConnectingToast(name) {
+  g_connectingToast = g_bui.toast(t('Connecting with') + ' ' + (name || t('Player')) + '...', 0);
+  if (g_connectingToast) g_connectingToast.setAttribute('data-permanent', 'true');
+}
+
 function dismissConnectingToast() {
   if (g_connectingToast && g_connectingToast.parentNode) {
+    g_connectingToast.removeAttribute('data-permanent');
     g_connectingToast.classList.remove('show');
     g_connectingToast.classList.add('hide');
     g_connectingToast = null;
@@ -1140,7 +1146,7 @@ function subscribeToMyInvites() {
       if (!payload.new || (payload.new.status !== 'accepted' && payload.new.status !== 'started')) return;
       if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) return;
 
-      g_connectingToast = g_bui.toast(t('Connecting with') + ' ' + (payload.new.to_name || t('Player')) + '...', 0);
+      showConnectingToast(payload.new.to_name);
       g_connectingInvites.add(payload.new.game_id);
       renderLobbyPlayers();
       delete g_myInvites[payload.new.game_id];
@@ -1315,7 +1321,7 @@ window.acceptInvite = async function(gameId) {
   g_connectingInvites.add(gameId);
   renderLobbyPlayers();
   delete g_pendingInvites[gameId];
-  g_connectingToast = g_bui.toast(t('Connecting with') + ' ' + (invite.from_name || t('Player')) + '...', 0);
+  showConnectingToast(invite.from_name);
   startMultiplayerGame(gameId, invite.from_id, invite.from_name, false);
 }
 

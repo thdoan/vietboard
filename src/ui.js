@@ -1884,7 +1884,8 @@ function RedipsUI() {
     if (!container) return;
 
     // Check for existing visible toast to reuse instead of stacking
-    var existing = container.querySelector('.toast-message.show');
+    // Skip permanent toasts (e.g. connecting toast) so they can't be overwritten
+    var existing = container.querySelector('.toast-message.show:not([data-permanent])');
     if (existing) {
       existing.innerHTML = msg;
       existing.classList.remove('hide');
