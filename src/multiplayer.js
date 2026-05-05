@@ -2281,6 +2281,10 @@ function cleanupOpponentPreviews() {
   }
 }
 
+function clearOpponentPreviewCache() {
+  if (g_bui) g_bui.oppNewplays = {};
+}
+
 function renderOpponentRackTileBack(cell) {
   if (!cell) return;
   cell.innerHTML = '<div class="drag t2">' + SPACER + '</div>';
@@ -2715,10 +2719,11 @@ function onMultiplayerMove(passed) {
   // Clear cached init so it can't be re-broadcast mid-game
   g_cachedInitPayload = null;
 
-  g_lastMoveAt = Date.now();
-  saveMultiplayerSession();
+    g_lastMoveAt = Date.now();
+    clearOpponentPreviewCache();
+    saveMultiplayerSession();
 
-  if (!passed && rackAfter.replace(/\./g, '') === '' && g_letpool.length === 0) {
+    if (!passed && rackAfter.replace(/\./g, '') === '' && g_letpool.length === 0) {
     g_rackEmptiedBy = 'player';
     g_isGameOver = true;
     announceWinner();
@@ -2849,6 +2854,7 @@ function handleMoveBroadcast(payload) {
         updateGameInfoLabels();
 
         g_lastMoveAt = Date.now();
+        clearOpponentPreviewCache();
         saveMultiplayerSession();
 
         // Phase 3: Sync from DB to ensure we have the authoritative state after opponent move
@@ -2928,6 +2934,7 @@ function handleMoveBroadcast(payload) {
     updateGameInfoLabels();
 
     g_lastMoveAt = Date.now();
+    clearOpponentPreviewCache();
     saveMultiplayerSession();
 
     // Phase 3: Sync from DB to ensure we have the authoritative state after opponent move
