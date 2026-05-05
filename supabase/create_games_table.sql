@@ -1,5 +1,15 @@
--- Phase 1: Create games table for DB-as-SSOT architecture
+-- Phase 4: Create games table for DB-as-SSOT architecture
 -- Run this in Supabase SQL Editor
+--
+-- games.state JSONB schema includes:
+--   board, boardPoints, boardTypes, boardEmpty, letpool,
+--   player1Id, player2Id, player1Rack, player2Rack,
+--   player1Score, player2Score, player1LastScore, player2LastScore,
+--   history, passes, turnNumber,
+--   preview: {
+--     player1: { "c3_4": {"letter":"a","points":1}, ... },
+--     player2: { "c5_2": {"letter":"b","points":3}, ... }
+--   }
 
 -- Create games table for authoritative multiplayer state
 create table if not exists games (

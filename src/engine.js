@@ -1612,6 +1612,7 @@ function onPlayerShuffle() {
         type: 'shuffle',
         rack: newRack
       });
+      if (typeof savePreviewToDB === 'function') savePreviewToDB();
     }
   });
 }

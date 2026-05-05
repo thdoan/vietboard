@@ -408,6 +408,7 @@ function RedipsUI() {
   self.oppRackId = 'op';
   self.boardId = 'c';
   self.newplays = {};
+  self.oppNewplays = {};
   self.racks = [];
   self.racks[1] = [];
   self.racks[2] = [];
@@ -525,18 +526,6 @@ function RedipsUI() {
       }
     }
     if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
-      for (var i = 0; i < tileInfos.length; ++i) {
-        var sid = tileInfos[i].sourceId;
-        if (sid.charAt(0) === 'c') {
-          var scoords = sid.substr(1).split('_');
-          var sx = parseInt(scoords[0]), sy = parseInt(scoords[1]);
-          if (!isNaN(sx) && !isNaN(sy)) {
-            g_board[sx][sy] = '';
-            g_boardpoints[sx][sy] = 0;
-            g_boardtypes[sx][sy] = 0;
-          }
-        }
-      }
       for (var i = 0; i < self.racksize; ++i) {
         var rid = self.plrRackId + i;
         var rcell = el(rid);
@@ -551,6 +540,9 @@ function RedipsUI() {
     // Save session immediately so cleared state survives reload
     if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof saveMultiplayerSession === 'function') {
       saveMultiplayerSession();
+    }
+    if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof savePreviewToDB === 'function') {
+      savePreviewToDB();
     }
   };
 
@@ -1062,23 +1054,6 @@ function RedipsUI() {
           // Clear old board position if moving from one board cell to another
           if (sourceId.charAt(0) === self.boardId && sourceId !== id) {
             delete self.newplays[sourceId];
-            var scoords = sourceId.substr(1).split('_');
-            var sx = parseInt(scoords[0]), sy = parseInt(scoords[1]);
-            if (!isNaN(sx) && !isNaN(sy)) {
-              g_board[sx][sy] = '';
-              g_boardpoints[sx][sy] = 0;
-              g_boardtypes[sx][sy] = 0;
-            }
-          }
-          // Set new board position
-          if (id.charAt(0) === self.boardId) {
-            var coords = id.substr(1).split('_');
-            var bx = parseInt(coords[0]), by = parseInt(coords[1]);
-            if (!isNaN(bx) && !isNaN(by)) {
-              g_board[bx][by] = holds.letter;
-              g_boardpoints[bx][by] = holds.points || 0;
-              g_boardtypes[bx][by] = 1; // my tile
-            }
           }
           if (sourceId.charAt(0) === 'p') {
             var ridx = parseInt(sourceId.substr(2));
@@ -1101,13 +1076,6 @@ function RedipsUI() {
         if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
           if (sourceId.charAt(0) === self.boardId) {
             delete self.newplays[sourceId];
-            var scoords = sourceId.substr(1).split('_');
-            var sx = parseInt(scoords[0]), sy = parseInt(scoords[1]);
-            if (!isNaN(sx) && !isNaN(sy)) {
-              g_board[sx][sy] = '';
-              g_boardpoints[sx][sy] = 0;
-              g_boardtypes[sx][sy] = 0;
-            }
             var ridx = parseInt(id.substr(2));
             if (!isNaN(ridx) && self.racks[1]) {
               self.racks[1] = self.racks[1].substr(0, ridx) + holds.letter + self.racks[1].substr(ridx + 1);
@@ -1126,6 +1094,9 @@ function RedipsUI() {
       self.makeTilesFixed();
       if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof saveMultiplayerSession === 'function') {
         saveMultiplayerSession();
+      }
+      if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof savePreviewToDB === 'function') {
+        savePreviewToDB();
       }
 
       if (isJokerOnBoard) {
@@ -1162,16 +1133,10 @@ function RedipsUI() {
       if (id.charAt(0) === self.boardId && sourceCell.firstChild && sourceCell.firstChild.holds) {
         sourceCell.holds = self.hcopy(sourceCell.firstChild.holds);
         self.newplays[id] = self.hcopy(sourceCell.firstChild.holds);
-          if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
-            var scoords = id.substr(1).split('_');
-            var sx = parseInt(scoords[0]), sy = parseInt(scoords[1]);
-            if (!isNaN(sx) && !isNaN(sy)) {
-              g_board[sx][sy] = sourceCell.firstChild.holds.letter;
-              g_boardpoints[sx][sy] = sourceCell.firstChild.holds.points || 0;
-              g_boardtypes[sx][sy] = 1;
-            }
-          }
-          self.makeTilesFixed();
+        self.makeTilesFixed();
+      }
+      if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof savePreviewToDB === 'function') {
+        savePreviewToDB();
       }
     };
 
@@ -1185,17 +1150,11 @@ function RedipsUI() {
       // Tile lifted from playing board
       if (id.charAt(0) === self.boardId) {
         delete self.newplays[id];
-        if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
-          var scoords = id.substr(1).split('_');
-          var sx = parseInt(scoords[0]), sy = parseInt(scoords[1]);
-          if (!isNaN(sx) && !isNaN(sy)) {
-            g_board[sx][sy] = '';
-            g_boardpoints[sx][sy] = 0;
-            g_boardtypes[sx][sy] = 0;
-          }
-        }
       }
       self.makeTilesFixed();
+      if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof savePreviewToDB === 'function') {
+        savePreviewToDB();
+      }
 
       if (typeof sendDragPosition === 'function' && self.rd.obj) {
         var rect = self.rd.obj.getBoundingClientRect();
@@ -1264,16 +1223,6 @@ function RedipsUI() {
       'points': 0
     };
     self.newplays[self.bdropCellId] = holds;
-    // Update g_board for the resolved joker
-    if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
-      var bcoords = self.bdropCellId.substr(1).split('_');
-      var bx = parseInt(bcoords[0]), by = parseInt(bcoords[1]);
-      if (!isNaN(bx) && !isNaN(by)) {
-        g_board[bx][by] = ltr;
-        g_boardpoints[bx][by] = 0;
-        g_boardtypes[bx][by] = 1;
-      }
-    }
     var cell = el(self.bdropCellId);
     cell.holds = self.hcopy(holds);
     var html = '';
@@ -1293,6 +1242,9 @@ function RedipsUI() {
 
     hideModal();
     self.makeTilesFixed();
+    if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof savePreviewToDB === 'function') {
+      savePreviewToDB();
+    }
     return self.bdropCellId;
   };
 

@@ -1889,6 +1889,17 @@ function normalizeBoardMatrix(matrix, fallbackValue) {
   return normalized;
 }
 
+function resetMultiplayerGameState() {
+  g_pscore = 0;
+  g_oscore = 0;
+  g_playerLastScore = 0;
+  g_opponentLastScore = 0;
+  g_passes = 0;
+  g_stateVersion = 0;
+  g_board_empty = true;
+  g_isGameOver = false;
+}
+
 function initializeHostGame() {
   // Guard: only initialize once per game. Subsequent ready broadcasts
   // from guest will re-send the cached init payload.
@@ -1911,6 +1922,7 @@ function initializeHostGame() {
   init('board');
   if (g_isMobile) hideGameInfo();
   g_isMultiplayer = true;
+  resetMultiplayerGameState();
 
   // Wait a tick for letpool to be built, then sync it
   setTimeout(() => {
@@ -2240,13 +2252,45 @@ function renderOpponentRackTileBack(cell) {
 }
 
 function renderOpponentBoardTile(cell, letter, points) {
+  renderTile(cell, letter, points, 't2');
+}
+
+function renderTile(cell, letter, points, tileClass) {
   if (!cell) return;
-  var displayLetter = letter;
-  if (displayLetter === '*' || displayLetter === ' ') displayLetter = SPACER;
-  else displayLetter = String(displayLetter || '').toUpperCase();
-  var p = parseInt(points);
+  var displayLetter = (letter === '*' || letter === ' ') ? SPACER : String(letter || '').toUpperCase();
+  var p = parseInt(points) || 0;
   var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
-  cell.innerHTML = '<div class="drag t2">' + displayLetter + pointsHtml + '</div>';
+  cell.innerHTML = '<div class="drag ' + (tileClass || 't1') + '">' + displayLetter + pointsHtml + '</div>';
+  var holdsObj = { 'letter': letter || '', 'points': p };
+  cell.holds = holdsObj;
+  if (cell.firstChild) cell.firstChild.holds = holdsObj;
+}
+
+function clearTile(cell) {
+  if (!cell) return;
+  cell.innerHTML = '';
+  cell.holds = '';
+}
+
+function renderCommittedBoard() {
+  if (!Array.isArray(g_board) || !Array.isArray(g_boardtypes)) return;
+  for (var x = 0; x < g_boardwidth; ++x) {
+    var boardColumn = g_board[x];
+    var boardTypeColumn = g_boardtypes[x];
+    if (!Array.isArray(boardColumn) || !Array.isArray(boardTypeColumn)) continue;
+    for (var y = 0; y < g_boardheight; ++y) {
+      var cell = el('c' + x + '_' + y);
+      if (!cell) continue;
+      var char = boardColumn[y];
+      if (char && char !== '' && typeof char !== 'undefined') {
+        var tClass = boardTypeColumn[y] === 1 ? 't1' : 't2';
+        var points = (g_boardpoints[x] && g_boardpoints[x][y]) || 0;
+        renderTile(cell, char, points, tClass);
+      } else {
+        clearTile(cell);
+      }
+    }
+  }
 }
 
 function applyDragPreview(payload) {
@@ -2281,13 +2325,10 @@ function applyDragPreview(payload) {
     // Board cell: render the real letter so the opponent sees what was placed
     var p = (typeof payload.points === 'number') ? payload.points : (g_letscore[payload.letter] || 0);
     renderOpponentBoardTile(toCell, payload.letter || '', p);
-    // Update g_board so state_sync includes preview tiles
-    var coords = toId.substr(1).split('_');
-    var bx = parseInt(coords[0]), by = parseInt(coords[1]);
-    if (!isNaN(bx) && !isNaN(by)) {
-      g_board[bx][by] = payload.letter || '';
-      g_boardpoints[bx][by] = p;
-      g_boardtypes[bx][by] = 2; // opponent tile
+    // Phase 4: previews are purely visual — do NOT mutate committed g_board state
+    if (g_bui) {
+      g_bui.oppNewplays = g_bui.oppNewplays || {};
+      g_bui.oppNewplays[toId] = { 'letter': payload.letter || '', 'points': p };
     }
   } else if (toId && toId.startsWith('op')) {
     // Opponent rack cell: still show blank back
@@ -2303,14 +2344,9 @@ function applyDragSourceClear(payload) {
   var sourceId = mapRemoteRackCellId(id);
   var sourceCell = el(sourceId);
   if (sourceCell) sourceCell.innerHTML = '';
-  if (sourceId && sourceId.charAt(0) === 'c') {
-    var coords = sourceId.substr(1).split('_');
-    var bx = parseInt(coords[0]), by = parseInt(coords[1]);
-    if (!isNaN(bx) && !isNaN(by)) {
-      g_board[bx][by] = '';
-      g_boardpoints[bx][by] = 0;
-      g_boardtypes[bx][by] = 0;
-    }
+  // Phase 4: previews are purely visual — do NOT mutate committed g_board state
+  if (g_bui && g_bui.oppNewplays) {
+    delete g_bui.oppNewplays[sourceId];
   }
 }
 
@@ -2414,6 +2450,7 @@ function handleGameStateBroadcast(payload) {
     init('board');
     if (g_isMobile) hideGameInfo();
     g_isMultiplayer = true; // init() clears this, re-enable it
+    resetMultiplayerGameState();
 
     setTimeout(() => {
       // Apply init state from host
@@ -2683,32 +2720,9 @@ function handleMoveBroadcast(payload) {
     // Clean up any stray ghost tiles before applying the move
     cleanupDragGhosts();
 
-    // Helper: re-render entire board from committed g_board
+    // Helper: re-render entire board from committed g_board and sync racks
     var syncBoardUI = function() {
-      for (var x = 0; x < g_boardwidth; ++x) {
-        var boardColumn = g_board[x];
-        var boardTypeColumn = g_boardtypes[x];
-        if (!Array.isArray(boardColumn) || !Array.isArray(boardTypeColumn)) continue;
-        for (var y = 0; y < g_boardheight; ++y) {
-          var cell = el('c' + x + '_' + y);
-          var char = boardColumn[y];
-          if (char && char !== '' && cell) {
-            var displayChar = char.toUpperCase();
-            var tClass = 't' + (boardTypeColumn[y] || 2);
-            var points = (g_boardpoints[x] && g_boardpoints[x][y]) || 0;
-            var p = parseInt(points);
-            var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
-            var html = '<div class="drag ' + tClass + '">' + (char !== ' ' ? displayChar : SPACER) + pointsHtml + '</div>';
-            cell.innerHTML = html;
-            var holdsObj = { 'letter': char, 'points': p };
-            cell.holds = holdsObj;
-            if (cell.firstChild) cell.firstChild.holds = holdsObj;
-          } else if (cell && (!char || char === '')) {
-            cell.holds = '';
-            cell.innerHTML = '';
-          }
-        }
-      }
+      renderCommittedBoard();
       g_bui.makeTilesFixed();
       // Sync racks from committed state alongside board
       g_bui.setPlayerRack(g_bui.racks[1] || '');
@@ -2996,6 +3010,18 @@ function buildGameStateSnapshot() {
     }
   }
 
+  // Convert local preview tiles to perspective-neutral
+  var myNewplays = (g_bui && g_bui.newplays) ? g_bui.newplays : {};
+  var oppNewplays = (g_bui && g_bui.oppNewplays) ? g_bui.oppNewplays : {};
+  var preview = {};
+  if (g_isHost) {
+    preview.player1 = myNewplays;
+    preview.player2 = oppNewplays;
+  } else {
+    preview.player1 = oppNewplays;
+    preview.player2 = myNewplays;
+  }
+
   return {
     turnPlayerId: g_isMyTurn ? g_lobbyUserId : (g_opponentId || ''),
     board: g_board,
@@ -3013,7 +3039,8 @@ function buildGameStateSnapshot() {
     player2LastScore: g_isHost ? g_opponentLastScore : g_playerLastScore,
     history: neutralHistory,
     passes: g_passes,
-    turnNumber: g_stateVersion
+    turnNumber: g_stateVersion,
+    preview: preview
   };
 }
 
@@ -3044,6 +3071,17 @@ function createGameStateInDB() {
       if (DEBUG) console.warn('[DB] create_game_state failed:', err);
       return false;
     });
+}
+
+var g_previewSaveTimer = null;
+
+function savePreviewToDB() {
+  if (!g_isMultiplayer || !g_gameId || !window.supabaseClient) return;
+  if (g_previewSaveTimer) clearTimeout(g_previewSaveTimer);
+  g_previewSaveTimer = setTimeout(function() {
+    g_previewSaveTimer = null;
+    if (typeof saveMultiplayerSession === 'function') saveMultiplayerSession();
+  }, 200);
 }
 
 function updateGameStateInDB(expectedVersion) {
@@ -3163,31 +3201,40 @@ function applyGameStateFromDB(dbState) {
   }
 
   // Render committed board tiles from g_board onto the DOM
-  if (Array.isArray(g_board) && Array.isArray(g_boardtypes)) {
-    for (var x = 0; x < g_boardwidth; ++x) {
-      var boardColumn = g_board[x];
-      var boardTypeColumn = g_boardtypes[x];
-      if (!Array.isArray(boardColumn) || !Array.isArray(boardTypeColumn)) continue;
-      for (var y = 0; y < g_boardheight; ++y) {
-        var cell = el('c' + x + '_' + y);
-        if (!cell) continue;
-        cell.innerHTML = '';
-        cell.holds = '';
-        var char = boardColumn[y];
-        if (char && char !== '' && typeof char !== 'undefined') {
-          var displayChar = char.toUpperCase();
-          var tClass = boardTypeColumn[y] === 1 ? 't1' : 't2';
-          var points = (g_boardpoints[x] && g_boardpoints[x][y]) || 0;
-          var p = parseInt(points);
-          var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
-          var html = '<div class="drag ' + tClass + '">' + (char !== ' ' ? displayChar : SPACER) + pointsHtml + '</div>';
-          cell.innerHTML = html;
-          var holdsObj = { 'letter': char, 'points': p };
-          cell.holds = holdsObj;
-          if (cell.firstChild) cell.firstChild.holds = holdsObj;
-        }
-      }
+  renderCommittedBoard();
+
+  // Restore preview tiles from DB (perspective-neutral → local)
+  if (g_bui && s.preview) {
+    var myPreviewKey = g_isHost ? 'player1' : 'player2';
+    var oppPreviewKey = g_isHost ? 'player2' : 'player1';
+
+    // Local player previews
+    g_bui.newplays = s.preview[myPreviewKey] || {};
+    for (var cellId in g_bui.newplays) {
+      var cell = el(cellId);
+      if (!cell) continue;
+      var ph = g_bui.newplays[cellId];
+      var ltr = ph.letter || '';
+      var pts = (typeof ph.points === 'number') ? ph.points : (g_letscore[ltr] || 0);
+      var displayLtr = (ltr === '*' || ltr === ' ') ? SPACER : String(ltr).toUpperCase();
+      var pHtml = (pts > 0) ? '<sup><small>' + pts + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
+      cell.innerHTML = '<div class="drag t1">' + displayLtr + pHtml + '</div>';
+      var holdsObj = { 'letter': ltr, 'points': pts };
+      cell.holds = holdsObj;
+      if (cell.firstChild) cell.firstChild.holds = holdsObj;
     }
+
+    // Opponent previews
+    g_bui.oppNewplays = s.preview[oppPreviewKey] || {};
+    for (var cellId in g_bui.oppNewplays) {
+      var cell = el(cellId);
+      if (!cell) continue;
+      var ph = g_bui.oppNewplays[cellId];
+      var pts = (typeof ph.points === 'number') ? ph.points : (g_letscore[ph.letter] || 0);
+      renderOpponentBoardTile(cell, ph.letter || '', pts);
+    }
+
+    g_bui.makeTilesFixed();
   }
 
   // Turn
@@ -3485,32 +3532,7 @@ document.addEventListener('appReady', function() {
         g_bui.setOpponentScore(0, g_oscore);
         g_bui.setTilesLeft((g_letpool || []).length);
 
-        if (Array.isArray(g_board) && Array.isArray(g_boardtypes)) {
-          for (var x = 0; x < g_boardwidth; ++x) {
-            var boardColumn = g_board[x];
-            var boardTypeColumn = g_boardtypes[x];
-            if (!Array.isArray(boardColumn) || !Array.isArray(boardTypeColumn)) continue;
-            for (var y = 0; y < g_boardheight; ++y) {
-              var cell = el('c' + x + '_' + y);
-              if (!cell) continue;
-              cell.innerHTML = '';
-              cell.holds = '';
-              var char = boardColumn[y];
-              if (char && char !== '' && typeof char !== 'undefined') {
-                var displayChar = char.toUpperCase();
-                var tClass = boardTypeColumn[y] === 1 ? 't1' : 't2';
-                var points = (g_boardpoints[x] && g_boardpoints[x][y]) || 0;
-                var p = parseInt(points);
-                var pointsHtml = (p > 0) ? '<sup><small>' + p + '</small></sup>' : '<sup><small>&nbsp;</small></sup>';
-                var html = '<div class="drag ' + tClass + '">' + (char !== ' ' ? displayChar : SPACER) + pointsHtml + '</div>';
-                cell.innerHTML = html;
-                var holdsObj = { 'letter': char, 'points': p };
-                cell.holds = holdsObj;
-                if (cell.firstChild) cell.firstChild.holds = holdsObj;
-              }
-            }
-          }
-        }
+        renderCommittedBoard();
         g_bui.newplays = mpData.newplays || {};
         g_bui.makeTilesFixed();
         updateTurnIndicator();
