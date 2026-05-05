@@ -68,7 +68,7 @@ if (!g_myName) {
     localStorage.setItem('player_name', g_myName);
 
     // Rename any local high scores that used the old fallback name and re-sync
-    if (oldName !== g_myName) {
+    if (oldName !== g_myName && !localStorage['_vb_name_migrated']) {
       for (var key in g_highscores) {
         if (Array.isArray(g_highscores[key])) {
           g_highscores[key].forEach(function(item) {
@@ -77,6 +77,7 @@ if (!g_myName) {
         }
       }
       localStorage['highscores'] = JSON.stringify(g_highscores);
+      localStorage['_vb_name_migrated'] = '1';
       if (typeof saveGlobalHighScores === 'function') saveGlobalHighScores();
     }
 
@@ -513,41 +514,42 @@ async function saveGlobalHighScores() {
     return;
   }
   try {
-    // Backfill missing sessionId for legacy scores (one-time migration)
-    var needsLocalSave = false;
-    for (var key in g_highscores) {
-      if (Array.isArray(g_highscores[key])) {
-        g_highscores[key].forEach(function(item) {
-          if (item.session && !item.sessionId) {
-            try {
-              var sessionObj = JSON.parse(item.session);
-              var newId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-              sessionObj.id = newId;
-              item.session = JSON.stringify(sessionObj);
-              item.sessionId = newId;
-              needsLocalSave = true;
-              if (window.supabaseClient) {
-                window.supabaseClient.from('sessions').upsert({
-                  id: newId,
-                  session_data: item.session,
-                  app_key: _dk(_hk)
-                }).catch(function(e) {
-                  console.warn('Failed to backfill session to Supabase:', e);
-                });
+    // One-time migration: backfill missing sessionId and repair sessions in Supabase
+    if (!localStorage['_vb_session_migrated']) {
+      var needsLocalSave = false;
+      for (var key in g_highscores) {
+        if (Array.isArray(g_highscores[key])) {
+          g_highscores[key].forEach(function(item) {
+            if (item.session && !item.sessionId) {
+              try {
+                var sessionObj = JSON.parse(item.session);
+                var newId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                sessionObj.id = newId;
+                item.session = JSON.stringify(sessionObj);
+                item.sessionId = newId;
+                needsLocalSave = true;
+                if (window.supabaseClient) {
+                  window.supabaseClient.from('sessions').upsert({
+                    id: newId,
+                    session_data: item.session,
+                    app_key: _dk(_hk)
+                  }).catch(function(e) {
+                    console.warn('Failed to backfill session to Supabase:', e);
+                  });
+                }
+              } catch (err) {
+                // Skip malformed session JSON
               }
-            } catch (err) {
-              // Skip malformed session JSON
             }
-          }
-        });
+          });
+        }
       }
+      if (needsLocalSave) {
+        localStorage['highscores'] = JSON.stringify(g_highscores);
+      }
+      await repairMissingSessions();
+      localStorage['_vb_session_migrated'] = '1';
     }
-    if (needsLocalSave) {
-      localStorage['highscores'] = JSON.stringify(g_highscores);
-    }
-
-    // One-time repair: ensure all local sessions with sessionId exist in Supabase
-    await repairMissingSessions();
 
     // Enforce max 100 scored entries per Layout-Level combo
     var needsTrimSave = false;
@@ -1569,12 +1571,6 @@ function joinGameChannel(gameId, isHost, onSubscribed, skipInitRetry) {
     .on('broadcast', { event: 'reaction' }, ({ payload }) => {
       handleReactionBroadcast(payload);
     })
-    .on('broadcast', { event: 'ready' }, ({ payload }) => {
-      // Legacy fallback: host receives ready from guest
-      if (isHost && payload && payload.gameId === g_gameId && payload.fromId !== g_lobbyUserId) {
-        initializeHostGame();
-      }
-    })
     .on('broadcast', { event: 'hello' }, ({ payload }) => {
       if (payload && payload.gameId === g_gameId && payload.fromId !== g_lobbyUserId) {
         // If the peer is resuming, do NOT send init or re-initialize.
@@ -1979,7 +1975,7 @@ function initializeHostGame() {
   g_lastMoveAt = Date.now();
   saveMultiplayerSession();
 
-  // Phase 1: Write initial state to DB and subscribe to changes
+  // Write initial state to DB and subscribe to changes
   createGameStateInDB().then(function() {
     subscribeToGameStateChanges();
   });
@@ -2072,12 +2068,8 @@ function sendDragPosition(x, y, sourceId, sourceCenter) {
   var board = el('board');
   if (board) g_cachedBoardRect = board.getBoundingClientRect();
 
-  var bx = 0, by = 0;
   var col = -1, row = -1, cx = 0.5, cy = 0.5;
   if (g_cachedBoardRect) {
-    bx = (x - g_cachedBoardRect.left) / g_cachedBoardRect.width;
-    by = (y - g_cachedBoardRect.top) / g_cachedBoardRect.height;
-
     // Cell-based coordinates for resolution-independent cross-device sync
     var cellW = g_cachedBoardRect.width / g_boardwidth;
     var cellH = g_cachedBoardRect.height / g_boardheight;
@@ -2089,8 +2081,6 @@ function sendDragPosition(x, y, sourceId, sourceCenter) {
 
   var payload = {
     seq: ++g_dragSeq,
-    bx: bx, // Board-relative X (legacy fallback)
-    by: by, // Board-relative Y (legacy fallback)
     col: col, // Board cell column (0-14)
     row: row, // Board cell row (0-14)
     cx: cx,   // Position within cell X (0-1)
@@ -2147,16 +2137,15 @@ function localizeDragPosition(payload) {
     cellH = g_cachedBoardRect.height / g_boardheight;
   }
 
-  // Primary: use cell-based coordinates for resolution-independent cross-device sync
+  // Use cell-based coordinates for resolution-independent cross-device sync
   var x, y;
   if (typeof payload.col === 'number' && typeof payload.row === 'number' &&
       payload.col >= 0 && payload.row >= 0 && g_cachedBoardRect) {
     x = g_cachedBoardRect.left + payload.col * cellW + (payload.cx || 0.5) * cellW;
     y = g_cachedBoardRect.top  + payload.row * cellH + (payload.cy || 0.5) * cellH;
   } else {
-    // Legacy fallback: board-relative percentages
-    x = (typeof payload.bx === 'number' && g_cachedBoardRect) ? (g_cachedBoardRect.left + payload.bx * g_cachedBoardRect.width) : payload.x;
-    y = (typeof payload.by === 'number' && g_cachedBoardRect) ? (g_cachedBoardRect.top + payload.by * g_cachedBoardRect.height) : payload.y;
+    x = payload.x;
+    y = payload.y;
   }
 
   var sX = (typeof payload.bsX === 'number' && g_cachedBoardRect) ? (g_cachedBoardRect.left + payload.bsX * g_cachedBoardRect.width) : payload.sourceCenterX;
@@ -2370,7 +2359,7 @@ function applyDragPreview(payload) {
     // Board cell: render the real letter so the opponent sees what was placed
     var p = (typeof payload.points === 'number') ? payload.points : (g_letscore[payload.letter] || 0);
     renderOpponentBoardTile(toCell, payload.letter || '', p);
-    // Phase 4: previews are purely visual — do NOT mutate committed g_board state
+    // previews are purely visual — do NOT mutate committed g_board state
     if (g_bui) {
       g_bui.oppNewplays = g_bui.oppNewplays || {};
       g_bui.oppNewplays[toId] = { 'letter': payload.letter || '', 'points': p };
@@ -2389,7 +2378,7 @@ function applyDragSourceClear(payload) {
   var sourceId = mapRemoteRackCellId(id);
   var sourceCell = el(sourceId);
   if (sourceCell) sourceCell.innerHTML = '';
-  // Phase 4: previews are purely visual — do NOT mutate committed g_board state
+  // previews are purely visual — do NOT mutate committed g_board state
   if (g_bui && g_bui.oppNewplays) {
     delete g_bui.oppNewplays[sourceId];
   }
@@ -2485,7 +2474,7 @@ function handleGameStateBroadcast(payload) {
     // Send ACK back to host
     sendBroadcastNow('init_ack', { gameId: g_gameId, initId: payload.initId });
 
-    // Phase 4: Ensure board is fresh for both players
+    // Ensure board is fresh for both players
     // g_bui.restart() would call cleanupMultiplayerSession() which tears down the game channel
     localStorage.removeItem('session');
     g_bui = new RedipsUI();
@@ -2508,13 +2497,13 @@ function handleGameStateBroadcast(payload) {
     // Initialize DB game state tracking for guest (host does this in createGameStateInDB)
     g_lastDBGameState = JSON.stringify(buildGameStateSnapshot());
 
-    // Phase 1: Subscribe to DB state changes for this game
+    // Subscribe to DB state changes for this game
     subscribeToGameStateChanges();
 
     updateTurnIndicator();
     updateGameInfoLabels();
   } else if (payload.type === 'shuffle') {
-    // Phase 5: Apply opponent shuffle with visible transition
+    // Apply opponent shuffle with visible transition
     animateRackShuffle('op', payload.rack || '', function() {
       g_bui.setOpponentRack(payload.rack || '');
     });
@@ -2559,12 +2548,12 @@ function handleGameStateBroadcast(payload) {
     }
   }
 
-  // Phase 3: Any broadcast from opponent indicates activity — reset idle timer
+  // Any broadcast from opponent indicates activity — reset idle timer
   resetIdleTimer();
 }
 
 function updateTurnIndicator() {
-  // Phase 4: Explicit button gating policy
+  // Explicit button gating policy
   // Move-action controls: turn-gated (Play, Clear/Shuffle, Swap, Pass)
   const moveButtons = ['play', 'clear', 'swap', 'pass'];
   const moveButtonIds = moveButtons.map(b => document.getElementById(b)).filter(Boolean);
@@ -2862,7 +2851,7 @@ function handleMoveBroadcast(payload) {
         clearOpponentPreviewCache();
         saveMultiplayerSession();
 
-        // Phase 3: Sync from DB to ensure we have the authoritative state after opponent move
+        // Sync from DB to ensure we have the authoritative state after opponent move
         maybeSyncGameStateFromDB('opponent-move');
       }
 
@@ -2942,7 +2931,7 @@ function handleMoveBroadcast(payload) {
     clearOpponentPreviewCache();
     saveMultiplayerSession();
 
-    // Phase 3: Sync from DB to ensure we have the authoritative state after opponent move
+    // Sync from DB to ensure we have the authoritative state after opponent move
     maybeSyncGameStateFromDB('opponent-move');
 
     // Opponent activity resets idle timer
@@ -2959,11 +2948,11 @@ function saveMultiplayerSession() {
       return;
     }
 
-    // Phase 3: Do NOT write committed MP state to localStorage.
+    // Do NOT write committed MP state to localStorage.
     // DB is the single source of truth for multiplayer game state.
     localStorage['session_mode'] = 'mp';
 
-    // Phase 2: Sync to DB, but only if game state actually changed
+    // Sync to DB, but only if game state actually changed
     var currentGameState = buildGameStateSnapshot();
     var currentGameStateJson = JSON.stringify(currentGameState);
     if (DEBUG && g_dbVersion > 0) {
@@ -3509,7 +3498,7 @@ function resumeFromInvite(invite) {
   updateGameInfoLabels();
 
   joinGameChannel(g_gameId, isHost, function() {
-    // Phase 3: Fetch authoritative state from DB instead of requesting via socket
+    // Fetch authoritative state from DB instead of requesting via socket
     syncGameStateFromDB().then(function(synced) {
       if (synced) {
         if (DEBUG) console.log('[DB] resumeFromInvite synced from DB');
@@ -3593,12 +3582,12 @@ document.addEventListener('appReady', function() {
         var resumedIsHost = !!mpData.isHost;
         g_isResuming = true;
         joinGameChannel(g_gameId, resumedIsHost, function() {
-          // Phase 3: Fetch authoritative state from DB instead of requesting via socket
+          // Fetch authoritative state from DB instead of requesting via socket
           syncGameStateFromDB().then(function(synced) {
             if (synced) {
               subscribeToGameStateChanges();
               g_isResuming = false;
-              // Phase 3: Purge stale localStorage snapshot now that DB is authoritative
+              // Purge stale localStorage snapshot now that DB is authoritative
               localStorage.removeItem('session_mp');
               if (DEBUG) console.log('[DB] Reconnected and synced from DB, purged session_mp');
             } else {
@@ -3795,7 +3784,7 @@ function handleVisibilityChange() {
       resetIdleTimer();
       startIdleTimer();
       startMpAutoSaveTimer();
-      // Phase 3: Fetch authoritative state from DB when tab becomes visible
+      // Fetch authoritative state from DB when tab becomes visible
       maybeSyncGameStateFromDB('visibility');
     }
     if (!g_isMultiplayer) {
@@ -3825,7 +3814,7 @@ window.addEventListener('beforeunload', function() {
   }
 });
 
-// Phase 3: Sync from DB when network comes back online
+// Sync from DB when network comes back online
 window.addEventListener('online', function() {
   if (g_isMultiplayer && !g_isGameOver) {
     if (DEBUG) console.log('[DB] Network came online, syncing game state...');
