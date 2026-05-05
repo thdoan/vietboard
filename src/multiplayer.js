@@ -1933,11 +1933,11 @@ function initializeHostGame() {
   g_bui = new RedipsUI();
   init('board');
   g_isMultiplayer = true;
-  g_gameStateInitialized = true;
   resetMultiplayerGameState();
 
   // Wait a tick for letpool to be built, then sync it
   setTimeout(() => {
+    if (g_gameStateInitialized) return; // DB sync or resume already initialized
     // Reset pool
     if (typeof g_origletpool !== 'undefined') {
       g_letpool = g_origletpool.slice();
@@ -1982,6 +1982,7 @@ function initializeHostGame() {
       subscribeToGameStateChanges();
     });
 
+    g_gameStateInitialized = true;
     updateTurnIndicator();
     updateGameInfoLabels();
   }, 100);
@@ -2462,10 +2463,10 @@ function handleGameStateBroadcast(payload) {
     g_bui = new RedipsUI();
     init('board');
     g_isMultiplayer = true; // init() clears this, re-enable it
-    g_gameStateInitialized = true;
     resetMultiplayerGameState();
 
     setTimeout(() => {
+      if (g_gameStateInitialized) return; // DB sync or resume already initialized
       // Apply init state from host
       g_letpool = payload.letpool;
       g_bui.setPlayerRack(payload.myRack);
@@ -2483,6 +2484,7 @@ function handleGameStateBroadcast(payload) {
 
       // Phase 1: Subscribe to DB state changes for this game
       subscribeToGameStateChanges();
+      g_gameStateInitialized = true;
 
       updateTurnIndicator();
       updateGameInfoLabels();
