@@ -3573,7 +3573,7 @@ document.addEventListener('appReady', function() {
           if (!g_channelSubscribed) {
             g_bui.prompt(
               t('Unable to reconnect to game.'),
-              '<button class="button" onclick="hideModal();cleanupMultiplayerSession();init(\'board\')">' + t('Play Computer') + '</button>'
+              '<button class="button" onclick="hideModal();cleanupMultiplayerSession();init(\'board\');if (g_isMobile) hideGameInfo()">' + t('Play Computer') + '</button>'
             );
           }
         }, 20000);
