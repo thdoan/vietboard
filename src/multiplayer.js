@@ -1928,7 +1928,6 @@ function initializeHostGame() {
 
   // Reset board state for a fresh MP game WITHOUT calling cleanupMultiplayerSession().
   // g_bui.restart() would tear down the active game channel because it sees g_isMultiplayer === true.
-  dismissConnectingToast();
   localStorage.removeItem('session');
   g_bui = new RedipsUI();
   init('board');
@@ -2482,7 +2481,6 @@ function handleGameStateBroadcast(payload) {
 
     // Phase 4: Ensure board is fresh for both players
     // g_bui.restart() would call cleanupMultiplayerSession() which tears down the game channel
-    dismissConnectingToast();
     localStorage.removeItem('session');
     g_bui = new RedipsUI();
     init('board');
@@ -3340,6 +3338,9 @@ function subscribeToGameStateChanges() {
     })
     .subscribe(function(status) {
       if (DEBUG) console.log('[DB] Game state subscription status:', status);
+      if (status === 'SUBSCRIBED') {
+        dismissConnectingToast();
+      }
     });
 }
 
