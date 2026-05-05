@@ -114,6 +114,7 @@ let g_dbVersion = 0; // DB-as-SSOT: tracks games.version for optimistic concurre
 let g_lastDBGameState = null; // Last game state snapshot written to DB (centralized dedup)
 let g_dbWriteInProgress = false; // Guard to prevent syncGameStateFromDB from clobbering in-flight writes
 let g_resumeToast = null;
+let g_connectingToast = null;
 let g_channelSubscribed = false;
 let g_resumeConnectionTimer = null;
 let g_resumeFailTimer = null;
@@ -972,6 +973,14 @@ function updateLobbyBadgeFromMergedState() {
   updateLobbyBadge();
 }
 
+function dismissConnectingToast() {
+  if (g_connectingToast && g_connectingToast.parentNode) {
+    g_connectingToast.classList.remove('show');
+    g_connectingToast.classList.add('hide');
+    g_connectingToast = null;
+  }
+}
+
 function renderLobbyPlayers(state) {
   if (g_lobbyRenderTimer) clearTimeout(g_lobbyRenderTimer);
   g_lobbyRenderTimer = setTimeout(function() {
@@ -1130,7 +1139,7 @@ function subscribeToMyInvites() {
       if (!payload.new || (payload.new.status !== 'accepted' && payload.new.status !== 'started')) return;
       if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) return;
 
-      g_bui.toast(t('Connecting with') + ' ' + (payload.new.to_name || t('Player')) + '...', 4000);
+      g_connectingToast = g_bui.toast(t('Connecting with') + ' ' + (payload.new.to_name || t('Player')) + '...', 0);
       g_connectingInvites.add(payload.new.game_id);
       renderLobbyPlayers();
       delete g_myInvites[payload.new.game_id];
@@ -1305,7 +1314,7 @@ window.acceptInvite = async function(gameId) {
   g_connectingInvites.add(gameId);
   renderLobbyPlayers();
   delete g_pendingInvites[gameId];
-  g_bui.toast(t('Connecting with') + ' ' + (invite.from_name || t('Player')) + '...', 4000);
+  g_connectingToast = g_bui.toast(t('Connecting with') + ' ' + (invite.from_name || t('Player')) + '...', 0);
   startMultiplayerGame(gameId, invite.from_id, invite.from_name, false);
 }
 
@@ -1917,6 +1926,7 @@ function initializeHostGame() {
 
   // Reset board state for a fresh MP game WITHOUT calling cleanupMultiplayerSession().
   // g_bui.restart() would tear down the active game channel because it sees g_isMultiplayer === true.
+  dismissConnectingToast();
   localStorage.removeItem('session');
   g_bui = new RedipsUI();
   init('board');
@@ -2445,6 +2455,7 @@ function handleGameStateBroadcast(payload) {
 
     // Phase 4: Ensure board is fresh for both players
     // g_bui.restart() would call cleanupMultiplayerSession() which tears down the game channel
+    dismissConnectingToast();
     localStorage.removeItem('session');
     g_bui = new RedipsUI();
     init('board');
