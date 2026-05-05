@@ -1098,6 +1098,16 @@ function RedipsUI() {
         savePreviewToDB();
       }
 
+      // If a DB sync was deferred during drag, run it now after a brief delay
+      if (typeof g_deferredDBSync !== 'undefined' && g_deferredDBSync && typeof syncGameStateFromDB === 'function') {
+        setTimeout(function() {
+          if (g_deferredDBSync) {
+            g_deferredDBSync = false;
+            syncGameStateFromDB();
+          }
+        }, 300);
+      }
+
       if (isJokerOnBoard) {
         self.showLettersModal(id);
       }
@@ -1136,6 +1146,16 @@ function RedipsUI() {
       }
       if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof savePreviewToDB === 'function') {
         savePreviewToDB();
+      }
+
+      // If a DB sync was deferred during drag, run it now after a brief delay
+      if (typeof g_deferredDBSync !== 'undefined' && g_deferredDBSync && typeof syncGameStateFromDB === 'function') {
+        setTimeout(function() {
+          if (g_deferredDBSync) {
+            g_deferredDBSync = false;
+            syncGameStateFromDB();
+          }
+        }, 300);
       }
     };
 
