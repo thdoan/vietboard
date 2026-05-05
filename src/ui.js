@@ -1070,6 +1070,7 @@ function RedipsUI() {
             'letter': '*',
             'points': 0
           };
+          holds.letter = '*';
         }
         if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
           if (sourceId.charAt(0) === self.boardId) {
