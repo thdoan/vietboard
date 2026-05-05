@@ -1682,6 +1682,25 @@ function leavePostGameState() {
   }
 }
 
+function resetInitHandshakeState() {
+  g_stateVersion = 0;
+  g_dbVersion = 0;
+  g_lastDBWriteAt = 0;
+  g_lastMoveAt = 0;
+  g_lastRemoteDragSeq = -1;
+  g_dragSeq = 0;
+  g_myRematchGameId = null;
+  g_lastEmojiSentAt = 0;
+  g_mpGameEndReason = '';
+  g_cachedInitPayload = null;
+  g_seenInitIds.clear();
+  if (g_initRetryTimer) {
+    clearTimeout(g_initRetryTimer);
+    g_initRetryTimer = null;
+  }
+  g_initRetryCount = 0;
+}
+
 function cleanupMultiplayerSession() {
   if (g_idleTimer) {
     clearInterval(g_idleTimer);
@@ -1728,22 +1747,7 @@ function cleanupMultiplayerSession() {
   g_opponentName = null;
   g_opponentPresenceState = false;
   g_opponentDisconnectSeconds = 0;
-  g_stateVersion = 0;
-  g_dbVersion = 0;
-  g_lastDBWriteAt = 0;
-  g_lastMoveAt = 0;
-  g_lastRemoteDragSeq = -1;
-  g_dragSeq = 0;
-  g_myRematchGameId = null;
-  g_lastEmojiSentAt = 0;
-  g_mpGameEndReason = '';
-  g_cachedInitPayload = null;
-  g_seenInitIds.clear();
-  if (g_initRetryTimer) {
-    clearTimeout(g_initRetryTimer);
-    g_initRetryTimer = null;
-  }
-  g_initRetryCount = 0;
+  resetInitHandshakeState();
   g_connectingInvites.clear();
 
   g_activeChannelType = null;
@@ -1783,6 +1787,9 @@ window.initiateRematch = function() {
   if (oldGameId) {
     deleteGameStateFromDB(oldGameId);
   }
+
+  // Reset init handshake state so host can re-initialize on guest hello
+  resetInitHandshakeState();
 
   // Deterministic host: lexicographically smaller playerId generates the gameId
   var isHost = g_lobbyUserId < g_opponentId;
