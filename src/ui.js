@@ -1044,10 +1044,9 @@ function RedipsUI() {
       if (id.charAt(0) === self.boardId) {
         // Tile dropped on playing board
         self.playSound();
+        self.newplays[id] = self.hcopy(holds);
         if (holds && holds.points === 0) { // Joker
           isJokerOnBoard = true;
-        } else {
-          self.newplays[id] = self.hcopy(holds);
         }
         if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
           // Clear old board position if moving from one board cell to another
@@ -1856,7 +1855,10 @@ function RedipsUI() {
     html += '</tr></table>';
 
     // Display the HTML in the modal window
-    self.prompt(html, '<button class="button" onclick="g_bui.onSwap()">' + t('Swap') + ' & ' + t('Pass') + '</button>', 'wide');
+    self.prompt(html,
+      '<button class="button secondary" onclick="hideModal()">' + t('Cancel') + '</button>' + SPACER +
+      '<button class="button" onclick="g_bui.onSwap()">' + t('Swap') + ' & ' + t('Pass') + '</button>', 'wide'
+    );
 
     // And then fill the DOM in the modal window with the existing letter
     // divs from the players rack

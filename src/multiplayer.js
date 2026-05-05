@@ -2325,7 +2325,8 @@ function renderCommittedBoard() {
         var tClass = boardTypeColumn[y] === 1 ? 't1' : 't2';
         var points = (g_boardpoints[x] && g_boardpoints[x][y]) || 0;
         renderTile(cell, char, points, tClass);
-      } else {
+      } else if (!cell.holds) {
+        // Preserve active preview tiles (e.g. joker awaiting letter selection)
         clearTile(cell);
       }
     }
@@ -3259,6 +3260,10 @@ function applyGameStateFromDB(dbState) {
       var holdsObj = { 'letter': ltr, 'points': pts };
       cell.holds = holdsObj;
       if (cell.firstChild) cell.firstChild.holds = holdsObj;
+      // Re-open letter picker if restored preview is an unresolved joker
+      if (ltr === '*' && typeof g_bui.showLettersModal === 'function') {
+        g_bui.showLettersModal(cellId);
+      }
     }
 
     // Opponent previews
