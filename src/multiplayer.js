@@ -68,7 +68,7 @@ if (!g_myName) {
     localStorage.setItem('player_name', g_myName);
 
     // Rename any local high scores that used the old fallback name and re-sync
-    if (oldName !== g_myName && !localStorage['_vb_name_migrated']) {
+    if (oldName !== g_myName) {
       for (var key in g_highscores) {
         if (Array.isArray(g_highscores[key])) {
           g_highscores[key].forEach(function(item) {
@@ -77,7 +77,6 @@ if (!g_myName) {
         }
       }
       localStorage['highscores'] = JSON.stringify(g_highscores);
-      localStorage['_vb_name_migrated'] = '1';
       if (typeof saveGlobalHighScores === 'function') saveGlobalHighScores();
     }
 
@@ -514,43 +513,6 @@ async function saveGlobalHighScores() {
     return;
   }
   try {
-    // One-time migration: backfill missing sessionId and repair sessions in Supabase
-    if (!localStorage['_vb_session_migrated']) {
-      var needsLocalSave = false;
-      for (var key in g_highscores) {
-        if (Array.isArray(g_highscores[key])) {
-          g_highscores[key].forEach(function(item) {
-            if (item.session && !item.sessionId) {
-              try {
-                var sessionObj = JSON.parse(item.session);
-                var newId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-                sessionObj.id = newId;
-                item.session = JSON.stringify(sessionObj);
-                item.sessionId = newId;
-                needsLocalSave = true;
-                if (window.supabaseClient) {
-                  window.supabaseClient.from('sessions').upsert({
-                    id: newId,
-                    session_data: item.session,
-                    app_key: _dk(_hk)
-                  }).catch(function(e) {
-                    console.warn('Failed to backfill session to Supabase:', e);
-                  });
-                }
-              } catch (err) {
-                // Skip malformed session JSON
-              }
-            }
-          });
-        }
-      }
-      if (needsLocalSave) {
-        localStorage['highscores'] = JSON.stringify(g_highscores);
-      }
-      await repairMissingSessions();
-      localStorage['_vb_session_migrated'] = '1';
-    }
-
     // Enforce max 100 scored entries per Layout-Level combo
     var needsTrimSave = false;
     for (var key in g_highscores) {
