@@ -1539,7 +1539,7 @@ function joinGameChannel(gameId, isHost, onSubscribed, skipInitRetry) {
           to_name: g_myName,
           status: 'started',
           app_key: _dk(_hk)
-        }, { onConflict: 'from_id,to_id,game_id' }).catch(function(e) {
+        }, { onConflict: 'from_id,to_id,game_id' }).then(null, function(e) {
           if (DEBUG) console.warn('Failed to create rematch invite row:', e);
         });
       }
@@ -1825,7 +1825,7 @@ window.initiateRematch = function() {
         to_name: g_opponentName,
         status: 'started',
         app_key: _dk(_hk)
-      }, { onConflict: 'from_id,to_id,game_id' }).catch(function(e) {
+      }, { onConflict: 'from_id,to_id,game_id' }).then(null, function(e) {
         if (DEBUG) console.warn('Failed to create rematch invite row:', e);
       });
     }
