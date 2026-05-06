@@ -1528,6 +1528,22 @@ function joinGameChannel(gameId, isHost, onSubscribed, skipInitRetry) {
       if (!payload || payload.fromId === g_lobbyUserId) return;
       leavePostGameState();
       g_myRematchGameId = payload.gameId;
+
+      // Create invite row so both players can resume on reload via checkActiveInvite()
+      if (window.supabaseClient) {
+        window.supabaseClient.from('invites').upsert({
+          from_id: payload.fromId,
+          to_id: g_lobbyUserId,
+          game_id: payload.gameId,
+          from_name: payload.fromName || t('Opponent'),
+          to_name: g_myName,
+          status: 'started',
+          app_key: _dk(_hk)
+        }, { onConflict: 'from_id,to_id,game_id' }).catch(function(e) {
+          if (DEBUG) console.warn('Failed to create rematch invite row:', e);
+        });
+      }
+
       startMultiplayerGame(payload.gameId, g_opponentId, g_opponentName, false);
     })
     .on('broadcast', { event: 'reaction' }, ({ payload }) => {
@@ -1797,6 +1813,22 @@ window.initiateRematch = function() {
   if (isHost) {
     var newGameId = 'game_' + Math.random().toString(36).substr(2, 9);
     g_myRematchGameId = newGameId;
+
+    // Create invite row so both players can resume on reload via checkActiveInvite()
+    if (window.supabaseClient) {
+      window.supabaseClient.from('invites').upsert({
+        from_id: g_lobbyUserId,
+        to_id: g_opponentId,
+        game_id: newGameId,
+        from_name: g_myName,
+        to_name: g_opponentName,
+        status: 'started',
+        app_key: _dk(_hk)
+      }, { onConflict: 'from_id,to_id,game_id' }).catch(function(e) {
+        if (DEBUG) console.warn('Failed to create rematch invite row:', e);
+      });
+    }
+
     sendBroadcastNow('rematch', {
       gameId: newGameId,
       fromId: g_lobbyUserId,
