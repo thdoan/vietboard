@@ -515,8 +515,11 @@ function RedipsUI() {
       if (rcell.holds === '' && count < tileInfos.length) {
         var info = tileInfos[count++];
         var div = info.div;
-        // Joker tile - remove previously selected letter from tile?
-        if (div.holds.points === 0) div.innerHTML = SPACER;
+        // Joker tile - remove previously selected letter from tile
+        if (div.holds.points === 0) {
+          div.innerHTML = SPACER;
+          div.holds.letter = '*';
+        }
         rcell.appendChild(div);
         rcell.holds = self.hcopy(div.holds);
 
