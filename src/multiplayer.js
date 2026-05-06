@@ -939,17 +939,15 @@ function updateLobbyBadgeFromMergedState() {
 }
 
 function showConnectingToast(name) {
+  if (DEBUG) console.log('[TOAST] showConnectingToast() called for:', name);
   g_connectingToast = g_bui.toast(t('Connecting with') + ' ' + (name || t('Player')) + '...', 0);
-  if (g_connectingToast) g_connectingToast.setAttribute('data-permanent', 'true');
+  if (DEBUG) console.log('[TOAST] showConnectingToast() created toast ref:', g_connectingToast ? 'yes' : 'no');
 }
 
 function dismissConnectingToast() {
-  if (g_connectingToast && g_connectingToast.parentNode) {
-    g_connectingToast.removeAttribute('data-permanent');
-    g_connectingToast.classList.remove('show');
-    g_connectingToast.classList.add('hide');
-    g_connectingToast = null;
-  }
+  if (DEBUG) console.log('[TOAST] dismissConnectingToast() called. g_bui:', !!g_bui, 'g_connectingToast:', !!g_connectingToast);
+  if (g_bui) g_bui.closeToast();
+  g_connectingToast = null;
 }
 
 function renderLobbyPlayers(state) {
@@ -1588,7 +1586,6 @@ function joinGameChannel(gameId, isHost, onSubscribed, skipInitRetry) {
       if (status === 'SUBSCRIBED') {
         g_channelSubscribed = true;
         g_channelSubscribing = false;
-        dismissConnectingToast();
         if (g_reconnectTimer) {
           clearTimeout(g_reconnectTimer);
           g_reconnectTimer = null;
@@ -1986,6 +1983,7 @@ function initializeHostGame() {
 
   updateTurnIndicator();
   updateGameInfoLabels();
+  dismissConnectingToast();
 }
 
 function sendBroadcastNow(event, payload) {
@@ -2326,6 +2324,8 @@ function renderCommittedBoard() {
       } else if (!cell.holds) {
         // Preserve active preview tiles (e.g. joker awaiting letter selection)
         clearTile(cell);
+      } else if (DEBUG && cell.holds) {
+        console.log('[JOKER] renderCommittedBoard preserving preview at c' + x + '_' + y, 'holds:', JSON.stringify(cell.holds));
       }
     }
   }
@@ -2506,6 +2506,7 @@ function handleGameStateBroadcast(payload) {
 
     updateTurnIndicator();
     updateGameInfoLabels();
+    dismissConnectingToast();
   } else if (payload.type === 'shuffle') {
     // Apply opponent shuffle with visible transition
     animateRackShuffle('op', payload.rack || '', function() {
@@ -2957,6 +2958,7 @@ function saveMultiplayerSession() {
     localStorage['session_mode'] = 'mp';
 
     // Sync to DB, but only if game state actually changed
+    if (DEBUG && g_bui && g_bui.newplays) console.log('[JOKER] saveMultiplayerSession newplays:', JSON.stringify(g_bui.newplays));
     var currentGameState = buildGameStateSnapshot();
     var currentGameStateJson = JSON.stringify(currentGameState);
     if (DEBUG && g_dbVersion > 0) {
@@ -3048,6 +3050,7 @@ function buildGameStateSnapshot() {
   // Convert local preview tiles to perspective-neutral
   var myNewplays = (g_bui && g_bui.newplays) ? g_bui.newplays : {};
   var oppNewplays = (g_bui && g_bui.oppNewplays) ? g_bui.oppNewplays : {};
+  if (DEBUG) console.log('[JOKER] buildGameStateSnapshot myNewplays:', JSON.stringify(myNewplays), 'oppNewplays:', JSON.stringify(oppNewplays));
   var preview = {};
   if (g_isHost) {
     preview.player1 = myNewplays;
@@ -3242,6 +3245,7 @@ function applyGameStateFromDB(dbState) {
   if (g_bui && s.preview) {
     var myPreviewKey = g_isHost ? 'player1' : 'player2';
     var oppPreviewKey = g_isHost ? 'player2' : 'player1';
+    if (DEBUG) console.log('[JOKER] DB restore myPreviewKey:', myPreviewKey, 'data:', JSON.stringify(s.preview[myPreviewKey]));
 
     // Local player previews
     g_bui.newplays = s.preview[myPreviewKey] || {};
@@ -3580,6 +3584,7 @@ document.addEventListener('appReady', function() {
         g_bui.setTilesLeft((g_letpool || []).length);
 
         renderCommittedBoard();
+        if (DEBUG) console.log('[JOKER] localStorage restore newplays:', JSON.stringify(mpData.newplays));
         g_bui.newplays = mpData.newplays || {};
         g_bui.makeTilesFixed();
         updateTurnIndicator();

@@ -1326,6 +1326,7 @@ function onPlayerMove() {
 
     if (pstr === '') {
       // Revert board state on invalid move
+      if (DEBUG) console.log('[JOKER] Invalid move detected. newplays before revert:', JSON.stringify(g_bui.newplays));
       g_board = JSON.parse(prevBoard);
       g_boardpoints = JSON.parse(prevBoardP);
       g_boardtypes = JSON.parse(prevBoardT);

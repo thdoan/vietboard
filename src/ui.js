@@ -487,6 +487,7 @@ function RedipsUI() {
   };
 
   self.cancelPlayerPlacement = function(cellId) {
+    if (DEBUG) console.log('[JOKER] cancelPlayerPlacement called, cellId:', cellId, 'newplays:', JSON.stringify(self.newplays));
     var placement = self.getPlayerPlacement();
     var tileInfos = [];
     var id;
@@ -1048,6 +1049,7 @@ function RedipsUI() {
         // Tile dropped on playing board
         self.playSound();
         self.newplays[id] = self.hcopy(holds);
+        if (DEBUG && holds && holds.points === 0) console.log('[JOKER] Joker placed on board at', id, 'letter:', holds.letter);
         if (holds && holds.points === 0) { // Joker
           isJokerOnBoard = true;
         }
@@ -1240,6 +1242,7 @@ function RedipsUI() {
   };
 
   self.onSelLetter = function(ltr) {
+    if (DEBUG) console.log('[JOKER] onSelLetter called for cell', self.bdropCellId, 'letter:', ltr);
     var holds = {
       'letter': ltr,
       'points': 0
@@ -1886,16 +1889,18 @@ function RedipsUI() {
     if (!msg) return;
     var container = getToastContainer();
     if (!container) return;
+    if (DEBUG) console.log('[TOAST] toast() called:', msg.substring(0, 50), 'duration:', duration);
 
     // Check for existing visible toast to reuse instead of stacking
-    // Skip permanent toasts (e.g. connecting toast) so they can't be overwritten
-    var existing = container.querySelector('.toast-message.show:not([data-permanent])');
+    var existing = container.querySelector('.toast-message.show');
     if (existing) {
+      if (DEBUG) console.log('[TOAST] Reusing existing toast. Old:', existing.innerHTML.substring(0, 50), 'New:', msg.substring(0, 50));
       existing.innerHTML = msg;
       existing.classList.remove('hide');
       if (existing._toastTimeout) clearTimeout(existing._toastTimeout);
       if (duration !== 0) {
         existing._toastTimeout = setTimeout(function() {
+          if (DEBUG) console.log('[TOAST] Auto-hiding reused toast:', msg.substring(0, 50));
           existing.classList.remove('show');
           existing.classList.add('hide');
         }, duration || 4000);
@@ -1907,6 +1912,7 @@ function RedipsUI() {
     toast.className = 'toast-message';
     toast.innerHTML = msg;
     container.insertBefore(toast, container.firstChild);
+    if (DEBUG) console.log('[TOAST] Created new toast:', msg.substring(0, 50));
 
     window.requestAnimationFrame(function() {
       toast.classList.add('show');
@@ -1915,20 +1921,38 @@ function RedipsUI() {
     var timeout;
     if (duration !== 0) {
       timeout = setTimeout(function() {
+        if (DEBUG) console.log('[TOAST] Auto-hiding new toast:', msg.substring(0, 50));
         toast.classList.remove('show');
         toast.classList.add('hide');
       }, duration || 4000);
+      toast._toastTimeout = timeout;
     }
 
     toast.addEventListener('transitionend', function(e) {
       if (e.propertyName !== 'opacity') return;
       if (toast.classList.contains('hide') && toast.parentNode) {
+        if (DEBUG) console.log('[TOAST] transitionend removing toast:', toast.innerHTML.substring(0, 50));
         toast.parentNode.removeChild(toast);
         if (timeout) clearTimeout(timeout);
       }
     });
 
     return toast;
+  };
+
+  self.closeToast = function() {
+    if (DEBUG) console.log('[TOAST] closeToast() called');
+    var container = getToastContainer();
+    if (!container) return;
+    var toast = container.querySelector('.toast-message.show');
+    if (toast) {
+      if (DEBUG) console.log('[TOAST] closeToast() hiding toast:', toast.innerHTML.substring(0, 50));
+      toast.classList.remove('show');
+      toast.classList.add('hide');
+      if (toast._toastTimeout) clearTimeout(toast._toastTimeout);
+    } else {
+      if (DEBUG) console.log('[TOAST] closeToast() found no visible toast');
+    }
   };
 
   self.wordInfo = function(word) {
