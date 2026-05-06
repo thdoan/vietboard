@@ -109,6 +109,9 @@ let g_idleTimer = null;
 let g_idleSeconds = 0;
 let g_postGameTimer = null;
 let g_myRematchGameId = null;
+let g_rematchState = 'idle'; // 'idle' | 'waiting' | 'received' | 'executing'
+let g_rematchTimer = null;
+let g_rematchFallbackTimer = null;
 let g_lastEmojiSentAt = 0;
 var g_mpGameEndReason = '';
 let g_mpAutoSaveTimer = null;
@@ -1364,6 +1367,7 @@ async function startMultiplayerGame(gameId, opponentId, opponentName, isHost) {
   g_isHost = isHost;
   g_isResuming = false;
   g_myRematchGameId = null;
+  clearRematchState();
   g_lastEmojiSentAt = 0;
   localStorage['session_mode'] = 'mp';
 
@@ -1547,6 +1551,30 @@ function joinGameChannel(gameId, isHost, onSubscribed, skipInitRetry) {
 
       startMultiplayerGame(payload.gameId, g_opponentId, g_opponentName, false);
     })
+    .on('broadcast', { event: 'rematch_request' }, ({ payload }) => {
+      if (!payload || payload.fromId === g_lobbyUserId) return;
+      if (!g_isGameOver) return;
+
+      if (g_rematchState === 'waiting') {
+        tryStartRematch();
+      } else if (g_rematchState === 'idle') {
+        g_rematchState = 'received';
+        updateRematchButton('received');
+      }
+    })
+    .on('broadcast', { event: 'rematch_cancel' }, ({ payload }) => {
+      if (!payload || payload.fromId === g_lobbyUserId) return;
+      if (!g_isGameOver) return;
+
+      if (g_rematchState === 'waiting') {
+        clearRematchState();
+        updateRematchButton('idle');
+        g_bui.toast(t('Opponent has left'), 4000);
+      } else if (g_rematchState === 'received') {
+        clearRematchState();
+        updateRematchButton('idle');
+      }
+    })
     .on('broadcast', { event: 'reaction' }, ({ payload }) => {
       handleReactionBroadcast(payload);
     })
@@ -1687,9 +1715,6 @@ function enterPostGameState() {
   if (g_postGameTimer) clearTimeout(g_postGameTimer);
   if (g_bui && g_bui.hideEmojiPicker) g_bui.hideEmojiPicker();
   stopMpAutoSaveTimer();
-  g_postGameTimer = setTimeout(function() {
-    cleanupMultiplayerSession();
-  }, typeof g_wait_mp_rematch !== 'undefined' ? g_wait_mp_rematch : 60000);
 }
 
 function leavePostGameState() {
@@ -1718,7 +1743,20 @@ function resetInitHandshakeState() {
   g_initRetryCount = 0;
 }
 
+function clearRematchState() {
+  g_rematchState = 'idle';
+  if (g_rematchTimer) {
+    clearTimeout(g_rematchTimer);
+    g_rematchTimer = null;
+  }
+  if (g_rematchFallbackTimer) {
+    clearTimeout(g_rematchFallbackTimer);
+    g_rematchFallbackTimer = null;
+  }
+}
+
 function cleanupMultiplayerSession() {
+  clearRematchState();
   if (g_idleTimer) {
     clearInterval(g_idleTimer);
     g_idleTimer = null;
@@ -1780,43 +1818,60 @@ function cleanupMultiplayerSession() {
   }
 }
 
-window.confirmRestartMultiplayer = function() {
-  g_bui.prompt(
-    t('Restarting will forfeit this game.'),
-    '<button class="button secondary" onclick="hideModal()">' + t('Cancel') + '</button>' + SPACER +
-    '<button class="button" onclick="hideModal();finalizeMultiplayerGame(\'forfeit\', true);g_bui.restart()">' + t('Forfeit &amp; Restart') + '</button>'
-  );
-};
+function updateRematchButton(state) {
+  var btn = document.getElementById('btn-rematch');
+  if (!btn) return;
+  if (state === 'waiting') {
+    btn.disabled = true;
+    btn.classList.remove('pulse');
+    btn.textContent = t('Waiting for opponent...');
+  } else if (state === 'received') {
+    btn.disabled = false;
+    btn.classList.add('pulse');
+    btn.textContent = t('Opponent wants a rematch!');
+  } else {
+    btn.disabled = false;
+    btn.classList.remove('pulse');
+    btn.textContent = t('Rematch');
+  }
+}
 
-window.initiateRematch = function() {
-  if (!g_isGameOver) return;
-
-  // If opponent is gone (forfeit / disconnect), fall back to single-player
-  if (!g_isMultiplayer) {
-    g_bui.restart();
+function tryStartRematch() {
+  if (g_rematchState === 'executing') return;
+  if (!g_opponentPresenceState) {
+    clearRematchState();
+    updateRematchButton('idle');
+    g_bui.toast(t('Opponent has left'), 4000);
     return;
   }
+  g_rematchState = 'executing';
+  if (g_rematchTimer) {
+    clearTimeout(g_rematchTimer);
+    g_rematchTimer = null;
+  }
+
+  hideModal();
+  dismissConnectingToast();
+  g_connectingToast = g_bui.toast(t('Starting rematch...'), 0);
 
   leavePostGameState();
-  showConnectingToast(g_opponentName);
 
-  // Clean up old game state before starting rematch
   var oldGameId = g_gameId;
   if (oldGameId) {
     deleteGameStateFromDB(oldGameId);
   }
 
-  // Reset init handshake state so host can re-initialize on guest hello
   resetInitHandshakeState();
 
-  // Deterministic host: lexicographically smaller playerId generates the gameId
+  // Notify opponent we're starting (idempotent — wakes them up if they're waiting)
+  sendBroadcastNow('rematch_request', { gameId: g_gameId, fromId: g_lobbyUserId });
+
   var isHost = g_lobbyUserId < g_opponentId;
 
   if (isHost) {
     var newGameId = 'game_' + Math.random().toString(36).substr(2, 9);
     g_myRematchGameId = newGameId;
 
-    // Create invite row so both players can resume on reload via checkActiveInvite()
     if (window.supabaseClient) {
       window.supabaseClient.from('invites').upsert({
         from_id: g_lobbyUserId,
@@ -1838,13 +1893,74 @@ window.initiateRematch = function() {
     });
     startMultiplayerGame(newGameId, g_opponentId, g_opponentName, true);
   } else {
-    // Non-host waits for host's rematch broadcast
     if (g_myRematchGameId) {
       startMultiplayerGame(g_myRematchGameId, g_opponentId, g_opponentName, false);
     } else {
-      g_bui.toast(t('Waiting for opponent to start rematch...'), 3000);
+      // Non-host without a gameId yet — wait for host's rematch broadcast.
+      // Set a safety fallback to dismiss the toast if host never responds.
+      if (g_rematchFallbackTimer) clearTimeout(g_rematchFallbackTimer);
+      g_rematchFallbackTimer = setTimeout(function() {
+        if (g_rematchState === 'executing') {
+          clearRematchState();
+          updateRematchButton('idle');
+          g_bui.closeToast();
+          g_bui.toast(t('No response from opponent'), 4000);
+        }
+      }, 15000);
     }
   }
+}
+
+window.onGameOverPlayComputer = function() {
+  hideModal();
+  if (g_rematchState === 'waiting') {
+    sendBroadcastNow('rematch_cancel', { gameId: g_gameId, fromId: g_lobbyUserId });
+  }
+  clearRematchState();
+  g_bui.restart();
+};
+
+window.initiateRematch = function() {
+  if (!g_isGameOver) return;
+
+  if (!g_isMultiplayer) {
+    g_bui.restart();
+    return;
+  }
+
+  if (g_rematchState === 'received') {
+    tryStartRematch();
+    return;
+  }
+
+  if (g_rematchState === 'waiting') return;
+
+  if (!g_opponentPresenceState) {
+    g_bui.toast(t('Opponent has left'), 4000);
+    return;
+  }
+
+  g_rematchState = 'waiting';
+  updateRematchButton('waiting');
+  sendBroadcastNow('rematch_request', { gameId: g_gameId, fromId: g_lobbyUserId });
+
+  if (g_rematchTimer) clearTimeout(g_rematchTimer);
+  g_rematchTimer = setTimeout(function() {
+    if (g_rematchState === 'waiting') {
+      sendBroadcastNow('rematch_cancel', { gameId: g_gameId, fromId: g_lobbyUserId });
+      clearRematchState();
+      updateRematchButton('idle');
+      g_bui.toast(t('No response from opponent'), 4000);
+    }
+  }, 60000);
+};
+
+window.confirmRestartMultiplayer = function() {
+  g_bui.prompt(
+    t('Restarting will forfeit this game.'),
+    '<button class="button secondary" onclick="hideModal()">' + t('Cancel') + '</button>' + SPACER +
+    '<button class="button" onclick="hideModal();finalizeMultiplayerGame(\'forfeit\', true);g_bui.restart()">' + t('Forfeit &amp; Restart') + '</button>'
+  );
 };
 
 function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
@@ -3616,7 +3732,7 @@ document.addEventListener('appReady', function() {
           if (!g_channelSubscribed) {
             g_bui.prompt(
               t('Unable to reconnect to game.'),
-              '<button class="button" onclick="hideModal();cleanupMultiplayerSession();init(\'board\')">' + t('Play Computer') + '</button>'
+              '<button class="button" onclick="hideModal();g_bui.restart()">' + t('Play Computer') + '</button>'
             );
           }
         }, 20000);

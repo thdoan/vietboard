@@ -280,6 +280,15 @@ picture img {
   background-color: rgb(var(--rgb-btn-secondary-hover));
 }
 
+.button.pulse {
+  -webkit-animation: pulse 1.2s infinite;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 2px 0px rgb(var(--rgb-btn-primary) / 0.8); }
+  50% { box-shadow: 0 0 2px 7px rgb(var(--rgb-btn-primary) / 0); }
+}
+
 .button.wide {
   width: 98% !important;
 }

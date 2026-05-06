@@ -325,8 +325,8 @@ function announceWinner() {
     playAgainBtn = '<button class="button" onclick="hideModal();g_bui.restart()">' + t('Play Computer') + '</button>';
   } else if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
     playAgainBtn =
-      '<button class="button secondary" onclick="hideModal();g_bui.restart()">' + t('Leave') + '</button>' + SPACER +
-      '<button class="button" onclick="hideModal();initiateRematch()">' + t('Play Again') + '</button>';
+      '<button class="button secondary" id="btn-play-computer" onclick="onGameOverPlayComputer()">' + t('Play Computer') + '</button>' + SPACER +
+      '<button class="button" id="btn-rematch" onclick="initiateRematch()">' + t('Rematch') + '</button>';
   } else {
     playAgainBtn = '<button class="button" onclick="hideModal();g_bui.restart()">' + t('Play Again') + '</button>';
   }
