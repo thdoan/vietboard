@@ -328,12 +328,6 @@ async function reloadApi(page) {
 async function sendGhostDragEvent(page) {
   await page.evaluate(() => {
     if (!g_channel || !g_isMultiplayer) throw new Error('No active game channel for drag test');
-    const board = document.getElementById('board');
-    const rect = board.getBoundingClientRect();
-    const x = rect.left + rect.width * 0.5;
-    const y = rect.top + rect.height * 0.5;
-    const sx = rect.left + rect.width * 0.15;
-    const sy = rect.top + rect.height * 0.9;
 
     g_channel.send({
       type: 'broadcast',
@@ -341,14 +335,9 @@ async function sendGhostDragEvent(page) {
       payload: {
         seq: ++g_dragSeq,
         sourceId: 'pl0',
-        x,
-        y,
-        sourceCenterX: sx,
-        sourceCenterY: sy,
-        bx: 0.5,
-        by: 0.5,
-        bsX: 0.15,
-        bsY: 0.9
+        targetId: 'c7_7',
+        cx: 0.5,
+        cy: 0.5
       }
     });
   });

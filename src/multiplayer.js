@@ -6,6 +6,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Oju2rh1kaNFcvlPfnssF7A_4YpvQKCH'; // N
 const SUPABASE_HIGHSCORES_TABLE = 'highscores';
 const SUPABASE_HIGHSCORES_ID = 'vietboard';
 
+const DRAG_TRANSITION_MS = 250; // Standard transition for all drag gestures
+
 const _hk = '\xdd\xc9\xf4\xca\xdb\xdb\xc0\xce\xd2\xf4\x9c\xc0\x92\xc6\x99\xdb\xf3\xda\xe7\x9f\xc5\xf9\x93\xdc\xff\x9e\xc1\xf2\x98\xdd\xe9\x9d\xc8\xe3\x9a\xca\xed\x9b\xcf\xee';
 function _dk(s) {
   var k = 0xAB;
@@ -93,7 +95,7 @@ let g_opponentPresenceState = false;
 let g_dragThrottleTimer = null;
 let g_dragGhost = null;
 let g_dragSeq = 0;
-let g_lastRemoteDragSeq = -1;
+let g_lastRemotePositionSeq = -1; // Only tracks position broadcasts; commands (preview/clear/end) are ungated
 let g_stateVersion = 0;
 let g_opponentDisconnectSeconds = 0;
 let g_reconnectTimer = null;
@@ -1506,7 +1508,7 @@ function joinGameChannel(gameId, isHost, onSubscribed, skipInitRetry) {
         g_opponentId = opponentId || g_opponentId;
         if (opponentName) g_opponentName = opponentName;
         if (wasDisconnected) {
-          g_lastRemoteDragSeq = -1; // reset drag tracking after reconnect
+          g_lastRemotePositionSeq = -1; // reset drag tracking after reconnect
         }
       }
     })
@@ -1702,7 +1704,7 @@ function resetInitHandshakeState() {
   g_dbVersion = 0;
   g_lastDBWriteAt = 0;
   g_lastMoveAt = 0;
-  g_lastRemoteDragSeq = -1;
+  g_lastRemotePositionSeq = -1;
   g_dragSeq = 0;
   g_myRematchGameId = null;
   g_lastEmojiSentAt = 0;
@@ -2058,7 +2060,8 @@ var g_dragLastSentTime = 0;
 var g_cachedBoardRect = null;
 var g_cachedLocalSourceRect = null;
 
-function sendDragPosition(x, y, sourceId, sourceCenter) {
+
+function sendDragPosition(x, y, sourceId, sourceCenter, targetId) {
   if (!g_isMultiplayer || !g_channel || !g_isMyTurn) return;
   if (g_dragThrottleTimer) return;
 
@@ -2066,45 +2069,38 @@ function sendDragPosition(x, y, sourceId, sourceCenter) {
     g_dragThrottleTimer = null;
   }, 50);
 
-  // Refresh rect every call to handle mobile/desktop size differences and resizes
-  var board = el('board');
-  if (board) g_cachedBoardRect = board.getBoundingClientRect();
+  var cx = 0.5, cy = 0.5;
 
-  var col = -1, row = -1, cx = 0.5, cy = 0.5;
-  if (g_cachedBoardRect) {
-    // Cell-based coordinates for resolution-independent cross-device sync
-    var cellW = g_cachedBoardRect.width / g_boardwidth;
-    var cellH = g_cachedBoardRect.height / g_boardheight;
-    col = Math.floor((x - g_cachedBoardRect.left) / cellW);
-    row = Math.floor((y - g_cachedBoardRect.top) / cellH);
-    cx = ((x - g_cachedBoardRect.left) % cellW) / cellW;
-    cy = ((y - g_cachedBoardRect.top) % cellH) / cellH;
-  }
-
-  var payload = {
-    seq: ++g_dragSeq,
-    col: col, // Board cell column (0-14)
-    row: row, // Board cell row (0-14)
-    cx: cx,   // Position within cell X (0-1)
-    cy: cy,   // Position within cell Y (0-1)
-    x: x,     // Absolute fallback
-    y: y
-  };
-  if (sourceId) payload.sourceId = sourceId;
-  if (sourceCenter && typeof sourceCenter.sourceCenterX === 'number' && typeof sourceCenter.sourceCenterY === 'number') {
-    // Also relativize source center
-    if (g_cachedBoardRect) {
-        payload.bsX = (sourceCenter.sourceCenterX - g_cachedBoardRect.left) / g_cachedBoardRect.width;
-        payload.bsY = (sourceCenter.sourceCenterY - g_cachedBoardRect.top) / g_cachedBoardRect.height;
+  // Compute cx/cy relative to the target element if available
+  if (targetId) {
+    var targetEl = el(targetId);
+    if (targetEl) {
+      var tRect = targetEl.getBoundingClientRect();
+      cx = (x - tRect.left) / tRect.width;
+      cy = (y - tRect.top) / tRect.height;
+    } else {
+      // Target not found locally; fall back to board-based sub-cell position
+      var board = el('board');
+      if (board) {
+        var bRect = board.getBoundingClientRect();
+        var cellW = bRect.width / g_boardwidth;
+        var cellH = bRect.height / g_boardheight;
+        cx = ((x - bRect.left) % cellW) / cellW;
+        cy = ((y - bRect.top) % cellH) / cellH;
+      }
     }
-    payload.sourceCenterX = sourceCenter.sourceCenterX;
-    payload.sourceCenterY = sourceCenter.sourceCenterY;
   }
 
   g_channel.send({
     type: 'broadcast',
     event: 'drag',
-    payload: payload
+    payload: {
+      seq: ++g_dragSeq,
+      targetId: targetId,
+      cx: cx,
+      cy: cy,
+      sourceId: sourceId || undefined
+    }
   });
 }
 
@@ -2126,10 +2122,30 @@ function mapRemoteRackCellId(remoteId) {
   return remoteId;
 }
 
+function resolveLocalTarget(targetId) {
+  if (typeof targetId !== 'string' || !targetId) return null;
+  var mappedId = mapRemoteRackCellId(targetId);
+  return el(mappedId) || null;
+}
+
 function localizeDragPosition(payload) {
   if (!payload) return null;
 
-  // Refresh rect every call to handle mobile/desktop size differences and resizes
+  // Primary path: targetId-based resolution (resolution-independent)
+  if (typeof payload.targetId === 'string' && payload.targetId) {
+    var targetEl = resolveLocalTarget(payload.targetId);
+    if (targetEl) {
+      var rect = targetEl.getBoundingClientRect();
+      var cx = (typeof payload.cx === 'number') ? payload.cx : 0.5;
+      var cy = (typeof payload.cy === 'number') ? payload.cy : 0.5;
+      return {
+        x: rect.left + cx * rect.width,
+        y: rect.top + cy * rect.height
+      };
+    }
+  }
+
+  // Fallback: legacy col/row reconstruction
   var board = el('board');
   if (board) g_cachedBoardRect = board.getBoundingClientRect();
 
@@ -2139,7 +2155,6 @@ function localizeDragPosition(payload) {
     cellH = g_cachedBoardRect.height / g_boardheight;
   }
 
-  // Use cell-based coordinates for resolution-independent cross-device sync
   var x, y;
   if (typeof payload.col === 'number' && typeof payload.row === 'number' &&
       payload.col >= 0 && payload.row >= 0 && g_cachedBoardRect) {
@@ -2148,47 +2163,6 @@ function localizeDragPosition(payload) {
   } else {
     x = payload.x;
     y = payload.y;
-  }
-
-  var sX = (typeof payload.bsX === 'number' && g_cachedBoardRect) ? (g_cachedBoardRect.left + payload.bsX * g_cachedBoardRect.width) : payload.sourceCenterX;
-  var sY = (typeof payload.bsY === 'number' && g_cachedBoardRect) ? (g_cachedBoardRect.top + payload.bsY * g_cachedBoardRect.height) : payload.sourceCenterY;
-
-  var sourceId = payload.sourceId;
-
-  if (typeof sourceId === 'string') {
-    if (!g_cachedLocalSourceRect) {
-      // Rack IDs are mirrored for face-to-face; board IDs (absolute) are not.
-      var localSourceId = (sourceId.startsWith('pl') || sourceId.startsWith('op')) ? mapRemoteRackCellId(sourceId) : sourceId;
-      var localSourceCell = el(localSourceId);
-      if (localSourceCell) g_cachedLocalSourceRect = localSourceCell.getBoundingClientRect();
-    }
-
-    if (g_cachedLocalSourceRect && (sourceId.startsWith('pl') || sourceId.startsWith('op')) && typeof sX === 'number' && typeof sY === 'number') {
-      // We want the ghost to start at the LOCAL mapped rack center
-      var startX_local = g_cachedLocalSourceRect.left + g_cachedLocalSourceRect.width / 2;
-      var startY_local = g_cachedLocalSourceRect.top + g_cachedLocalSourceRect.height / 2;
-
-      // Decay the error as the tile moves away from the source.
-      // Hard cutoff at 1 board cell: beyond that distance the ghost is purely
-      // at the absolute board position. This prevents mobile/desktop size
-      // differences from leaking into board positions while keeping the
-      // rack-to-board animation intact.
-      var dy_moved = Math.abs(y - sY);
-      var fade = (dy_moved < cellH) ? Math.max(0, 1 - dy_moved / cellH) : 0;
-
-      if (fade > 0) {
-          // At the rack, we mirror the offset relative to the local mapped cell center.
-          var offsetX = x - sX;
-          var offsetY = y - sY;
-
-          var x_at_rack = startX_local - offsetX;
-          var y_at_rack = startY_local - offsetY;
-
-          // Interpolate between mirrored rack position and absolute board position
-          x = x + (x_at_rack - x) * fade;
-          y = y + (y_at_rack - y) * fade;
-      }
-    }
   }
 
   return { x: x, y: y };
@@ -2394,11 +2368,7 @@ function handleDragBroadcast(payload) {
     return;
   }
 
-  if (typeof payload.seq === 'number') {
-    if (payload.seq <= g_lastRemoteDragSeq) return;
-    g_lastRemoteDragSeq = payload.seq;
-  }
-
+  // Commands (preview, clear, end) execute unconditionally — they are idempotent one-shots
   if (payload.action === 'preview') {
     if (DEBUG) console.log('[DRAG] Received preview broadcast:', payload.fromId, '->', payload.toId, 'letter:', payload.letter);
     applyDragPreview(payload);
@@ -2418,6 +2388,35 @@ function handleDragBroadcast(payload) {
     return;
   }
 
+  // Position broadcasts only: seq-gate to prevent stale out-of-order positions,
+  // with reload detection (sender reset causes seq to drop significantly)
+  if (typeof payload.seq === 'number') {
+    if (g_lastRemotePositionSeq > 0 && payload.seq < g_lastRemotePositionSeq - 10) {
+      if (DEBUG) console.log('[DRAG] Position seq reset detected, accepting new sequence');
+      g_lastRemotePositionSeq = -1;
+    }
+    if (payload.seq <= g_lastRemotePositionSeq) return;
+    g_lastRemotePositionSeq = payload.seq;
+  }
+
+  // Compute position BEFORE creating/appending ghost so initial placement is correct (Bug 1 fix)
+  var localPos = localizeDragPosition(payload);
+
+  // Size based on local mapped target cell
+  var gw = 50;
+  var gh = 50;
+  var targetEl = (typeof payload.targetId === 'string' && payload.targetId)
+    ? resolveLocalTarget(payload.targetId)
+    : null;
+  if (targetEl) {
+    var tRect = targetEl.getBoundingClientRect();
+    gw = tRect.width;
+    gh = tRect.height;
+  } else if (g_cachedBoardRect) {
+    gw = g_cachedBoardRect.width / g_boardwidth;
+    gh = g_cachedBoardRect.height / g_boardheight;
+  }
+
   if (!g_dragGhost) {
     g_dragGhost = document.createElement('div');
     g_dragGhost.id = 'mp-drag-ghost';
@@ -2429,30 +2428,29 @@ function handleDragBroadcast(payload) {
     g_dragGhost.style.top = '0';
     g_dragGhost.style.zIndex = '10000';
     g_dragGhost.style.pointerEvents = 'none';
-    g_dragGhost.style.transition = 'none'; // Disable transitions to prevent trailing lag
+    g_dragGhost.style.transition = 'none'; // No transition on creation — snap instantly to first position
 
-    document.body.appendChild(g_dragGhost);
-  }
-
-  g_dragGhost.innerHTML = SPACER;
-  var localPos = localizeDragPosition(payload);
-  if (localPos) {
-    var gw = 50;
-    var gh = 50;
-    if (g_cachedLocalSourceRect) {
-        gw = g_cachedLocalSourceRect.width;
-        gh = g_cachedLocalSourceRect.height;
-    } else if (g_cachedBoardRect) {
-        gw = g_cachedBoardRect.width / g_boardwidth;
-        gh = g_cachedBoardRect.height / g_boardheight;
-    }
-
-    // Set size to match original tile
+    g_dragGhost.innerHTML = SPACER;
     g_dragGhost.style.width = gw + 'px';
     g_dragGhost.style.height = gh + 'px';
 
-    // Center using translate(-50%, -50%) combined with absolute position
-    g_dragGhost.style.transform = 'translate3d(' + localPos.x + 'px, ' + localPos.y + 'px, 0) translate(-50%, -50%)';
+    // Set initial position BEFORE appending so browser never sees it at (0,0)
+    if (localPos) {
+      g_dragGhost.style.transform = 'translate3d(' + localPos.x + 'px, ' + localPos.y + 'px, 0) translate(-50%, -50%)';
+    }
+
+    document.body.appendChild(g_dragGhost);
+
+    // Enable transition AFTER element is in DOM at correct position
+    g_dragGhost.style.transition = 'transform ' + (DRAG_TRANSITION_MS / 1000) + 's linear';
+  } else {
+    g_dragGhost.innerHTML = SPACER;
+    g_dragGhost.style.width = gw + 'px';
+    g_dragGhost.style.height = gh + 'px';
+
+    if (localPos) {
+      g_dragGhost.style.transform = 'translate3d(' + localPos.x + 'px, ' + localPos.y + 'px, 0) translate(-50%, -50%)';
+    }
   }
 }
 

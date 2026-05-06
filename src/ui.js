@@ -1014,22 +1014,37 @@ function RedipsUI() {
       };
     }
 
+    function broadcastDragPosition() {
+      if (typeof sendDragPosition !== 'function' || !self.rd.obj) return;
+      var rect = self.rd.obj.getBoundingClientRect();
+      var y = rect.top + rect.height / 2;
+
+      // Suppress sync if drag is above the top rack or below the bottom rack
+      var topRackCell = el(self.oppRackId + '0');
+      var bottomRackCell = el(self.plrRackId + (g_racksize - 1));
+      if (topRackCell && bottomRackCell) {
+        var topRect = topRackCell.getBoundingClientRect();
+        var bottomRect = bottomRackCell.getBoundingClientRect();
+        if (y < topRect.top || y > bottomRect.bottom) return;
+      }
+
+      var dragSource = getMultiplayerDragSource();
+      var targetId = self.rd.td.current ? self.rd.td.current.id : null;
+      sendDragPosition(
+        rect.left + rect.width / 2,
+        rect.top + rect.height / 2,
+        dragSource ? dragSource.sourceId : '',
+        dragSource,
+        targetId
+      );
+    }
+
     function startMultiplayerDragSync() {
       stopMultiplayerDragSync();
       self.dragSyncTimer = setInterval(function() {
         if (typeof g_isMultiplayer === 'undefined' || !g_isMultiplayer) return;
         if (typeof g_isMyTurn === 'undefined' || !g_isMyTurn) return;
-        if (typeof sendDragPosition !== 'function') return;
-        if (!self.rd.obj) return;
-
-        var rect = self.rd.obj.getBoundingClientRect();
-        var dragSource = getMultiplayerDragSource();
-        sendDragPosition(
-          rect.left + rect.width / 2,
-          rect.top + rect.height / 2,
-          dragSource ? dragSource.sourceId : '',
-          dragSource
-        );
+        broadcastDragPosition();
       }, 40);
     }
 
@@ -1080,9 +1095,17 @@ function RedipsUI() {
         if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
           if (sourceId.charAt(0) === self.boardId) {
             delete self.newplays[sourceId];
-            var ridx = parseInt(id.substr(2));
-            if (!isNaN(ridx) && self.racks[1]) {
-              self.racks[1] = self.racks[1].substr(0, ridx) + holds.letter + self.racks[1].substr(ridx + 1);
+          }
+          // Update rack array for board->rack AND rack->rack moves
+          var targetRidx = parseInt(id.substr(2));
+          if (!isNaN(targetRidx) && self.racks[1]) {
+            self.racks[1] = self.racks[1].substr(0, targetRidx) + holds.letter + self.racks[1].substr(targetRidx + 1);
+          }
+          // If source was also a rack cell, clear the old position
+          if (sourceId.charAt(0) === 'p') {
+            var sourceRidx = parseInt(sourceId.substr(2));
+            if (!isNaN(sourceRidx) && self.racks[1]) {
+              self.racks[1] = self.racks[1].substr(0, sourceRidx) + '.' + self.racks[1].substr(sourceRidx + 1);
             }
           }
         }
@@ -1121,19 +1144,7 @@ function RedipsUI() {
     self.rd.event.changed = function() {
       if (typeof g_isMultiplayer === 'undefined' || !g_isMultiplayer) return;
       if (typeof g_isMyTurn === 'undefined' || !g_isMyTurn) return;
-
-      var dragObj = self.rd.obj;
-
-      if (dragObj && typeof sendDragPosition === 'function') {
-        var rect = dragObj.getBoundingClientRect();
-        var dragSource = getMultiplayerDragSource();
-        sendDragPosition(
-          rect.left + rect.width / 2,
-          rect.top + rect.height / 2,
-          dragSource ? dragSource.sourceId : '',
-          dragSource
-        );
-      }
+      broadcastDragPosition();
     };
 
     self.rd.event.notMoved = function() {
@@ -1180,16 +1191,7 @@ function RedipsUI() {
         savePreviewToDB();
       }
 
-      if (typeof sendDragPosition === 'function' && self.rd.obj) {
-        var rect = self.rd.obj.getBoundingClientRect();
-        var dragSource = getMultiplayerDragSource();
-        sendDragPosition(
-          rect.left + rect.width / 2,
-          rect.top + rect.height / 2,
-          dragSource ? dragSource.sourceId : '',
-          dragSource
-        );
-      }
+      broadcastDragPosition();
     };
   };
 
