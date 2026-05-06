@@ -1527,6 +1527,7 @@ function joinGameChannel(gameId, isHost, onSubscribed, skipInitRetry) {
     .on('broadcast', { event: 'rematch' }, ({ payload }) => {
       if (!payload || payload.fromId === g_lobbyUserId) return;
       leavePostGameState();
+      showConnectingToast(payload.fromName || t('Opponent'));
       g_myRematchGameId = payload.gameId;
 
       // Create invite row so both players can resume on reload via checkActiveInvite()
@@ -1587,6 +1588,7 @@ function joinGameChannel(gameId, isHost, onSubscribed, skipInitRetry) {
       if (status === 'SUBSCRIBED') {
         g_channelSubscribed = true;
         g_channelSubscribing = false;
+        dismissConnectingToast();
         if (g_reconnectTimer) {
           clearTimeout(g_reconnectTimer);
           g_reconnectTimer = null;
@@ -3320,7 +3322,12 @@ function detectStateMismatches(dbState) {
 }
 
 function subscribeToGameStateChanges() {
-  if (!window.supabaseClient || !g_gameId || g_gameStateSubscription) return;
+  if (!window.supabaseClient || !g_gameId) return;
+
+  // Clean up stale subscription from previous game (rematch, etc.)
+  if (g_gameStateSubscription) {
+    unsubscribeFromGameStateChanges();
+  }
 
   g_gameStateSubscription = window.supabaseClient
     .channel('game_state:' + g_gameId)
@@ -3335,9 +3342,6 @@ function subscribeToGameStateChanges() {
     })
     .subscribe(function(status) {
       if (DEBUG) console.log('[DB] Game state subscription status:', status);
-      if (status === 'SUBSCRIBED') {
-        dismissConnectingToast();
-      }
     });
 }
 
