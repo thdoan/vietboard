@@ -1797,6 +1797,7 @@ window.initiateRematch = function() {
   }
 
   leavePostGameState();
+  showConnectingToast(g_opponentName);
 
   // Clean up old game state before starting rematch
   var oldGameId = g_gameId;
