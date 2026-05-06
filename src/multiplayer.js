@@ -6,7 +6,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Oju2rh1kaNFcvlPfnssF7A_4YpvQKCH'; // N
 const SUPABASE_HIGHSCORES_TABLE = 'highscores';
 const SUPABASE_HIGHSCORES_ID = 'vietboard';
 
-const DRAG_TRANSITION_MS = 250; // Standard transition for all drag gestures
+const DRAG_TRANSITION_MS = 200; // Standard transition for all drag gestures
 
 const _hk = '\xdd\xc9\xf4\xca\xdb\xdb\xc0\xce\xd2\xf4\x9c\xc0\x92\xc6\x99\xdb\xf3\xda\xe7\x9f\xc5\xf9\x93\xdc\xff\x9e\xc1\xf2\x98\xdd\xe9\x9d\xc8\xe3\x9a\xca\xed\x9b\xcf\xee';
 function _dk(s) {
@@ -2442,7 +2442,7 @@ function handleDragBroadcast(payload) {
     document.body.appendChild(g_dragGhost);
 
     // Enable transition AFTER element is in DOM at correct position
-    g_dragGhost.style.transition = 'transform ' + (DRAG_TRANSITION_MS / 1000) + 's linear';
+    g_dragGhost.style.transition = 'transform ' + (DRAG_TRANSITION_MS / 1000) + 's ease-out';
   } else {
     g_dragGhost.innerHTML = SPACER;
     g_dragGhost.style.width = gw + 'px';
