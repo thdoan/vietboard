@@ -427,8 +427,7 @@ function checkValidPlacement(placement) {
 
   for (var i = 0; i < placement.length; ++i) {
     var pl = placement[i];
-    if (pl.lsc === 0) lplayed += '*';
-    else lplayed += pl.ltr;
+    lplayed += pl.ltr;
     x = pl.x;
     y = pl.y;
 
