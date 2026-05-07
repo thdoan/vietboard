@@ -804,6 +804,9 @@ table.board td .drag,
   top: 0.5rem;
   left: 0;
   width: 100%;
+  box-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.5),        /* dark groove shadow */
+    0 2px 0 rgba(255, 255, 255, 0.08); /* faint light edge below */
   display: flex;
   justify-content: space-evenly;
   transform: translateX(-100%);
@@ -1273,8 +1276,7 @@ html.mobile body {
 }
 html.mobile #app {
   position: static;
-  background: url(../pics/rack_bg.jpg);
-  background-size: contain;
+  background: rgb(var(--rgb-gray-dark));
   -webkit-box-shadow: 0 3px 15px rgb(var(--rgb-black) / 0.5);
   box-shadow: 0 3px 15px rgb(var(--rgb-black) / 0.5);
   padding-top: var(--header-height);
