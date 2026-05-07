@@ -1733,6 +1733,8 @@ function enterPostGameState() {
   if (g_postGameTimer) clearTimeout(g_postGameTimer);
   if (g_bui && g_bui.hideEmojiPicker) g_bui.hideEmojiPicker();
   stopMpAutoSaveTimer();
+  // Prevent reload from re-entering MP mode with no session data
+  localStorage['session_mode'] = 'sp';
 }
 
 function leavePostGameState() {
@@ -1997,11 +1999,15 @@ function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
   g_isGameOver = true;
   g_mpGameEndReason = reason || '';
 
-  broadcastGameState({
-    type: 'game_ended',
-    reason: reason || 'ended',
-    stateVersion: g_stateVersion
-  });
+  // When skipLocalAnnounce is true (mover side), the receiver will detect
+  // the game end and broadcast game_ended with authoritative scores.
+  if (!skipLocalAnnounce) {
+    broadcastGameState({
+      type: 'game_ended',
+      reason: reason || 'ended',
+      stateVersion: g_stateVersion
+    });
+  }
 
   // Purge invite row and game state immediately on game end so it can never cause stale-state issues
   if (g_gameId) {
@@ -2019,6 +2025,16 @@ function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
     enterPostGameState();
   } else {
     cleanupMultiplayerSession();
+  }
+
+  // Fallback: if receiver's game_ended broadcast is lost, compute locally after 5s
+  if (skipLocalAnnounce) {
+    setTimeout(function() {
+      if (g_isGameOver && !g_finalScoresApplied) {
+        finalizeGameScores();
+        announceWinner();
+      }
+    }, 5000);
   }
 }
 
@@ -2782,12 +2798,25 @@ function handleGameStateBroadcast(payload) {
       }
     }
   } else if (payload.type === 'game_ended') {
-    if (g_isGameOver) return;
-    g_isGameOver = true;
+    var alreadyEnded = g_isGameOver;
+    if (!alreadyEnded) {
+      g_isGameOver = true;
+    }
     g_mpGameEndReason = payload.reason || '';
     if (payload.reason === 'forfeit') {
       g_bui.prompt(t('Opponent has left the game.'));
     }
+    // Apply authoritative final scores from the receiver
+    if (typeof payload.finalPScore === 'number' && typeof payload.finalOScore === 'number') {
+      g_pscore = payload.finalPScore;
+      g_oscore = payload.finalOScore;
+      g_finalScoresApplied = true;
+      if (g_bui) {
+        g_bui.setPlayerScore(g_playerLastScore || 0, g_pscore);
+        g_bui.setOpponentScore(g_opponentLastScore || 0, g_oscore);
+      }
+    }
+    // Always call announceWinner; it's idempotent for UI and finalizeGameScores is guarded
     announceWinner();
     if (payload.reason === 'passes' || payload.reason === 'ended') {
       enterPostGameState();
@@ -2917,7 +2946,7 @@ function onMultiplayerMove(passed) {
     g_bui.cancelPlayerPlacement();
     ++g_passes;
     if (g_passes >= g_maxpasses) {
-      finalizeMultiplayerGame('passes');
+      finalizeMultiplayerGame('passes', true);
       // No return here, we still want to broadcast the move that ended the game
     }
   }
@@ -2969,8 +2998,15 @@ function onMultiplayerMove(passed) {
   if (!passed && rackAfter.replace(/\./g, '') === '' && g_letpool.length === 0) {
     g_rackEmptiedBy = 'player';
     g_isGameOver = true;
-    announceWinner();
+    saveMultiplayerSession();
     enterPostGameState();
+    // Fallback: if receiver's game_ended broadcast is lost, compute locally after 5s
+    setTimeout(function() {
+      if (g_isGameOver && !g_finalScoresApplied) {
+        finalizeGameScores();
+        announceWinner();
+      }
+    }, 5000);
     return;
   }
 }
@@ -3154,6 +3190,16 @@ function handleMoveBroadcast(payload) {
         ++g_passes;
         if (g_passes >= g_maxpasses) {
           g_isGameOver = true;
+          saveMultiplayerSession();
+          finalizeGameScores();
+          g_finalScoresApplied = true;
+          broadcastGameState({
+            type: 'game_ended',
+            reason: 'passes',
+            stateVersion: g_stateVersion,
+            finalPScore: g_pscore,
+            finalOScore: g_oscore
+          });
           announceWinner();
           enterPostGameState();
           return;
@@ -3167,6 +3213,16 @@ function handleMoveBroadcast(payload) {
     if (payload.rackAfter.replace(/\./g, '') === '' && g_letpool.length === 0) {
       g_rackEmptiedBy = 'opponent';
       g_isGameOver = true;
+      saveMultiplayerSession();
+      finalizeGameScores();
+      g_finalScoresApplied = true;
+      broadcastGameState({
+        type: 'game_ended',
+        reason: 'ended',
+        stateVersion: g_stateVersion,
+        finalPScore: g_pscore,
+        finalOScore: g_oscore
+      });
       announceWinner();
       enterPostGameState();
       return;
