@@ -393,20 +393,24 @@ async function mergeGlobalHighScores(remoteScores) {
 
       if (duplicateIndex !== -1) {
         var existing = unique[duplicateIndex];
-        var merged = mergeDuplicateScoreEntries(existing, item);
-        unique[duplicateIndex] = merged;
+        // Merge session data preferring whichever has it
+        if (!existing.session && item.session) existing.session = item.session;
+        if (!existing.sessionId && item.sessionId) existing.sessionId = item.sessionId;
+        if (!existing.date && item.date) existing.date = item.date;
 
         // Propagate playerId and name updates
-        if (playerId && !merged.playerId) {
-          merged.playerId = playerId;
-          if (rawName) merged.player = rawName;
-        } else if (playerId && merged.playerId && playerId === merged.playerId && rawName && merged.player !== rawName) {
+        if (playerId && !existing.playerId) {
+          existing.playerId = playerId;
+          if (rawName) existing.player = rawName;
+        } else if (playerId && existing.playerId && playerId === existing.playerId && rawName && existing.player !== rawName) {
+          // Same known player, different name. Prefer remote (i >= localList.length) unless it's the current user.
           if (playerId !== currentUserId && i >= localList.length) {
-            merged.player = rawName;
+            existing.player = rawName;
           }
-        } else if (!playerId && !merged.playerId && item.sessionId && merged.sessionId === item.sessionId && rawName && merged.player !== rawName) {
+        } else if (!playerId && !existing.playerId && item.sessionId && existing.sessionId === item.sessionId && rawName && existing.player !== rawName) {
+          // Same session, no IDs. Prefer remote name.
           if (i >= localList.length) {
-            merged.player = rawName;
+            existing.player = rawName;
           }
         }
         continue;
@@ -497,6 +501,15 @@ async function loadGlobalHighScores() {
     }
 
     if (data && typeof data.scores === 'object') {
+      // Sanitize: strip any circular references from remote data
+      try {
+        data.scores = JSON.parse(JSON.stringify(data.scores));
+      } catch (e) {
+        console.warn('Corrupted highscores from Supabase, stripping bad keys');
+        for (var k in data.scores) {
+          try { JSON.stringify(data.scores[k]); } catch (e2) { delete data.scores[k]; }
+        }
+      }
       var hasNewLocalData = await mergeGlobalHighScores(data.scores);
       if (hasNewLocalData) {
         if (DEBUG) console.log('New local high scores detected. Syncing to global...');

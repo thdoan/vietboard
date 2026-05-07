@@ -268,23 +268,19 @@ function finalizeGameScores() {
     });
   }
   if (scoreEntries.length) {
-    // Pre-insert deduplication: merge if same playerId and score
+    // Pre-insert deduplication: skip if same playerId and score
     var existing = g_highscores[sHighScoresKey];
     for (var i = 0; i < scoreEntries.length; ++i) {
       var entry = scoreEntries[i];
-      var dupIndex = -1;
+      var isDup = false;
       for (var j = 0; j < existing.length; ++j) {
         if (existing[j].playerId === entry.playerId &&
             existing[j].score === entry.score) {
-          dupIndex = j;
+          isDup = true;
           break;
         }
       }
-      if (dupIndex !== -1) {
-        existing[dupIndex] = mergeDuplicateScoreEntries(existing[dupIndex], entry);
-      } else {
-        existing.push(entry);
-      }
+      if (!isDup) existing.push(entry);
     }
   }
   g_highscores[sHighScoresKey].sort(gCompareScores);
@@ -368,34 +364,6 @@ function getHighScoreNames() {
     'player': myName || youLabel,
     'opponent': oppName || opponentLabel
   };
-}
-
-function mergeDuplicateScoreEntries(existing, candidate) {
-  var existingDate = existing.date ? new Date(existing.date).getTime() : 0;
-  var candidateDate = candidate.date ? new Date(candidate.date).getTime() : 0;
-  if (isNaN(existingDate)) existingDate = 0;
-  if (isNaN(candidateDate)) candidateDate = 0;
-
-  var keepExisting = false;
-  if (existingDate > 0 && candidateDate > 0) {
-    keepExisting = existingDate <= candidateDate;
-  } else if (existingDate > 0) {
-    keepExisting = true;
-  } else if (candidateDate > 0) {
-    keepExisting = false;
-  } else {
-    keepExisting = true;
-  }
-
-  if (keepExisting) {
-    if (!existing.session && candidate.session) existing.session = candidate.session;
-    if (!existing.sessionId && candidate.sessionId) existing.sessionId = candidate.sessionId;
-    return existing;
-  } else {
-    if (!candidate.session && existing.session) candidate.session = existing.session;
-    if (!candidate.sessionId && existing.sessionId) candidate.sessionId = existing.sessionId;
-    return candidate;
-  }
 }
 
 //------------------------------------------------------------------------------
