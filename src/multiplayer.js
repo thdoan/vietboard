@@ -1994,6 +1994,22 @@ window.confirmRestartMultiplayer = function() {
   );
 };
 
+function applyFinalScores(payload) {
+  if (typeof payload.finalPScore !== 'number' || typeof payload.finalOScore !== 'number') return;
+  if (payload.fromId === g_lobbyUserId) {
+    g_pscore = payload.finalPScore;
+    g_oscore = payload.finalOScore;
+  } else {
+    g_pscore = payload.finalOScore;
+    g_oscore = payload.finalPScore;
+  }
+  g_finalScoresApplied = true;
+  if (g_bui) {
+    g_bui.setPlayerScore(g_playerLastScore || 0, g_pscore);
+    g_bui.setOpponentScore(g_opponentLastScore || 0, g_oscore);
+  }
+}
+
 function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
   if (!g_isMultiplayer || g_isGameOver) return;
   g_isGameOver = true;
@@ -2005,7 +2021,8 @@ function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
     broadcastGameState({
       type: 'game_ended',
       reason: reason || 'ended',
-      stateVersion: g_stateVersion
+      stateVersion: g_stateVersion,
+      fromId: g_lobbyUserId
     });
   }
 
@@ -2017,8 +2034,6 @@ function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
 
   if (!skipLocalAnnounce) {
     announceWinner();
-  } else if (typeof finalizeGameScores === 'function') {
-    finalizeGameScores();
   }
 
   if (reason === 'passes' || reason === 'ended') {
@@ -2807,15 +2822,7 @@ function handleGameStateBroadcast(payload) {
       g_bui.prompt(t('Opponent has left the game.'));
     }
     // Apply authoritative final scores from the receiver
-    if (typeof payload.finalPScore === 'number' && typeof payload.finalOScore === 'number') {
-      g_pscore = payload.finalPScore;
-      g_oscore = payload.finalOScore;
-      g_finalScoresApplied = true;
-      if (g_bui) {
-        g_bui.setPlayerScore(g_playerLastScore || 0, g_pscore);
-        g_bui.setOpponentScore(g_opponentLastScore || 0, g_oscore);
-      }
-    }
+    applyFinalScores(payload);
     // Always call announceWinner; it's idempotent for UI and finalizeGameScores is guarded
     announceWinner();
     if (payload.reason === 'passes' || payload.reason === 'ended') {
@@ -3197,6 +3204,7 @@ function handleMoveBroadcast(payload) {
             type: 'game_ended',
             reason: 'passes',
             stateVersion: g_stateVersion,
+            fromId: g_lobbyUserId,
             finalPScore: g_pscore,
             finalOScore: g_oscore
           });
@@ -3220,6 +3228,7 @@ function handleMoveBroadcast(payload) {
         type: 'game_ended',
         reason: 'ended',
         stateVersion: g_stateVersion,
+        fromId: g_lobbyUserId,
         finalPScore: g_pscore,
         finalOScore: g_oscore
       });
@@ -3247,8 +3256,12 @@ function handleMoveBroadcast(payload) {
   }
 }
 
+function shouldSaveMpSession() {
+  return g_isMultiplayer && g_opponentName && g_gameId && !g_isGameOver;
+}
+
 function saveSessionMpOnly() {
-  if (!g_isMultiplayer || !g_opponentName || !g_gameId) return;
+  if (!shouldSaveMpSession()) return;
   var snapshot = {
     gameId: g_gameId,
     opponentId: g_opponentId,
@@ -3282,8 +3295,8 @@ function saveMultiplayerSession() {
   if (g_isMultiplayer) {
     // Don't save corrupted sessions (e.g. opponentName missing indicates cleanupMultiplayerSession
     // was incorrectly called during init, leaving g_isMultiplayer=true but opponentName=null)
-    if (!g_opponentName || !g_gameId) {
-      if (DEBUG) console.warn('Skipping save of corrupted MP session: missing opponentName or gameId');
+    if (!shouldSaveMpSession()) {
+      if (DEBUG && (!g_opponentName || !g_gameId)) console.warn('Skipping save of corrupted MP session: missing opponentName or gameId');
       return;
     }
 
