@@ -215,6 +215,14 @@ To avoid the race condition where the host broadcasts `init` before the guest is
 - Forfeit / disconnect / inactivity still call `cleanupMultiplayerSession()` immediately (no rematch offered).
 - Key state variables: `g_postGameTimer`, `g_myRematchGameId`, `enterPostGameState()`, `leavePostGameState()`, `initiateRematch()`.
 
+### Final Score Synchronization
+To prevent divergent final scores in multiplayer (both players independently computing deductions from potentially stale racks):
+- **Only the receiver** of the final move computes `finalizeGameScores()` and broadcasts `{type: 'game_ended', finalPScore, finalOScore}`.
+- **The mover** skips `announceWinner()` when detecting game end (rack empty or max passes), sets `g_isGameOver = true`, and waits for the `game_ended` broadcast.
+- **`g_finalScoresApplied`** guards `finalizeGameScores()` from double-computation.
+- **Fallback timeout**: If the `game_ended` broadcast is lost, the mover computes locally after 5s.
+- **Reload safety**: `enterPostGameState()` sets `localStorage['session_mode'] = 'sp'` to prevent corrupt reloads into MP mode with no session data.
+
 <!-- BEGIN BEADS INTEGRATION -->
 ## Beads Issue Tracker
 
