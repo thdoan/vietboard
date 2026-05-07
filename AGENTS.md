@@ -174,6 +174,35 @@ To avoid the race condition where the host broadcasts `init` before the guest is
 - The init payload includes: `gameId`, `initId`, `letpool`, `myRack`, `oppRack`, `hostGoesFirst`, `stateVersion`.
 - `g_cachedInitPayload`, `g_seenInitIds`, `g_initTimeout`, `g_initRetryTimer`, and `g_initRetryCount` are cleared during `cleanupMultiplayerSession()`, rematch, and channel teardown.
 
+### Per-Player Rack Sovereignty (DB-as-SSOT)
+- Racks are stored in **separate DB columns** (`rack_a`, `rack_b`, `rack_a_count`, `rack_b_count`) to prevent feedback loops where both clients write both racks into the same JSON blob.
+- **`update_player_rack(p_app_key, p_game_id, p_player_id, p_rack, p_rack_count)`** uses `player_id` matching to decide which column to update (host writes `rack_a`, guest writes `rack_b`). Neither client ever writes the opponent's column.
+- **`create_game_state()`** seeds both rack columns on row creation to cover the initial handshake window where reloads could otherwise see null racks.
+- **`buildGameStateSnapshot()`** omits rack strings from the JSON state blob entirely; the per-player columns are authoritative.
+- **`applyGameStateFromDB()`** reads only the local player's rack from the new columns (with one-time legacy JSON fallback), and renders the opponent rack from `*_count` columns as tile-back placeholders.
+
+### Remote Drag Guard
+- DB sync is **deferred during opponent drag operations** to prevent DB sync from wiping live opponent drag preview tiles from the board.
+- **`g_remoteDragging`** with token matching tracks active opponent drags with a **5s rolling timeout**.
+- **`g_remoteDragCooldown`** adds a **400ms post-end cooldown** before flushing deferred DB sync.
+- **`renderTransientOverlays()`** re-applies opponent board previews (`oppNewplays`) after DB sync wipes them. Call this after every `syncGameStateFromDB` completion, initial MP load, and reconnect.
+- **`maybeSyncGameStateFromDB()`** defers sync if remote drag or cooldown is active; it also defers on local drag in progress.
+
+### Idempotent SQL Migrations
+- Use `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for column additions.
+- Use `DO $$` blocks checking `pg_policies`/`pg_publication_tables` for policies and realtime publications to avoid "already exists" errors.
+- Use `CREATE OR REPLACE FUNCTION` for RPCs so re-runs are safe against existing tables.
+
+### Supabase Free Tier Optimization
+- The multiplayer module can generate **~70–90 DB API calls per game per minute** at worst case (drag rack saves, move writes, auto-save, redundant syncs).
+- **Highest-impact optimizations** (no behavioral change):
+  1. Remove DB rack writes from drag preview/clear/end (broadcast already syncs live state).
+  2. Stop redundant `syncGameStateFromDB` after broadcast moves (receiver already has the payload).
+  3. Only the active player should write full game state; the receiver skips `saveMultiplayerSession`.
+  4. Skip auto-save rack writes when the rack string hasn't changed since last save.
+  5. Slow lobby heartbeat from 15s to 60s for idle clients.
+- With 100 concurrent games, even conservative estimates exceed the free tier 100k API requests/day. These optimizations are essential before scaling.
+
 ### Multiplayer Rematch
 - After a natural game-over (empty rack or max passes), the game enters a **post-game state** for `g_wait_mp_rematch` ms (default 60s).
 - In post-game state, the game channel stays alive and `cleanupMultiplayerSession()` is deferred.
