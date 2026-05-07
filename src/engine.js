@@ -37,6 +37,7 @@ var g_opponentLastScore = 0;    // Opponent's last move score
 var g_passes;                   // Number of consecutive passes
 var g_board_empty;              // First move flag
 var g_isGameOver = false;       // Game over flag
+var g_finalScoresApplied = false; // MP: set when final scores received from broadcast
 var g_playerPassed = false;
 var g_opponent_has_joker;       // Optimization flag if computer has joker tile
 var g_isShuffling = false;      // Track rack shuffle animation state
@@ -133,6 +134,7 @@ function init(iddiv, skipRacks) {
   g_passes = 0;
   g_board_empty = true;
   g_isGameOver = false;
+  g_finalScoresApplied = false;
   var wasMultiplayer = g_isMultiplayer;
   g_isMultiplayer = false;
   if (g_isMobile) hideGameInfo();
@@ -197,6 +199,11 @@ function init(iddiv, skipRacks) {
 function finalizeGameScores() {
   var isMP = (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer);
   var opponentNoun = isMP ? t('Opponent') : t('Computer');
+
+  // Guard: in MP, if scores were already applied via broadcast, skip recomputing
+  if (isMP && typeof g_isGameOver !== 'undefined' && g_isGameOver && typeof g_finalScoresApplied !== 'undefined' && g_finalScoresApplied) {
+    return;
+  }
 
   var oleft = g_bui.getOpponentRack();
   var pleft = g_bui.getPlayerRack();
