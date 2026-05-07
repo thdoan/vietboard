@@ -53,6 +53,7 @@ The build output is placed in the `play/` directory.
 - **Mobile Detection:** Use `g_isMobile` (global boolean in `src/events.js`) to detect mobile form factor. Check with `typeof g_isMobile !== 'undefined' && g_isMobile` for safety.
 - **Mobile Transitions:** When positioning elements over the board on mobile (e.g., emoji reactions), elements may be off-screen when the drawer is open. Use `transitionend` event on `#board` to wait for CSS transitions before calculating positions.
 - **Rack Representation:** Empty rack cells are represented as `'.'` (dot), not empty string `''`. When checking for empty rack, use `rack.replace(/\./g, '') === ''` instead of `rack === ''`.
+- **Rack String Normalization:** Always ensure rack strings are exactly `g_racksize` length by padding with dots (`padEnd`). Functions that return rack strings (like `takeLetters()`) should pad, and UI setters (like `setLetters()`) should normalize. This prevents off-by-one errors in rack manipulation.
 - **Dynamic CSS Updates:** When updating CSS dynamically (e.g., tileset, fonts), use separate `<style>` elements with unique IDs. Avoid concatenating multiple rules into one `textContent` update, as this wipes all other rules. See `index.html` for the pattern with `tileset-font-style` and `bonus-tiles-style`.
 - **Data Loading Pattern:** Prefer loading small data via `<script>` tags (e.g., `lang/emojis.js` setting `window.g_emojis`) over `fetch()` for JSON. Script tags are synchronous and more reliable on mobile browsers where fetch can fail intermittently due to caching or battery-saving modes.
 
@@ -156,7 +157,7 @@ The invite system replaces the old broadcast-based invites with a persistent Sup
 
 ### Session Persistence
 Multiplayer sessions use `localStorage['session_mp']` for persistence, while single-player uses `localStorage['session']`. Key patterns:
-- **Session mode tracking:** `localStorage['session_mode']` is `'mp'` or `'sp'`, but do not rely on it alone for resume decisions — always check for valid `session_mp` first.
+- **Session mode tracking:** `localStorage['session_mode']` is `'mp'` or `'sp'` and is now the **primary signal** for MP detection. On load, check `session_mode` first, then fall back to `session_mp` for legacy clients. Only clear `session_mp` after successful DB sync to ensure transition to DB-as-SSOT.
 - **On-load priority:** In `window.onload` (`src/events.js`), parse `session_mp` directly and check for valid `gameId` and `!isGameOver` before falling back to SP or fresh start.
 - **Periodic auto-save:** Use a 30-second interval (`g_mpAutoSaveTimer`) to keep `session_mp` fresh for mobile scenarios where visibility events may not fire reliably.
 - **Lifecycle events:** Handle `visibilitychange` (tab hide/visible), `pagehide` (beforeunload alternative for mobile), `beforeunload` (explicit unload), and `pageshow` (bfcache restore).
