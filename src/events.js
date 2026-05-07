@@ -103,18 +103,18 @@ window.onload = function() {
     // Restore exact previous mode/session from localStorage
     // Phase 3: Use session_mode as the lightweight signal for MP detection.
     // session_mp is no longer written for MP committed state (DB is SSOT).
-    var hasMultiplayerSession = false;
-    try {
-      var mpSession = JSON.parse(localStorage['session_mp'] || 'null');
-      hasMultiplayerSession = !!(mpSession && mpSession.gameId && !mpSession.isGameOver);
-    } catch (err) {
-      hasMultiplayerSession = false;
-    }
+    var sessionMode = localStorage['session_mode'];
+    var hasMultiplayerSession = (sessionMode === 'mp');
 
-    // If session_mode claims MP but session_mp is missing/invalid, reset it.
-    // This prevents broken reloads when session_mode was left stale.
-    if (!hasMultiplayerSession && localStorage['session_mode'] === 'mp') {
-      localStorage['session_mode'] = 'sp';
+    // session_mp legacy check for older clients still using it
+    if (!hasMultiplayerSession) {
+      try {
+        var mpSession = JSON.parse(localStorage['session_mp'] || 'null');
+        if (mpSession && mpSession.gameId && !mpSession.isGameOver) {
+          hasMultiplayerSession = true;
+          localStorage['session_mode'] = 'mp';
+        }
+      } catch (err) {}
     }
 
     var hasSinglePlayerSession = !!localStorage['session'];
