@@ -1099,14 +1099,22 @@ function RedipsUI() {
           // Update rack array for board->rack AND rack->rack moves
           var targetRidx = parseInt(id.substr(2));
           if (!isNaN(targetRidx) && self.racks[1]) {
-            self.racks[1] = self.racks[1].substr(0, targetRidx) + holds.letter + self.racks[1].substr(targetRidx + 1);
+            // Ensure rack string is correctly padded before substitution
+            var rack = self.racks[1].padEnd(self.racksize, '.');
+            self.racks[1] = rack.substr(0, targetRidx) + holds.letter + rack.substr(targetRidx + 1);
           }
           // If source was also a rack cell, clear the old position
           if (sourceId.charAt(0) === 'p') {
             var sourceRidx = parseInt(sourceId.substr(2));
             if (!isNaN(sourceRidx) && self.racks[1]) {
-              self.racks[1] = self.racks[1].substr(0, sourceRidx) + '.' + self.racks[1].substr(sourceRidx + 1);
+              // Ensure rack string is correctly padded before substitution
+              var rack = self.racks[1].padEnd(self.racksize, '.');
+              self.racks[1] = rack.substr(0, sourceRidx) + '.' + rack.substr(sourceRidx + 1);
             }
+          }
+          // Track local rack modification time to prevent stale DB sync from overwriting
+          if (typeof g_lastLocalRackChange !== 'undefined') {
+            g_lastLocalRackChange = Date.now();
           }
         }
       }
@@ -1614,7 +1622,26 @@ function RedipsUI() {
     if (DEBUG && typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
       console.log('[setLetters] player:', player, 'letters:', JSON.stringify(letters));
     }
+    
+    // Always pad/normalize rack string length to racksize
+    if (typeof letters === 'string') {
+      if (letters.length < self.racksize) {
+        letters = letters.padEnd(self.racksize, '.');
+      } else if (letters.length > self.racksize) {
+        letters = letters.substring(0, self.racksize);
+      }
+    }
     self.racks[player] = letters;
+
+    // Rack validation (always warn on corruption, even without DEBUG)
+    if (typeof letters !== 'string') {
+      console.warn('[RACK-VAL] setLetters received non-string:', typeof letters);
+    } else {
+      var invalidChar = letters.match(/[^a-zA-Z\*\. ]/);
+      if (invalidChar) {
+        console.warn('[RACK-VAL] Invalid char in rack:', invalidChar[0], 'rack:', letters);
+      }
+    }
     var cells = [];
     var ifprfx = (player === 1) ? self.plrRackId : self.oppRackId;
     var upper = letters.toUpperCase();
@@ -1780,6 +1807,9 @@ function RedipsUI() {
     if (typeof loadGlobalHighScores === 'function') {
       await loadGlobalHighScores();
     }
+    if (typeof repairMissingSessions === 'function') {
+      repairMissingSessions();
+    }
     var sLevels = '';
     for (var i = 1; i < 11; ++i) {
       sLevels += '<option' + (i == g_bui.level ? ' selected' : '') + '>' + i + '</option>';
@@ -1814,6 +1844,8 @@ function RedipsUI() {
     // Refresh in-game players from DB and start periodic refresh
     if (typeof refreshPlayersInGames === 'function') refreshPlayersInGames();
     if (typeof startLobbyRefresh === 'function') startLobbyRefresh();
+    // Periodically clean up stale games in the background
+    if (typeof cleanupStaleGamesFromClient === 'function') cleanupStaleGamesFromClient(24);
     // Save name
     localStorage.setItem('player_name', g_myName);
 

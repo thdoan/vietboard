@@ -1764,7 +1764,6 @@ function shufflePool() {
 
 //------------------------------------------------------------------------------
 function takeLetters(existing) {
-  var poolsize = g_letpool.length;
   var rack = existing.split('');
   // Fill in gaps first
   for (var i = 0; i < rack.length; ++i) {
@@ -1776,7 +1775,14 @@ function takeLetters(existing) {
   while (rack.length < g_racksize && g_letpool.length > 0) {
     rack.push(g_letpool.splice(0, 1)[0]);
   }
-  return rack.join('');
+  // Always pad with dots to ensure exactly g_racksize length
+  var rackStr = rack.join('');
+  if (rackStr.length < g_racksize) {
+    rackStr = rackStr.padEnd(g_racksize, '.');
+  } else if (rackStr.length > g_racksize) {
+    rackStr = rackStr.substring(0, g_racksize);
+  }
+  return rackStr;
 }
 
 window['init'] = init;
