@@ -393,24 +393,20 @@ async function mergeGlobalHighScores(remoteScores) {
 
       if (duplicateIndex !== -1) {
         var existing = unique[duplicateIndex];
-        // Merge session data preferring whichever has it
-        if (!existing.session && item.session) existing.session = item.session;
-        if (!existing.sessionId && item.sessionId) existing.sessionId = item.sessionId;
-        if (!existing.date && item.date) existing.date = item.date;
+        var merged = mergeDuplicateScoreEntries(existing, item);
+        unique[duplicateIndex] = merged;
 
         // Propagate playerId and name updates
-        if (playerId && !existing.playerId) {
-          existing.playerId = playerId;
-          if (rawName) existing.player = rawName;
-        } else if (playerId && existing.playerId && playerId === existing.playerId && rawName && existing.player !== rawName) {
-          // Same known player, different name. Prefer remote (i >= localList.length) unless it's the current user.
+        if (playerId && !merged.playerId) {
+          merged.playerId = playerId;
+          if (rawName) merged.player = rawName;
+        } else if (playerId && merged.playerId && playerId === merged.playerId && rawName && merged.player !== rawName) {
           if (playerId !== currentUserId && i >= localList.length) {
-            existing.player = rawName;
+            merged.player = rawName;
           }
-        } else if (!playerId && !existing.playerId && item.sessionId && existing.sessionId === item.sessionId && rawName && existing.player !== rawName) {
-          // Same session, no IDs. Prefer remote name.
+        } else if (!playerId && !merged.playerId && item.sessionId && merged.sessionId === item.sessionId && rawName && merged.player !== rawName) {
           if (i >= localList.length) {
-            existing.player = rawName;
+            merged.player = rawName;
           }
         }
         continue;
