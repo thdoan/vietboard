@@ -121,7 +121,8 @@ window.onload = function() {
 
     if (hasMultiplayerSession) {
       init('board', true);
-      g_isMultiplayer = true; // prevent SP first-turn timeout from firing during MP resume
+      g_isMultiplayer = true;
+      if (typeof renderTransientOverlays === 'function') renderTransientOverlays();
     } else if (hasSinglePlayerSession) {
       load(localStorage['session']);
     } else {

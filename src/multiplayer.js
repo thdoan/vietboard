@@ -119,6 +119,24 @@ let g_dbVersion = 0; // DB-as-SSOT: tracks games.version for optimistic concurre
 let g_lastDBGameState = null; // Last game state snapshot written to DB (centralized dedup)
 let g_dbWriteInProgress = false; // Guard to prevent syncGameStateFromDB from clobbering in-flight writes
 let g_deferredDBSync = false;    // Set when a DB sync is skipped due to active drag
+let g_deferredDbState = null;
+let g_rackSaveTimer = null;
+let g_rackFallbackDone = false;
+
+// Remote drag guard
+const REMOTE_DRAG_TIMEOUT_MS = 5000;
+const REMOTE_DRAG_COOLDOWN_MS = 400;
+let g_remoteDragging = false;
+let g_remoteDragToken = null;
+let g_remoteDragTimeout = null;
+let g_remoteDragCooldown = null;
+
+// Debug stats
+let g_deferredDbSyncs = 0;
+let g_remoteDragTimeoutUnlocks = 0;
+let g_remoteDragCooldownFlushes = 0;
+let g_overlayReapplies = 0;
+
 let g_resumeToast = null;
 let g_connectingToast = null;
 let g_isResuming = false;
@@ -1807,6 +1825,23 @@ function cleanupMultiplayerSession() {
 
   g_activeChannelType = null;
   g_activeGameId = null;
+  g_rackFallbackDone = false;
+
+  if (g_rackSaveTimer) {
+    clearTimeout(g_rackSaveTimer);
+    g_rackSaveTimer = null;
+  }
+
+  g_remoteDragging = false;
+  g_remoteDragToken = null;
+  if (g_remoteDragTimeout) {
+    clearTimeout(g_remoteDragTimeout);
+    g_remoteDragTimeout = null;
+  }
+  if (g_remoteDragCooldown) {
+    clearTimeout(g_remoteDragCooldown);
+    g_remoteDragCooldown = null;
+  }
 
   if (g_bui && g_bui.hideEmojiPicker) g_bui.hideEmojiPicker();
   applyNonGameButtonPolicy();
@@ -2095,7 +2130,7 @@ function initializeHostGame() {
   saveMultiplayerSession();
 
   // Write initial state to DB and subscribe to changes
-  createGameStateInDB().then(function() {
+  createGameStateInDB(myRack, oppRack).then(function() {
     subscribeToGameStateChanges();
   });
 
@@ -2299,6 +2334,8 @@ function sendDragEnd() {
   // Clear local sender-side cache
   g_cachedBoardRect = null;
   g_cachedLocalSourceRect = null;
+
+  scheduleSavePlayerRackToDB(true);
 }
 
 function sendDragPreview(fromId, toId, holds) {
@@ -2319,6 +2356,8 @@ function sendDragPreview(fromId, toId, holds) {
       points: holds && typeof holds.points !== 'undefined' ? holds.points : ''
     }
   });
+
+  scheduleSavePlayerRackToDB();
 }
 
 function sendDragSourceClear(sourceId) {
@@ -2333,6 +2372,8 @@ function sendDragSourceClear(sourceId) {
       sourceId: sourceId
     }
   });
+
+  scheduleSavePlayerRackToDB();
 }
 
 function cleanupDragGhosts() {
@@ -2478,10 +2519,69 @@ function applyDragSourceClear(payload) {
   }
 }
 
+function onRemoteDragStart(payload) {
+  g_remoteDragging = true;
+  g_remoteDragToken = payload.seq;
+  if (g_remoteDragTimeout) clearTimeout(g_remoteDragTimeout);
+  g_remoteDragTimeout = setTimeout(function() {
+    g_remoteDragging = false;
+    g_remoteDragToken = null;
+    g_remoteDragTimeout = null;
+    g_remoteDragTimeoutUnlocks++;
+    if (DEBUG) console.log('[DRAG-GUARD] Remote drag timeout expired');
+  }, REMOTE_DRAG_TIMEOUT_MS);
+  if (DEBUG) console.log('[DRAG-GUARD] Remote drag started, token:', payload.seq);
+}
+
+function onRemoteDragEnd(payload) {
+  if (g_remoteDragToken !== null && payload.seq !== g_remoteDragToken) {
+    if (DEBUG) console.log('[DRAG-GUARD] Drag end token mismatch, ignoring');
+    return;
+  }
+  g_remoteDragging = false;
+  g_remoteDragToken = null;
+  if (g_remoteDragTimeout) {
+    clearTimeout(g_remoteDragTimeout);
+    g_remoteDragTimeout = null;
+  }
+  g_remoteDragCooldown = setTimeout(function() {
+    g_remoteDragCooldown = null;
+    g_remoteDragCooldownFlushes++;
+    flushDeferredDbSync();
+  }, REMOTE_DRAG_COOLDOWN_MS);
+  if (DEBUG) console.log('[DRAG-GUARD] Remote drag ended, cooldown started');
+}
+
+function flushDeferredDbSync() {
+  if (DEBUG) console.log('[DRAG-GUARD] Flushing deferred DB sync');
+  syncGameStateFromDB().then(function() {
+    renderTransientOverlays();
+  });
+}
+
+function renderTransientOverlays() {
+  if (!g_bui || !g_bui.oppNewplays) return;
+  for (var cellId in g_bui.oppNewplays) {
+    var cell = el(cellId);
+    if (!cell) continue;
+    var ph = g_bui.oppNewplays[cellId];
+    var pts = (typeof ph.points === 'number') ? ph.points : (g_letscore[ph.letter] || 0);
+    renderOpponentBoardTile(cell, ph.letter || '', pts);
+  }
+  g_overlayReapplies++;
+  if (DEBUG) console.log('[OVERLAY] Re-applied', Object.keys(g_bui.oppNewplays).length, 'transient overlays');
+}
+
 function handleDragBroadcast(payload) {
   if (!g_isMultiplayer || !payload) {
     if (DEBUG) console.log('[DRAG] handleDragBroadcast skipped: mp=' + g_isMultiplayer);
     return;
+  }
+
+  if (payload.action === 'preview' || payload.action === 'clear') {
+    onRemoteDragStart(payload);
+  } else if (payload.end) {
+    onRemoteDragEnd(payload);
   }
 
   // Commands (preview, clear, end) execute unconditionally — they are idempotent one-shots
@@ -3071,6 +3171,9 @@ function saveMultiplayerSession() {
     // DB is the single source of truth for multiplayer game state.
     localStorage['session_mode'] = 'mp';
 
+    // Save authoritative rack to its own column
+    savePlayerRackToDB();
+
     // Sync to DB, but only if game state actually changed
     if (DEBUG && g_bui && g_bui.newplays) console.log('[JOKER] saveMultiplayerSession newplays:', JSON.stringify(g_bui.newplays));
     var currentGameState = buildGameStateSnapshot();
@@ -3183,8 +3286,6 @@ function buildGameStateSnapshot() {
     letpool: g_letpool,
     player1Id: g_isHost ? g_lobbyUserId : (g_opponentId || ''),
     player2Id: g_isHost ? (g_opponentId || '') : g_lobbyUserId,
-    player1Rack: g_isHost ? (g_bui.racks[1] || '') : (g_bui.racks[2] || ''),
-    player2Rack: g_isHost ? (g_bui.racks[2] || '') : (g_bui.racks[1] || ''),
     player1Score: g_isHost ? g_pscore : g_oscore,
     player2Score: g_isHost ? g_oscore : g_pscore,
     player1LastScore: g_isHost ? g_playerLastScore : g_opponentLastScore,
@@ -3196,16 +3297,22 @@ function buildGameStateSnapshot() {
   };
 }
 
-function createGameStateInDB() {
+function createGameStateInDB(rackA, rackB) {
   if (!window.supabaseClient || !g_gameId) return Promise.resolve(false);
   var state = buildGameStateSnapshot();
+  var a = typeof rackA === 'string' ? rackA : ((g_bui && g_bui.racks[1]) || '');
+  var b = typeof rackB === 'string' ? rackB : ((g_bui && g_bui.racks[2]) || '');
   return window.supabaseClient
     .rpc('create_game_state', {
       p_game_id: g_gameId,
       p_app_key: _dk(_hk),
       p_player_a_id: g_isHost ? g_lobbyUserId : (g_opponentId || ''),
       p_player_b_id: g_isHost ? (g_opponentId || '') : g_lobbyUserId,
-      p_initial_state: state
+      p_initial_state: state,
+      p_rack_a: a,
+      p_rack_b: b,
+      p_rack_a_count: a.replace(/\./g, '').length,
+      p_rack_b_count: b.replace(/\./g, '').length
     })
     .then(function(result) {
       if (result.error) {
@@ -3236,6 +3343,44 @@ function savePreviewToDB() {
   }, 200);
 }
 
+function scheduleSavePlayerRackToDB(immediate) {
+  if (g_rackSaveTimer) {
+    clearTimeout(g_rackSaveTimer);
+    g_rackSaveTimer = null;
+  }
+  if (immediate) {
+    savePlayerRackToDB();
+  } else {
+    g_rackSaveTimer = setTimeout(function() {
+      g_rackSaveTimer = null;
+      savePlayerRackToDB();
+    }, 150);
+  }
+}
+
+function savePlayerRackToDB() {
+  if (!window.supabaseClient || !g_gameId || !g_isMultiplayer) return;
+  if (g_rackSaveTimer) {
+    clearTimeout(g_rackSaveTimer);
+    g_rackSaveTimer = null;
+  }
+  var myRack = (g_bui && g_bui.racks[1]) || '';
+  var rackCount = myRack.replace(/\./g, '').length;
+  window.supabaseClient.rpc('update_player_rack', {
+    p_app_key: _dk(_hk),
+    p_game_id: g_gameId,
+    p_player_id: g_lobbyUserId,
+    p_rack: myRack,
+    p_rack_count: rackCount
+  }).then(function(result) {
+    if (result.error && DEBUG) {
+      console.warn('[DB] update_player_rack error:', result.error);
+    }
+  }).catch(function(err) {
+    if (DEBUG) console.warn('[DB] savePlayerRackToDB failed:', err);
+  });
+}
+
 function updateGameStateInDB(expectedVersion) {
   if (!window.supabaseClient || !g_gameId) return Promise.resolve(false);
   var state = buildGameStateSnapshot();
@@ -3264,7 +3409,7 @@ function fetchGameStateFromDB() {
   if (!window.supabaseClient || !g_gameId) return Promise.resolve(null);
   return window.supabaseClient
     .from('games')
-    .select('state, version, updated_at')
+    .select('state, version, updated_at, rack_a, rack_b, rack_a_count, rack_b_count')
     .eq('id', g_gameId)
     .single()
     .then(function(result) {
@@ -3306,14 +3451,45 @@ function applyGameStateFromDB(dbState) {
     if (typeof s.player1LastScore === 'number') g_opponentLastScore = s.player1LastScore;
   }
 
-  // Racks (perspective-neutral: player1 = host, player2 = guest)
+  // Racks: new per-player columns are authoritative
   if (g_bui) {
+    var myRack = null;
+    var oppRackCount = null;
+
     if (g_isHost) {
-      if (typeof s.player1Rack === 'string') g_bui.setPlayerRack(s.player1Rack);
-      if (typeof s.player2Rack === 'string') g_bui.setOpponentRack(s.player2Rack);
+      myRack = dbState.rack_a;
+      oppRackCount = dbState.rack_b_count;
     } else {
-      if (typeof s.player2Rack === 'string') g_bui.setPlayerRack(s.player2Rack);
-      if (typeof s.player1Rack === 'string') g_bui.setOpponentRack(s.player1Rack);
+      myRack = dbState.rack_b;
+      oppRackCount = dbState.rack_a_count;
+    }
+
+    // Local player rack: new columns authoritative, fallback once to legacy JSON
+    if (typeof myRack === 'string') {
+      g_bui.setPlayerRack(myRack);
+    } else if (!g_rackFallbackDone) {
+      if (g_isHost) {
+        if (typeof s.player1Rack === 'string') g_bui.setPlayerRack(s.player1Rack);
+      } else {
+        if (typeof s.player2Rack === 'string') g_bui.setPlayerRack(s.player2Rack);
+      }
+      g_rackFallbackDone = true;
+    }
+
+    // Opponent rack: render from count columns only; skip during remote drag/cooldown
+    if (!g_remoteDragging && !g_remoteDragCooldown) {
+      if (typeof oppRackCount === 'number' && oppRackCount >= 0 && oppRackCount <= g_racksize) {
+        var placeholder = 'x';
+        var rackStr = placeholder.repeat(oppRackCount).padEnd(g_racksize, '.');
+        g_bui.setOpponentRack(rackStr);
+      } else {
+        // Fallback to legacy JSON
+        if (g_isHost) {
+          if (typeof s.player2Rack === 'string') g_bui.setOpponentRack(s.player2Rack);
+        } else {
+          if (typeof s.player1Rack === 'string') g_bui.setOpponentRack(s.player1Rack);
+        }
+      }
     }
   }
 
@@ -3426,15 +3602,8 @@ function detectStateMismatches(dbState) {
       mismatches.push('turn: DB=' + s.turnPlayerId + ' localMyTurn=' + g_isMyTurn);
     }
   }
-  // Compare racks
-  if (g_bui) {
-    if (typeof s.player1Rack === 'string' && s.player1Rack !== g_bui.racks[1]) {
-      mismatches.push('player1Rack');
-    }
-    if (typeof s.player2Rack === 'string' && s.player2Rack !== g_bui.racks[2]) {
-      mismatches.push('player2Rack');
-    }
-  }
+  // Racks are no longer in JSON state (per-player columns are authoritative)
+  // Skip rack mismatch detection
 
   return mismatches;
 }
@@ -3514,11 +3683,18 @@ function isDragInProgress() {
 }
 
 function maybeSyncGameStateFromDB(reason) {
+  if (g_remoteDragging || g_remoteDragCooldown) {
+    if (DEBUG) console.log('[DB] Remote drag active/cooldown, deferring sync:', reason);
+    g_deferredDBSync = true;
+    g_deferredDbSyncs++;
+    return;
+  }
   if (!isDragInProgress()) {
     syncGameStateFromDB();
   } else {
-    if (DEBUG) console.log('[DB] Drag in progress, deferring sync:', reason);
+    if (DEBUG) console.log('[DB] Local drag in progress, deferring sync:', reason);
     g_deferredDBSync = true;
+    g_deferredDbSyncs++;
   }
 }
 
@@ -3541,8 +3717,17 @@ function syncGameStateFromDB() {
       g_dbVersion = dbData.version;
     }
 
+    // Preserve transient opponent previews before DB application may wipe them
+    var savedOppNewplays = (g_bui && g_bui.oppNewplays) ? JSON.parse(JSON.stringify(g_bui.oppNewplays)) : {};
+
     // Apply committed state from DB
     applyGameStateFromDB(dbData);
+
+    // Restore opponent previews that DB sync may have wiped
+    if (g_bui) {
+      g_bui.oppNewplays = savedOppNewplays;
+    }
+    renderTransientOverlays();
 
     // Update lastDBSnapshot using LOCAL snapshot format
     // (DB JSONB may have different property ordering than local objects)
