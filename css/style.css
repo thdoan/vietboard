@@ -801,14 +801,16 @@ table.board td .drag,
 }
 #score header .icons {
   position: absolute;
-  top: 0.5rem;
+  top: 0;
   left: 0;
   width: 100%;
+  background: rgb(var(--rgb-gray-dark));
   box-shadow:
     0 1px 0 rgba(0, 0, 0, 0.5),        /* dark groove shadow */
     0 2px 0 rgba(255, 255, 255, 0.08); /* faint light edge below */
   display: flex;
   justify-content: space-evenly;
+  padding-top: 0.5rem;
   transform: translateX(-100%);
 }
 #score header .icon {
