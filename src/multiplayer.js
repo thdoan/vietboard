@@ -41,14 +41,10 @@ if (!g_myName) {
   // Real fallback stored immediately — never expose "Generating..." to high scores
   g_myName = generateUniquePlayerName();
   localStorage.setItem('player_name', g_myName);
-  if (DEBUG) console.log('Generated fallback player_name:', g_myName);
+  if (DEBUG) console.log('Generated temporary fallback player_name:', g_myName);
 
   // Custom Google Apps Script Random Username Generator
   async function generateNickname() {
-    // Basic randInt implementation since we might not have access to the UI one directly if it's not global yet, but engine.js has randInt? Wait, randInt is in ui.js which is loaded later.
-    // We will just use Math.random here.
-    const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
-    const sRandInt = (+new Date() + '').slice(-randInt(2, 4));
     let response = Object.create(null);
     let sNickname;
 
@@ -59,15 +55,16 @@ if (!g_myName) {
     }
 
     if (response.ok) {
-      sNickname = await response.text() + sRandInt;
+      sNickname = await response.text() + (+new Date() + '').slice(-randInt(2, 4));
     } else { // Fallback
       if (DEBUG) console.warn(t('Failed to generate nickname.'), response.status || '', '\n' + t('Using fallback method...'));
-      sNickname = t('Player') + '_' + sRandInt;
+      sNickname = g_myName;
     }
 
     var oldName = g_myName;
     g_myName = sNickname;
     localStorage.setItem('player_name', g_myName);
+    if (DEBUG) console.log('Generated player_name:', g_myName);
 
     // Rename any local high scores that used the old fallback name and re-sync
     if (oldName !== g_myName) {
@@ -273,14 +270,14 @@ function validatePlayerName(desiredName) {
 }
 
 function generateUniquePlayerName() {
-  var base = t('Player') + '_' + Math.floor(Math.random() * 10000);
+  var base = 'Player_' + Math.round((+new Date() + '').slice(-5) * Math.random());
   var existing = getKnownPlayerNames();
   var lower = base.toLowerCase();
   if (!existing[lower]) return base;
   var suffix = 2;
   var candidate = base + ' (' + suffix + ')';
   while (existing[candidate.toLowerCase()] && suffix < 1000) {
-    suffix++;
+    ++suffix;
     candidate = base + ' (' + suffix + ')';
   }
   return candidate.substring(0, 32);
@@ -2476,11 +2473,11 @@ function renderCommittedBoard() {
       var cellId = 'c' + x + '_' + y;
       var cell = el(cellId);
       if (!cell) continue;
-      
+
       // Safety: check if this cell has a preview tile
       var hasLocalPreview = g_bui && g_bui.newplays && g_bui.newplays[cellId];
       var hasOpponentPreview = g_bui && g_bui.oppNewplays && g_bui.oppNewplays[cellId];
-      
+
       var char = boardColumn[y];
       if (char && char !== '' && typeof char !== 'undefined') {
         var tClass = boardTypeColumn[y] === 1 ? 't1' : 't2';
@@ -2596,7 +2593,7 @@ function flushDeferredDbSync() {
 
 function renderTransientOverlays() {
   if (!g_bui) return;
-  
+
   // 1. Render local player previews (newplays)
   if (g_bui.newplays) {
     for (var cellId in g_bui.newplays) {
@@ -2605,7 +2602,7 @@ function renderTransientOverlays() {
       var ph = g_bui.newplays[cellId];
       var pts = (typeof ph.points === 'number') ? ph.points : (g_letscore[ph.letter] || 0);
       renderTile(cell, ph.letter || '', pts, 't1');
-      
+
       // Re-open letter picker if restored preview is an unresolved joker
       if (ph.letter === '*' && typeof g_bui.showLettersModal === 'function') {
         g_bui.showLettersModal(cellId);
@@ -2625,9 +2622,9 @@ function renderTransientOverlays() {
   }
 
   g_overlayReapplies++;
-  mpLog('OVERLAY', 'log', 'Re-applied transient overlays', { 
+  mpLog('OVERLAY', 'log', 'Re-applied transient overlays', {
     local: g_bui.newplays ? Object.keys(g_bui.newplays).length : 0,
-    opponent: g_bui.oppNewplays ? Object.keys(g_bui.oppNewplays).length : 0 
+    opponent: g_bui.oppNewplays ? Object.keys(g_bui.oppNewplays).length : 0
   });
 }
 
@@ -2707,13 +2704,8 @@ function handleDragBroadcast(payload) {
     g_dragGhost.id = 'mp-drag-ghost';
     g_dragGhost.className = 'drag t2 mp-ghost';
 
-    // Core styling for translate3d efficiency
-    g_dragGhost.style.position = 'fixed';
-    g_dragGhost.style.left = '0';
-    g_dragGhost.style.top = '0';
-    g_dragGhost.style.zIndex = '10000';
-    g_dragGhost.style.pointerEvents = 'none';
-    g_dragGhost.style.transition = 'none'; // No transition on creation — snap instantly to first position
+    // No transition on creation — snap instantly to first position
+    g_dragGhost.style.transition = 'none';
 
     g_dragGhost.innerHTML = SPACER;
     g_dragGhost.style.width = gw + 'px';
@@ -3319,7 +3311,7 @@ function saveMultiplayerSession() {
     if (DEBUG && g_bui && g_bui.newplays) mpLog('JOKER', 'log', 'saveMultiplayerSession newplays', g_bui.newplays);
     var currentGameState = buildGameStateSnapshot();
     var currentGameStateJson = JSON.stringify(currentGameState);
-    
+
     // Check if turn changed (last snapshot might have had different turn)
     var lastTurnId = null;
     try {
@@ -3694,18 +3686,18 @@ function subscribeToGameStateChanges() {
       filter: 'id=eq.' + g_gameId
     }, function(payload) {
       if (DEBUG) console.log('[DB] Realtime update received for game:', g_gameId);
-      
+
       // Debounce sync to allow broadcast/local writes to settle
       if (g_realtimeSyncTimer) clearTimeout(g_realtimeSyncTimer);
       g_realtimeSyncTimer = setTimeout(function() {
         g_realtimeSyncTimer = null;
-        
+
         var dbVersion = payload.new && typeof payload.new.version === 'number' ? payload.new.version : 0;
         var mismatches = detectStateMismatches(payload.new);
 
         if (dbVersion > g_dbVersion || mismatches.length > 0) {
-          mpLog('SYNC', 'log', 'Realtime sync triggered', { 
-            dbVersion: dbVersion, 
+          mpLog('SYNC', 'log', 'Realtime sync triggered', {
+            dbVersion: dbVersion,
             localVersion: g_dbVersion,
             mismatches: mismatches
           });
@@ -3843,7 +3835,7 @@ function syncGameStateFromDB() {
     updateGameInfoLabels();
 
     mpLog('SYNC', 'log', 'State synced from DB', { version: g_dbVersion, overlaysReapplied: Object.keys(savedOppNewplays).length });
-    
+
     // Update g_lastDBGameState after successful sync to prevent redundant writes
     g_lastDBGameState = JSON.stringify(buildGameStateSnapshot());
 
@@ -4001,8 +3993,8 @@ document.addEventListener('appReady', function() {
             if (synced) {
               subscribeToGameStateChanges();
               g_isResuming = false;
-              // DEFERRED removal: only remove session_mp AFTER we've successfully 
-              // transitioned to DB-as-SSOT. This ensures session_mode=mp is the 
+              // DEFERRED removal: only remove session_mp AFTER we've successfully
+              // transitioned to DB-as-SSOT. This ensures session_mode=mp is the
               // only signal needed for subsequent reloads.
               localStorage.removeItem('session_mp');
               if (DEBUG) console.log('[DB] Reconnected and synced from DB, purged session_mp');

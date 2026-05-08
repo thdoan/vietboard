@@ -1738,7 +1738,6 @@ function placeOnBoard(word, animCallback) {
     }
   }
 
-  hideModal();
   g_bui.playOpponentMove(placements, animCallback);
   if (g_board_empty) {
     g_board_empty = false;
