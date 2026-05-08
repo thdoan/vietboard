@@ -27,10 +27,7 @@ The codebase is structured to separate game logic from the user interface:
 The project can be run by opening `index.html` directly in a modern web browser. It can also be served via `http-server --cors -c-1` in WSL.
 
 ### Testing
-End-to-end tests are implemented using Puppeteer.
-```bash
-npm test
-```
+Since WSL environment does not allow automated browser testing, manual testing is recommended. Use the browser's developer tools to monitor console logs, network requests, and localStorage for debugging. Skip tests inside `src/tests/`.
 
 ### Build Process (Windows only)
 A production build (minified and concatenated) can be generated using `build.bat`.
