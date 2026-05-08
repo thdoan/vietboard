@@ -31,35 +31,42 @@ node scripts/minify.js css css/style.css -o play/css/styles.min.css
 # ---------------------------------------------------------------------------
 echo "[4/8] Bundling language files..."
 node scripts/minify.js js \
+  lang/vi_letters.js \
   lang/vi_wordlist.js \
   lang/vi_defs.js \
-  lang/vi_letters.js \
   lang/emojis.js \
   -o play/js/lang.min.js
 
 # ---------------------------------------------------------------------------
-# 5. Prepare production engine.js (increase bag size)
+# 5. Prepare production engine.js
 # ---------------------------------------------------------------------------
-echo "[5/8] Preparing production engine.js..."
+echo "[5/8] Preparing production source files..."
 TMP_ENGINE=$(mktemp)
 cp src/engine.js "$TMP_ENGINE"
+# Disable debug mode
 sed -i 's/const DEBUG = true/const DEBUG = false/' "$TMP_ENGINE"
+# Reset bag size
 sed -i 's/g_tiles_in_bag = 20/g_tiles_in_bag = 200/' "$TMP_ENGINE"
+
+TMP_MULTIPLAYER=$(mktemp)
+cp src/multiplayer.js "$TMP_MULTIPLAYER"
+sed -i '/^[[:space:]]*mpLog(/d' "$TMP_MULTIPLAYER"
 
 # ---------------------------------------------------------------------------
 # 6. Bundle + minify application source files
 # ---------------------------------------------------------------------------
 echo "[6/8] Bundling application files..."
 node scripts/minify.js js \
-  src/multiplayer.js \
   src/redipsdrag.js \
   src/bonuses.js \
   src/ui.js \
   "$TMP_ENGINE" \
+  "$TMP_MULTIPLAYER" \
   src/events.js \
   src/changelog.js \
   -o play/js/app.min.js
-rm -f "$TMP_ENGINE"
+# Remove temporary files
+rm -f "$TMP_ENGINE" "$TMP_MULTIPLAYER"
 
 # ---------------------------------------------------------------------------
 # 7. Copy static assets
@@ -82,19 +89,19 @@ echo "[8/8] Transforming index.html for production..."
 sed -i "s|css/style.css|css/styles.min.css?v=$TIMESTAMP|" play/index.html
 
 # Replace one lang script tag with the bundled version, delete the rest
-sed -i "s|<script src=\"lang/vi_wordlist.js\"></script>|<script src=\"js/lang.min.js?v=$TIMESTAMP\"></script>|" play/index.html
-sed -i '/<script src="lang\/emojis.js"><\/script>/d' play/index.html
+sed -i "s|<script src=\"lang/vi_letters.js\"></script>|<script src=\"js/lang.min.js?v=$TIMESTAMP\"></script>|" play/index.html
+sed -i '/<script src="lang\/vi_wordlist.js"><\/script>/d' play/index.html
 sed -i '/<script src="lang\/vi_defs.js"><\/script>/d' play/index.html
-sed -i '/<script src="lang\/vi_letters.js"><\/script>/d' play/index.html
+sed -i '/<script src="lang\/emojis.js"><\/script>/d' play/index.html
 
 # Replace one src script tag with the bundled version, delete the rest
 sed -i "s|<script src=\"src/redipsdrag.js\"></script>|<script src=\"js/app.min.js?v=$TIMESTAMP\"></script>|" play/index.html
 sed -i '/<script src="src\/bonuses.js"><\/script>/d' play/index.html
-sed -i '/<script src="src\/changelog.js"><\/script>/d' play/index.html
-sed -i '/<script src="src\/engine.js"><\/script>/d' play/index.html
-sed -i '/<script src="src\/events.js"><\/script>/d' play/index.html
-sed -i '/<script src="src\/multiplayer.js"><\/script>/d' play/index.html
 sed -i '/<script src="src\/ui.js"><\/script>/d' play/index.html
+sed -i '/<script src="src\/engine.js"><\/script>/d' play/index.html
+sed -i '/<script src="src\/multiplayer.js"><\/script>/d' play/index.html
+sed -i '/<script src="src\/events.js"><\/script>/d' play/index.html
+sed -i '/<script src="src\/changelog.js"><\/script>/d' play/index.html
 
 echo "=== Build complete ==="
 echo "Output: play/"
