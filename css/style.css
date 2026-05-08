@@ -633,6 +633,7 @@ table.board td:after,
   left: 0;
   background-color: rgb(var(--rgb-tile-ghost));
   pointer-events: none;
+  z-index: 999;
 }
 
 table.board td .drag,
