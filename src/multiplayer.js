@@ -294,7 +294,9 @@ initSupabase();
 
 function mpLog(category, level, msg, data) {
   if (!DEBUG) return;
-  var prefix = '[' + category + ']';
+  var now = new Date();
+  var ts = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+  var prefix = '[' + ts + '] [' + category + ']';
   if (data) console[level](prefix, msg, data);
   else console[level](prefix, msg);
 }
@@ -2369,7 +2371,7 @@ function sendDragEnd() {
 
 function sendDragPreview(fromId, toId, holds) {
   if (!g_isMultiplayer || !g_channel || !g_isMyTurn) {
-    if (DEBUG) console.log('[DRAG] sendDragPreview skipped: mp=' + g_isMultiplayer + ' ch=' + !!g_channel + ' turn=' + g_isMyTurn);
+    mpLog('DRAG', 'log', 'sendDragPreview skipped: mp=' + g_isMultiplayer + ' ch=' + !!g_channel + ' turn=' + g_isMyTurn);
     return;
   }
 
@@ -2495,7 +2497,7 @@ function renderCommittedBoard() {
 
 function applyDragPreview(payload) {
   if (!payload || !payload.toId) {
-    if (DEBUG) console.log('[DRAG] applyDragPreview skipped: missing payload or toId');
+    mpLog('DRAG', 'log', 'applyDragPreview skipped: missing payload or toId');
     return;
   }
 
@@ -2503,11 +2505,11 @@ function applyDragPreview(payload) {
   var toCell = el(toId);
 
   if (!toCell) {
-    if (DEBUG) console.log('[DRAG] applyDragPreview skipped: cell not found for', toId);
+    mpLog('DRAG', 'log', 'applyDragPreview skipped: cell not found for ' + toId);
     return;
   }
 
-  if (DEBUG) console.log('[DRAG] applyDragPreview rendering at', toId, 'letter:', payload.letter);
+  mpLog('DRAG', 'log', 'applyDragPreview rendering at ' + toId + ' letter: ' + payload.letter);
 
   // Clear source cell if provided (extra safety)
   if (payload.fromId) {
@@ -2640,7 +2642,7 @@ function logDebugStats() {
 
 function handleDragBroadcast(payload) {
   if (!g_isMultiplayer || !payload) {
-    if (DEBUG) console.log('[DRAG] handleDragBroadcast skipped: mp=' + g_isMultiplayer);
+    mpLog('DRAG', 'log', 'handleDragBroadcast skipped: mp=' + g_isMultiplayer);
     return;
   }
 
@@ -2652,7 +2654,7 @@ function handleDragBroadcast(payload) {
 
   // Commands (preview, clear, end) execute unconditionally — they are idempotent one-shots
   if (payload.action === 'preview') {
-    if (DEBUG) console.log('[DRAG] Received preview broadcast:', payload.fromId, '->', payload.toId, 'letter:', payload.letter);
+    mpLog('DRAG', 'log', 'Received preview broadcast: ' + payload.fromId + ' -> ' + payload.toId + ' letter: ' + payload.letter);
     applyDragPreview(payload);
     return;
   }
@@ -2674,7 +2676,7 @@ function handleDragBroadcast(payload) {
   // with reload detection (sender reset causes seq to drop significantly)
   if (typeof payload.seq === 'number') {
     if (g_lastRemotePositionSeq > 0 && payload.seq < g_lastRemotePositionSeq - 10) {
-      if (DEBUG) console.log('[DRAG] Position seq reset detected, accepting new sequence');
+      mpLog('DRAG', 'log', 'Position seq reset detected, accepting new sequence');
       g_lastRemotePositionSeq = -1;
     }
     if (payload.seq <= g_lastRemotePositionSeq) return;
@@ -3336,15 +3338,15 @@ function saveMultiplayerSession() {
         if (success) {
           g_dbVersion += 1;
           g_lastDBGameState = currentGameStateJson;
-          if (DEBUG) console.log('[DB] saveMultiplayerSession synced, new version:', g_dbVersion);
+          mpLog('DB', 'log', 'saveMultiplayerSession synced, new version: ' + g_dbVersion);
         } else {
-          if (DEBUG) console.warn('[DB] saveMultiplayerSession sync failed (version conflict), fetching current version and retrying...');
+          mpLog('DB', 'warn', 'saveMultiplayerSession sync failed (version conflict), fetching current version and retrying...');
           // Fetch current state and retry once
           fetchGameStateFromDB().then(function(dbData) {
             if (dbData && typeof dbData.version === 'number') {
               g_dbVersion = dbData.version;
               g_lastDBGameState = JSON.stringify(dbData.state || {});
-              if (DEBUG) console.log('[DB] Updated g_dbVersion to:', g_dbVersion, 'retrying write...');
+              mpLog('DB', 'log', 'Updated g_dbVersion to: ' + g_dbVersion + ', retrying write...');
               // Retry the write with updated version
               return updateGameStateInDB(g_dbVersion);
             }
@@ -3353,9 +3355,9 @@ function saveMultiplayerSession() {
             if (retrySuccess) {
               g_dbVersion += 1;
               g_lastDBGameState = currentGameStateJson;
-              if (DEBUG) console.log('[DB] Retry succeeded, new version:', g_dbVersion);
+              mpLog('DB', 'log', 'Retry succeeded, new version: ' + g_dbVersion);
             } else {
-              if (DEBUG) console.warn('[DB] Retry failed, will retry on next save');
+              mpLog('DB', 'warn', 'Retry failed, will retry on next save');
             }
           });
         }
@@ -3365,7 +3367,7 @@ function saveMultiplayerSession() {
         g_dbWriteInProgress = false;
       });
     } else if (g_dbVersion > 0 && DEBUG) {
-      if (DEBUG) console.log('[DB] Game state unchanged, skipping DB write');
+      mpLog('DB', 'log', 'Game state unchanged, skipping DB write');
     }
   }
 }
@@ -3408,7 +3410,7 @@ function buildGameStateSnapshot() {
   // Convert local preview tiles to perspective-neutral
   var myNewplays = (g_bui && g_bui.newplays) ? g_bui.newplays : {};
   var oppNewplays = (g_bui && g_bui.oppNewplays) ? g_bui.oppNewplays : {};
-  if (DEBUG) console.log('[JOKER] buildGameStateSnapshot myNewplays:', JSON.stringify(myNewplays), 'oppNewplays:', JSON.stringify(oppNewplays));
+  mpLog('JOKER', 'log', 'buildGameStateSnapshot myNewplays: ' + JSON.stringify(myNewplays) + ' oppNewplays: ' + JSON.stringify(oppNewplays));
   var preview = {};
   if (g_isHost) {
     preview.player1 = myNewplays;
@@ -3453,18 +3455,18 @@ function createGameStateInDB() {
     })
     .then(function(result) {
       if (result.error) {
-        if (DEBUG) console.warn('[DB] create_game_state error:', result.error);
+        mpLog('DB', 'warn', 'create_game_state error', result.error);
         return false;
       }
       if (result.data) {
         g_dbVersion = 1;
         g_lastDBGameState = JSON.stringify(state);
-        if (DEBUG) console.log('[DB] create_game_state success, version set to:', g_dbVersion);
+        mpLog('DB', 'log', 'create_game_state success, version set to: ' + g_dbVersion);
       }
       return result.data;
     })
     .catch(function(err) {
-      if (DEBUG) console.warn('[DB] create_game_state failed:', err);
+      mpLog('DB', 'warn', 'create_game_state failed', err);
       return false;
     });
 }
@@ -3492,14 +3494,14 @@ function updateGameStateInDB(expectedVersion) {
     })
     .then(function(result) {
       if (result.error) {
-        if (DEBUG) console.warn('[DB] update_game_state error:', result.error);
+        mpLog('DB', 'warn', 'update_game_state error', result.error);
         return false;
       }
-      if (DEBUG) console.log('[DB] update_game_state result:', result.data);
+      mpLog('DB', 'log', 'update_game_state result', result.data);
       return result.data;
     })
     .catch(function(err) {
-      if (DEBUG) console.warn('[DB] update_game_state failed:', err);
+      mpLog('DB', 'warn', 'update_game_state failed', err);
       return false;
     });
 }
@@ -3513,14 +3515,14 @@ function fetchGameStateFromDB() {
     .single()
     .then(function(result) {
       if (result.error) {
-        if (DEBUG) console.warn('[DB] fetch game state error:', result.error);
+        mpLog('DB', 'warn', 'fetch game state error', result.error);
         return null;
       }
-      if (DEBUG) console.log('[DB] fetched game state version:', result.data.version);
+      mpLog('DB', 'log', 'fetched game state version: ' + result.data.version);
       return result.data;
     })
     .catch(function(err) {
-      if (DEBUG) console.warn('[DB] fetch game state failed:', err);
+      mpLog('DB', 'warn', 'fetch game state failed', err);
       return null;
     });
 }
@@ -3685,7 +3687,7 @@ function subscribeToGameStateChanges() {
       table: 'games',
       filter: 'id=eq.' + g_gameId
     }, function(payload) {
-      if (DEBUG) console.log('[DB] Realtime update received for game:', g_gameId);
+      mpLog('DB', 'log', 'Realtime update received for game: ' + g_gameId);
 
       // Debounce sync to allow broadcast/local writes to settle
       if (g_realtimeSyncTimer) clearTimeout(g_realtimeSyncTimer);
@@ -3703,12 +3705,12 @@ function subscribeToGameStateChanges() {
           });
           maybeSyncGameStateFromDB('realtime');
         } else if (DEBUG) {
-          console.log('[DB] Realtime update skipped, state matches local');
+          mpLog('DB', 'log', 'Realtime update skipped, state matches local');
         }
       }, REALTIME_SYNC_DEBOUNCE_MS);
     })
     .subscribe(function(status) {
-      if (DEBUG) console.log('[DB] Game state subscription status:', status);
+      mpLog('DB', 'log', 'Game state subscription status: ' + status);
     });
 }
 
@@ -3725,14 +3727,14 @@ function cleanupStaleGamesFromClient(maxAgeHours) {
     .rpc('cleanup_stale_games', { p_max_age_hours: maxAgeHours || 24 })
     .then(function(result) {
       if (result.error) {
-        if (DEBUG) console.warn('[DB] cleanup_stale_games error:', result.error);
+        mpLog('DB', 'warn', 'cleanup_stale_games error', result.error);
         return 0;
       }
-      if (DEBUG && result.data > 0) console.log('[DB] cleaned up stale games:', result.data);
+      if (result.data > 0) mpLog('DB', 'log', 'cleaned up stale games: ' + result.data);
       return result.data || 0;
     })
     .catch(function(err) {
-      if (DEBUG) console.warn('[DB] cleanup_stale_games failed:', err);
+      mpLog('DB', 'warn', 'cleanup_stale_games failed', err);
       return 0;
     });
 }
@@ -3746,14 +3748,14 @@ function deleteGameStateFromDB(gameId) {
     })
     .then(function(result) {
       if (result.error) {
-        if (DEBUG) console.warn('[DB] delete game state error:', result.error);
+        mpLog('DB', 'warn', 'delete game state error', result.error);
         return false;
       }
-      if (DEBUG) console.log('[DB] deleted game state for:', gameId);
+      mpLog('DB', 'log', 'deleted game state for: ' + gameId);
       return result.data;
     })
     .catch(function(err) {
-      if (DEBUG) console.warn('[DB] delete game state failed:', err);
+      mpLog('DB', 'warn', 'delete game state failed', err);
       return false;
     });
 }
@@ -3788,7 +3790,7 @@ function syncGameStateFromDB() {
 
   return fetchGameStateFromDB().then(function(dbData) {
     if (!dbData || !dbData.state) {
-      if (DEBUG) console.warn('[DB] No state found in DB for game:', g_gameId);
+      mpLog('DB', 'warn', 'No state found in DB for game: ' + g_gameId);
       return false;
     }
 
@@ -3905,7 +3907,7 @@ function resumeFromInvite(invite) {
     // Fetch authoritative state from DB instead of requesting via socket
     syncGameStateFromDB().then(function(synced) {
       if (synced) {
-        if (DEBUG) console.log('[DB] resumeFromInvite synced from DB');
+        mpLog('DB', 'log', 'resumeFromInvite synced from DB');
         subscribeToGameStateChanges();
         g_isResuming = false;
         dismissResumeToast();
@@ -3978,7 +3980,7 @@ document.addEventListener('appReady', function() {
         g_bui.setTilesLeft((g_letpool || []).length);
 
         renderCommittedBoard();
-        if (DEBUG) console.log('[JOKER] localStorage restore newplays:', JSON.stringify(mpData.newplays));
+        mpLog('JOKER', 'log', 'localStorage restore newplays: ' + JSON.stringify(mpData.newplays));
         g_bui.newplays = mpData.newplays || {};
         g_bui.makeTilesFixed();
         updateTurnIndicator();
@@ -3997,9 +3999,9 @@ document.addEventListener('appReady', function() {
               // transitioned to DB-as-SSOT. This ensures session_mode=mp is the
               // only signal needed for subsequent reloads.
               localStorage.removeItem('session_mp');
-              if (DEBUG) console.log('[DB] Reconnected and synced from DB, purged session_mp');
+              mpLog('DB', 'log', 'Reconnected and synced from DB, purged session_mp');
             } else {
-              if (DEBUG) console.warn('[DB] Sync failed during resume, keeping session_mp as backup');
+              mpLog('DB', 'warn', 'Sync failed during resume, keeping session_mp as backup');
               g_bui.toast(t('Game not found'), 4000);
               cleanupMultiplayerSession();
             }
@@ -4221,7 +4223,7 @@ window.addEventListener('beforeunload', function() {
 // Sync from DB when network comes back online
 window.addEventListener('online', function() {
   if (g_isMultiplayer && !g_isGameOver) {
-    if (DEBUG) console.log('[DB] Network came online, syncing game state...');
+    mpLog('DB', 'log', 'Network came online, syncing game state...');
     maybeSyncGameStateFromDB('online');
   }
 });
