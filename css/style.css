@@ -620,7 +620,6 @@ table.board td:after,
   line-height: 1.1;
   opacity: 0.9;
   padding-top: 2px;
-  pointer-events: none;
   text-align: center;
   z-index: 50;
 }
@@ -629,6 +628,7 @@ table.board td:after,
   top: 0;
   left: 0;
   background-color: rgb(var(--rgb-tile-ghost));
+  pointer-events: none;
 }
 
 table.board td .drag,
