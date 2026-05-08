@@ -1638,7 +1638,7 @@ function RedipsUI() {
     if (typeof letters !== 'string') {
       console.warn('[RACK-VAL] setLetters received non-string:', typeof letters);
     } else {
-      var invalidChar = letters.match(/[^a-zA-Z\*\. ]/);
+      var invalidChar = letters.match(/[^\p{L}\*\. ]/u);
       if (invalidChar) {
         console.warn('[RACK-VAL] Invalid char in rack:', invalidChar[0], 'rack:', letters);
       }
