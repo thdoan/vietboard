@@ -66,7 +66,7 @@ if (!g_myName) {
     }
 
     var oldName = g_myName;
-    g_myName = generateUniquePlayerName();
+    g_myName = sNickname;
     localStorage.setItem('player_name', g_myName);
 
     // Rename any local high scores that used the old fallback name and re-sync
