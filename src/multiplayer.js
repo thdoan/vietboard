@@ -3284,7 +3284,7 @@ function saveSessionMpOnly() {
     isGameOver: g_isGameOver,
     history: g_history,
     newplays: (g_bui && g_bui.newplays) || {},
-    oppNewplays: (g_bui && g_bui.oppNewplays) || {},
+    oppNewplays: {},
     savedAt: Date.now(),
     lastMoveAt: g_lastMoveAt || Date.now()
   };
@@ -3613,16 +3613,9 @@ function applyGameStateFromDB(dbState) {
     }
   }
 
-  // Preview tiles: restore pending drag tiles from DB
-  // During an active drag, preserve local previews to prevent DB sync from
-  // wiping in-progress drag state (Firefox Android bfcache/visibility bugs)
-  if (s.preview && g_bui) {
-    var myDbPreviews = g_isHost ? (s.preview.player1 || {}) : (s.preview.player2 || {});
-    var localNewplays = (g_bui && g_bui.newplays) ? g_bui.newplays : {};
-    g_bui.newplays = isDragInProgress() && Object.keys(localNewplays).length > 0
-      ? localNewplays : myDbPreviews;
-    g_bui.oppNewplays = g_isHost ? (s.preview.player2 || {}) : (s.preview.player1 || {});
-  }
+  // Preview tiles are transient — never restore from DB.
+  // Local player's previews are restored from localStorage (session_mp).
+  // Opponent previews come from live drag broadcasts only.
 
   // Turn state
   if (s.turnPlayerId) {
@@ -3808,22 +3801,9 @@ function syncGameStateFromDB() {
       g_dbVersion = dbData.version;
     }
 
-    // Preserve transient opponent previews before DB application may wipe them
-    var savedOppNewplays = (g_bui && g_bui.oppNewplays) ? JSON.parse(JSON.stringify(g_bui.oppNewplays)) : {};
-
     // Apply committed state from DB
     applyGameStateFromDB(dbData);
 
-    // Restore opponent previews that DB sync may have wiped.
-    // Only fall back to local memory if DB state has no preview data.
-    if (g_bui) {
-      var hasDbPreviews = dbData.state && dbData.state.preview &&
-        (Object.keys(dbData.state.preview.player1 || {}).length > 0 ||
-         Object.keys(dbData.state.preview.player2 || {}).length > 0);
-      if (!hasDbPreviews) {
-        g_bui.oppNewplays = savedOppNewplays;
-      }
-    }
     renderTransientOverlays();
 
     // Update lastDBSnapshot using LOCAL snapshot format
