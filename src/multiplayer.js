@@ -1426,6 +1426,9 @@ async function startMultiplayerGame(gameId, opponentId, opponentName, isHost) {
   // Connect to game channel
   joinGameChannel(gameId, isHost);
 
+  // Save initial session so host can resume if they reload before guest joins
+  saveMultiplayerSession();
+
   // Start periodic auto-save
   startMpAutoSaveTimer();
 }
@@ -3585,11 +3588,7 @@ function applyGameStateFromDB(dbState) {
       g_bui.setPlayerRack(myRack);
     }
     if (typeof oppRack === 'string' && oppRack !== '') {
-      var localOppRack = (g_bui.racks[2] || '').replace(/\.| /g, '');
-      var dbOppRack = oppRack.replace(/\.| /g, '');
-      if (dbOppRack.length >= localOppRack.length) {
-        g_bui.setOpponentRack(oppRack);
-      }
+      g_bui.setOpponentRack(oppRack);
     }
   }
 
@@ -3613,9 +3612,16 @@ function applyGameStateFromDB(dbState) {
     }
   }
 
-  // Preview tiles are transient — never restore from DB.
-  // Local player's previews are restored from localStorage (session_mp).
-  // Opponent previews come from live drag broadcasts only.
+  // Preview tiles: restore from DB
+  // Own previews for crash recovery, opponent previews for display.
+  // Safe from feedback loops: buildGameStateSnapshot only writes own slot.
+  if (s.preview && g_bui) {
+    var myDbPreviews = g_isHost ? (s.preview.player1 || {}) : (s.preview.player2 || {});
+    var localNewplays = (g_bui && g_bui.newplays) ? g_bui.newplays : {};
+    g_bui.newplays = isDragInProgress() && Object.keys(localNewplays).length > 0
+      ? localNewplays : myDbPreviews;
+    g_bui.oppNewplays = g_isHost ? (s.preview.player2 || {}) : (s.preview.player1 || {});
+  }
 
   // Turn state
   if (s.turnPlayerId) {
@@ -3929,7 +3935,7 @@ document.addEventListener('appReady', function() {
   if (hasLocalSession) {
     var hasRecentSnapshot = typeof mpData.savedAt === 'number' && (now - mpData.savedAt) <= MAX_RESUME_AGE_MS;
     var hasRecentMove = typeof mpData.lastMoveAt === 'number' && (now - mpData.lastMoveAt) <= MAX_RESUME_AGE_MS;
-    var hasUsableState = typeof mpData.stateVersion === 'number' && mpData.stateVersion > 0 &&
+    var hasUsableState = typeof mpData.stateVersion === 'number' && mpData.stateVersion >= 0 &&
       typeof mpData.myRack === 'string' && typeof mpData.oppRack === 'string' &&
       Array.isArray(mpData.letpool) && typeof mpData.opponentName === 'string' && mpData.opponentName !== '';
 
@@ -3990,9 +3996,9 @@ document.addEventListener('appReady', function() {
               localStorage.removeItem('session_mp');
               mpLog('DB', 'log', 'Reconnected and synced from DB, purged session_mp');
             } else {
-              mpLog('DB', 'warn', 'Sync failed during resume, keeping session_mp as backup');
-              g_bui.toast(t('Game not found'), 4000);
-              cleanupMultiplayerSession();
+              // Sync failed — DB may not have state yet (host pre-init).
+              // Keep MP mode with localStorage state; DB will be created on init.
+              mpLog('DB', 'warn', 'Sync failed during resume, keeping localStorage state');
             }
           });
         }, true);
