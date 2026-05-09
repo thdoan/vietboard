@@ -3433,8 +3433,8 @@ function buildGameStateSnapshot() {
     player2Score: g_isHost ? g_oscore : g_pscore,
     player1LastScore: g_isHost ? g_playerLastScore : g_opponentLastScore,
     player2LastScore: g_isHost ? g_opponentLastScore : g_playerLastScore,
-    player1Rack: (g_bui && g_bui.racks[g_isHost ? 1 : 2]) || '',
-    player2Rack: (g_bui && g_bui.racks[g_isHost ? 2 : 1]) || '',
+    player1Rack: g_isHost ? ((g_bui && g_bui.racks[1]) || '') : '',
+    player2Rack: g_isHost ? '' : ((g_bui && g_bui.racks[1]) || ''),
     history: neutralHistory,
     passes: g_passes,
     turnNumber: g_stateVersion,
@@ -3585,7 +3585,11 @@ function applyGameStateFromDB(dbState) {
       g_bui.setPlayerRack(myRack);
     }
     if (typeof oppRack === 'string' && oppRack !== '') {
-      g_bui.setOpponentRack(oppRack);
+      var localOppRack = (g_bui.racks[2] || '').replace(/\.| /g, '');
+      var dbOppRack = oppRack.replace(/\.| /g, '');
+      if (dbOppRack.length >= localOppRack.length) {
+        g_bui.setOpponentRack(oppRack);
+      }
     }
   }
 
