@@ -157,7 +157,7 @@ Multiplayer sessions use `localStorage['session_mp']` for persistence, while sin
 - **Session mode tracking:** `localStorage['session_mode']` is `'mp'` or `'sp'` and is now the **primary signal** for MP detection. On load, check `session_mode` first, then fall back to `session_mp` for legacy clients. Only clear `session_mp` after successful DB sync to ensure transition to DB-as-SSOT.
 - **On-load priority:** In `window.onload` (`src/events.js`), parse `session_mp` directly and check for valid `gameId` and `!isGameOver` before falling back to SP or fresh start.
 - **Periodic auto-save:** Use a 30-second interval (`g_mpAutoSaveTimer`) to keep `session_mp` fresh for mobile scenarios where visibility events may not fire reliably.
-- **Lifecycle events:** Handle `visibilitychange` (tab hide/visible), `pagehide` (beforeunload alternative for mobile), `beforeunload` (explicit unload), and `pageshow` (bfcache restore).
+- **Lifecycle events:** Handle `visibilitychange` (tab hide/visible), `pagehide` (beforeunload alternative for mobile), `beforeunload` (explicit unload), and `pageshow` (bfcache restore). On hide/restore, always clear stale drag state (`g_bui.rd.obj`) before syncing — Firefox Android aggressively bfcaches pages during touch drags.
 - **Skip identical saves:** In `saveMultiplayerSession()`, compare serialized JSON before writing to reduce disk I/O.
 - **Resume connection watchdog:** After re-joining a game channel on resume, use a timer to show user feedback if connection is slow (toast at 5s, prompt at 20s).
 
@@ -185,6 +185,10 @@ To avoid the race condition where the host broadcasts `init` before the guest is
 - **`g_remoteDragCooldown`** adds a **400ms post-end cooldown** before flushing deferred DB sync.
 - **`renderTransientOverlays()`** re-applies opponent board previews (`oppNewplays`) after DB sync wipes them. Call this after every `syncGameStateFromDB` completion, initial MP load, and reconnect.
 - **`maybeSyncGameStateFromDB()`** defers sync if remote drag or cooldown is active; it also defers on local drag in progress.
+- **Preview tiles are transient.** `oppNewplays` (opponent preview tiles from broadcasts) must never be persisted to DB — they are ephemeral broadcast state, not committed game state. `buildGameStateSnapshot()` only includes the local player's `newplays`.
+- **`applyGameStateFromDB()`** preserves local `newplays` when `isDragInProgress()` returns true, to prevent DB sync from wiping in-progress drag state. Falls back to DB value when no drag is active.
+- **Lifecycle drag cleanup:** `visibilitychange` (hidden) clears `g_bui.rd.obj` and stops drag sync timer — touch events are lost when page is hidden, so any drag is abandoned. `pageshow` (bfcache restore) clears all drag guard state (`rd.obj`, `g_remoteDragging`, timeouts, `g_deferredDBSync`) and forces `syncGameStateFromDB()` directly.
+- **`isDragInProgress()`** checks `g_bui.rd.obj` (REDIPS internal state). This can be stale after bfcache restore or visibility changes — always clear it in lifecycle handlers.
 
 ### Idempotent SQL Migrations
 - Use `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for column additions.

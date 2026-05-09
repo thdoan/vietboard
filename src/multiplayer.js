@@ -3414,9 +3414,9 @@ function buildGameStateSnapshot() {
   var preview = {};
   if (g_isHost) {
     preview.player1 = myNewplays;
-    preview.player2 = oppNewplays;
+    preview.player2 = {};
   } else {
-    preview.player1 = oppNewplays;
+    preview.player1 = {};
     preview.player2 = myNewplays;
   }
 
@@ -3610,8 +3610,13 @@ function applyGameStateFromDB(dbState) {
   }
 
   // Preview tiles: restore pending drag tiles from DB
+  // During an active drag, preserve local previews to prevent DB sync from
+  // wiping in-progress drag state (Firefox Android bfcache/visibility bugs)
   if (s.preview && g_bui) {
-    g_bui.newplays    = g_isHost ? (s.preview.player1 || {}) : (s.preview.player2 || {});
+    var myDbPreviews = g_isHost ? (s.preview.player1 || {}) : (s.preview.player2 || {});
+    var localNewplays = (g_bui && g_bui.newplays) ? g_bui.newplays : {};
+    g_bui.newplays = isDragInProgress() && Object.keys(localNewplays).length > 0
+      ? localNewplays : myDbPreviews;
     g_bui.oppNewplays = g_isHost ? (s.preview.player2 || {}) : (s.preview.player1 || {});
   }
 
@@ -4190,6 +4195,11 @@ function handleVisibilityChange() {
       g_idleTimer = null;
     }
     stopMpAutoSaveTimer();
+    // Clear stale drag state — touch events are lost when page is hidden,
+    // so any in-progress drag is abandoned. This prevents isDragInProgress()
+    // from blocking DB syncs on resume.
+    if (g_bui && g_bui.rd) g_bui.rd.obj = null;
+    if (typeof stopMultiplayerDragSync === 'function') stopMultiplayerDragSync();
   } else {
     if (g_isMultiplayer && !g_isGameOver) {
       resetIdleTimer();
@@ -4230,9 +4240,20 @@ window.addEventListener('online', function() {
 window.addEventListener('pageshow', function(e) {
   if (e.persisted) {
     if (g_isMultiplayer && g_gameId && !g_isGameOver) {
+      // Clear stale drag state frozen by bfcache — prevents isDragInProgress()
+      // from blocking DB syncs after Firefox Android force-close/restore
+      if (g_bui && g_bui.rd) g_bui.rd.obj = null;
+      g_remoteDragging = false;
+      if (g_remoteDragTimeout) { clearTimeout(g_remoteDragTimeout); g_remoteDragTimeout = null; }
+      if (g_remoteDragCooldown) { clearTimeout(g_remoteDragCooldown); g_remoteDragCooldown = null; }
+      g_deferredDBSync = false;
       setTimeout(function() {
         if (!g_channelSubscribed && !g_channelSubscribing) {
-          joinGameChannel(g_gameId, g_isHost, null, true);
+          joinGameChannel(g_gameId, g_isHost, function() {
+            syncGameStateFromDB();
+          }, true);
+        } else {
+          syncGameStateFromDB();
         }
       }, 100);
     } else {
