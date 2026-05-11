@@ -1841,6 +1841,8 @@ function cleanupMultiplayerSession() {
 
   g_remoteDragging = false;
   g_remoteDragToken = null;
+  g_playerStateWritePending = false;
+  g_lastPreviewClearAt = 0;
   if (g_remoteDragTimeout) {
     clearTimeout(g_remoteDragTimeout);
     g_remoteDragTimeout = null;
@@ -2560,8 +2562,8 @@ function onRemoteDragStart(payload) {
   g_remoteDragToken = payload.seq;
   if (g_remoteDragTimeout) clearTimeout(g_remoteDragTimeout);
   g_remoteDragTimeout = setTimeout(function() {
-    g_remoteDragging = false;
-    g_remoteDragToken = null;
+  g_remoteDragging = false;
+  g_remoteDragToken = null;
     g_remoteDragTimeout = null;
     g_remoteDragTimeoutUnlocks++;
     mpLog('DRAG', 'log', 'Guard: dragging → idle (timeout expired)');
@@ -3131,6 +3133,7 @@ function handleMoveBroadcast(payload) {
         elStatus.innerHTML = t('Opponent') + ' ' + t('scored ') + payload.score;
 
         // Ensure board UI is perfectly in sync
+        clearOpponentPreviewCache();
         syncBoardUI();
 
         if (payload.rackAfter.replace(/\./g, '') === '' && g_letpool.length === 0) {
@@ -3147,7 +3150,6 @@ function handleMoveBroadcast(payload) {
         updateGameInfoLabels();
 
         g_lastMoveAt = Date.now();
-        clearOpponentPreviewCache();
         // Receiver skips DB write; mover already wrote authoritative state.
         // But we still need to update session_mp for reload resilience.
         if (typeof saveSessionMpOnly === 'function') saveSessionMpOnly();
@@ -3180,6 +3182,9 @@ function handleMoveBroadcast(payload) {
 
     // Re-render board from committed g_board for both moves and passes.
     // This clears any phantom preview tiles left over from earlier drag broadcasts.
+    // Clear opponent previews BEFORE rendering so renderCommittedBoard() doesn't
+    // preserve stale preview cells (which would leave orphaned tiles with holds data).
+    clearOpponentPreviewCache();
     if (typeof syncBoardUI === 'function') syncBoardUI();
 
     // Extra safety: clear any ghost tiles that survived the move processing
@@ -3249,7 +3254,6 @@ function handleMoveBroadcast(payload) {
     updateGameInfoLabels();
 
     g_lastMoveAt = Date.now();
-    clearOpponentPreviewCache();
     // Receiver skips DB write; mover already wrote authoritative state.
     // But we still need to update session_mp for reload resilience.
     if (typeof saveSessionMpOnly === 'function') saveSessionMpOnly();
@@ -3289,7 +3293,8 @@ function saveSessionMpOnly() {
     newplays: (g_bui && g_bui.newplays) || {},
     oppNewplays: {},
     savedAt: Date.now(),
-    lastMoveAt: g_lastMoveAt || Date.now()
+    lastMoveAt: g_lastMoveAt || Date.now(),
+    lastPlayerStateWriteAt: g_lastPlayerStateWriteAt || 0
   };
   var snapshotJson = JSON.stringify(snapshot);
   if (localStorage['session_mp'] !== snapshotJson) {
@@ -3309,11 +3314,15 @@ function saveMultiplayerSession() {
     // Write to localStorage as backup for reload resilience
     // DB is the primary SSOT, but session_mp enables instant reload
     // when DB is temporarily unavailable or stale.
+    // Update write timestamp BEFORE saving to localStorage so it survives reload.
+    g_lastPlayerStateWriteAt = Date.now();
     localStorage['session_mode'] = 'mp';
     saveSessionMpOnly();
 
-    // Sync to DB, but only if game state actually changed
-    if (DEBUG && g_bui && g_bui.newplays) mpLog('JOKER', 'log', 'saveMultiplayerSession newplays', g_bui.newplays);
+    // Write player state (rack, preview) independently to DB
+    savePlayerStateToDB();
+
+    // Sync global state to DB, but only if it changed
     var currentGameState = buildGameStateSnapshot();
     var currentGameStateJson = JSON.stringify(currentGameState);
 
@@ -3410,19 +3419,6 @@ function buildGameStateSnapshot() {
     }
   }
 
-  // Convert local preview tiles to perspective-neutral
-  var myNewplays = (g_bui && g_bui.newplays) ? g_bui.newplays : {};
-  var oppNewplays = (g_bui && g_bui.oppNewplays) ? g_bui.oppNewplays : {};
-  mpLog('JOKER', 'log', 'buildGameStateSnapshot myNewplays: ' + JSON.stringify(myNewplays) + ' oppNewplays: ' + JSON.stringify(oppNewplays));
-  var preview = {};
-  if (g_isHost) {
-    preview.player1 = myNewplays;
-    preview.player2 = {};
-  } else {
-    preview.player1 = {};
-    preview.player2 = myNewplays;
-  }
-
   return {
     turnPlayerId: g_isMyTurn ? g_lobbyUserId : (g_opponentId || ''),
     board: g_board,
@@ -3436,12 +3432,9 @@ function buildGameStateSnapshot() {
     player2Score: g_isHost ? g_oscore : g_pscore,
     player1LastScore: g_isHost ? g_playerLastScore : g_opponentLastScore,
     player2LastScore: g_isHost ? g_opponentLastScore : g_playerLastScore,
-    player1Rack: g_isHost ? ((g_bui && g_bui.racks[1]) || '') : '',
-    player2Rack: g_isHost ? '' : ((g_bui && g_bui.racks[1]) || ''),
     history: neutralHistory,
     passes: g_passes,
-    turnNumber: g_stateVersion,
-    preview: preview
+    turnNumber: g_stateVersion
   };
 }
 
@@ -3454,7 +3447,13 @@ function createGameStateInDB() {
       p_app_key: _dk(_hk),
       p_player_a_id: g_isHost ? g_lobbyUserId : (g_opponentId || ''),
       p_player_b_id: g_isHost ? (g_opponentId || '') : g_lobbyUserId,
-      p_initial_state: state
+      p_initial_state: state,
+      p_rack_a: ((g_bui && g_bui.racks[1]) || '').padEnd(g_racksize, '.'),
+      p_rack_b: ((g_bui && g_bui.racks[2]) || '').padEnd(g_racksize, '.'),
+      p_rack_a_count: ((g_bui && g_bui.racks[1]) || '').replace(/\./g, '').length,
+      p_rack_b_count: ((g_bui && g_bui.racks[2]) || '').replace(/\./g, '').length,
+      p_preview_a: ((g_bui && g_bui.newplays) || {}),
+      p_preview_b: {},
     })
     .then(function(result) {
       if (result.error) {
@@ -3481,7 +3480,7 @@ function savePreviewToDB() {
   if (g_previewSaveTimer) clearTimeout(g_previewSaveTimer);
   g_previewSaveTimer = setTimeout(function() {
     g_previewSaveTimer = null;
-    if (typeof saveMultiplayerSession === 'function') saveMultiplayerSession();
+    if (typeof savePlayerStateToDB === 'function') savePlayerStateToDB();
   }, 200);
 }
 
@@ -3513,7 +3512,7 @@ function fetchGameStateFromDB() {
   if (!window.supabaseClient || !g_gameId) return Promise.resolve(null);
   return window.supabaseClient
     .from('games')
-    .select('state, version, updated_at')
+    .select('state, version, updated_at, rack_a, rack_b, rack_a_count, rack_b_count, preview_a, preview_b')
     .eq('id', g_gameId)
     .single()
     .then(function(result) {
@@ -3527,6 +3526,45 @@ function fetchGameStateFromDB() {
     .catch(function(err) {
       mpLog('DB', 'warn', 'fetch game state failed', err);
       return null;
+    });
+}
+
+var g_lastSavedPlayerStateStr = '';
+var g_playerStateWritePending = false; // True while savePlayerStateToDB RPC is in-flight
+var g_lastPreviewClearAt = 0; // Timestamp of last preview clear — blocks stale DB overwrites
+var g_lastPlayerStateWriteAt = 0; // Timestamp of last player state write (rack/preview) to DB
+
+function savePlayerStateToDB() {
+  if (!window.supabaseClient || !g_gameId || !g_lobbyUserId) return Promise.resolve(false);
+
+  var myRack = ((g_bui && g_bui.racks[1]) || '').padEnd(g_racksize, '.');
+  var myRackCount = myRack.replace(/\./g, '').length;
+  var myPreview = (g_bui && g_bui.newplays) || {};
+
+  g_playerStateWritePending = true;
+  g_lastPlayerStateWriteAt = Date.now();
+  return window.supabaseClient
+    .rpc('update_player_state', {
+      p_game_id: g_gameId,
+      p_app_key: _dk(_hk),
+      p_player_id: g_lobbyUserId,
+      p_rack: myRack,
+      p_rack_count: myRackCount,
+      p_preview: myPreview
+    })
+    .then(function(result) {
+      g_playerStateWritePending = false;
+      if (!result.error && result.data) {
+        g_lastSavedPlayerStateStr = JSON.stringify({ rack: myRack, preview: myPreview });
+      } else {
+        mpLog('DB', 'warn', 'update_player_state returned error', result.error);
+      }
+      return result.data;
+    })
+    .catch(function(err) {
+      g_playerStateWritePending = false;
+      mpLog('DB', 'warn', 'update_player_state failed', err);
+      return false;
     });
 }
 
@@ -3574,21 +3612,39 @@ function applyGameStateFromDB(dbState) {
     if (typeof s.player1LastScore === 'number') g_opponentLastScore = s.player1LastScore;
   }
 
-  // Racks: stored in JSON state (player1Rack = host rack, player2Rack = guest rack)
+  // Racks: restore from separate DB columns
   if (g_bui) {
-    var myRack = g_isHost ? s.player1Rack : s.player2Rack;
-    var oppRack = g_isHost ? s.player2Rack : s.player1Rack;
+    var myRack = g_isHost ? dbState.rack_a : dbState.rack_b;
+    var oppRack = g_isHost ? dbState.rack_b : dbState.rack_a;
+    var oppRackCount = g_isHost ? dbState.rack_b_count : dbState.rack_a_count;
 
-    // Guard: don't overwrite local rack with stale DB data.
-    // If local rack has more tiles than DB, local player likely just dragged
-    // a tile and their write hasn't won the version race yet.
+    // Guard: don't overwrite local rack with stale DB data if we wrote more recently.
+    // This handles the race where: (1) we save cleared state, (2) page reloads before
+    // DB write completes, (3) DB sync reads stale data.
+    // Use localStorage session's savedAt as the timestamp source — it's set synchronously
+    // and survives reload. Compare with DB's updated_at.
+    var dbUpdatedAtMs = 0;
+    if (dbState.updated_at) {
+      try { dbUpdatedAtMs = new Date(dbState.updated_at).getTime(); } catch(e) {}
+    }
+    // Trust localStorage if it was saved within the last 5 seconds — the DB write
+    // may not have completed, but the local data is fresher.
+    var sessionSavedRecently = (typeof g_lastPlayerStateWriteAt !== 'undefined') && g_lastPlayerStateWriteAt > 0 && (Date.now() - g_lastPlayerStateWriteAt < 5000);
+    var localWriteIsNewer = sessionSavedRecently && (dbUpdatedAtMs === 0 || g_lastPlayerStateWriteAt > dbUpdatedAtMs - 2000);
     var localRack = (g_bui.racks[1] || '').replace(/\./g, '');
     var dbMyRack = (typeof myRack === 'string' ? myRack : '').replace(/\./g, '');
-    if (typeof myRack === 'string' && myRack !== '' && dbMyRack.length >= localRack.length) {
-      g_bui.setPlayerRack(myRack);
+    var skipLocalRack = localWriteIsNewer || g_playerStateWritePending || (isDragInProgress() && localRack.length > 0);
+    if (!skipLocalRack || dbMyRack.length > localRack.length) {
+      if (typeof myRack === 'string' && myRack !== '') {
+        g_bui.setPlayerRack(myRack);
+      }
     }
+    
+    // Opponent rack (render placeholders based on count, or actual string if visible)
     if (typeof oppRack === 'string' && oppRack !== '') {
       g_bui.setOpponentRack(oppRack);
+    } else if (typeof oppRackCount === 'number') {
+      g_bui.setOpponentRack('?'.repeat(oppRackCount).padEnd(g_racksize, '.'));
     }
   }
 
@@ -3612,15 +3668,22 @@ function applyGameStateFromDB(dbState) {
     }
   }
 
-  // Preview tiles: restore from DB
-  // Own previews for crash recovery, opponent previews for display.
-  // Safe from feedback loops: buildGameStateSnapshot only writes own slot.
-  if (s.preview && g_bui) {
-    var myDbPreviews = g_isHost ? (s.preview.player1 || {}) : (s.preview.player2 || {});
-    var localNewplays = (g_bui && g_bui.newplays) ? g_bui.newplays : {};
-    g_bui.newplays = isDragInProgress() && Object.keys(localNewplays).length > 0
-      ? localNewplays : myDbPreviews;
-    g_bui.oppNewplays = g_isHost ? (s.preview.player2 || {}) : (s.preview.player1 || {});
+  // Preview tiles: restore from separate DB columns
+  if (g_bui) {
+    var myDbPreviews = g_isHost ? dbState.preview_a : dbState.preview_b;
+    var oppDbPreviews = g_isHost ? dbState.preview_b : dbState.preview_a;
+
+    // If a preview was recently cleared locally, don't overwrite with stale DB data.
+    // The DB write from clear is async; stale realtime events from earlier saves can
+    // arrive after the clear and carry the old preview. Block for 3 seconds.
+    var previewRecentlyCleared = (typeof g_lastPreviewClearAt !== 'undefined') && (Date.now() - g_lastPreviewClearAt < 5000);
+    var localNewplays = (g_bui.newplays) ? g_bui.newplays : {};
+    if (previewRecentlyCleared || sessionSavedRecently || localWriteIsNewer || (isDragInProgress() && Object.keys(localNewplays).length > 0) || g_playerStateWritePending) {
+      // Keep local newplays as-is
+    } else {
+      g_bui.newplays = myDbPreviews || {};
+    }
+    g_bui.oppNewplays = oppDbPreviews || {};
   }
 
   // Turn state
@@ -3831,7 +3894,7 @@ function syncGameStateFromDB() {
     updateTurnIndicator();
     updateGameInfoLabels();
 
-    mpLog('SYNC', 'log', 'State synced from DB', { version: g_dbVersion, overlaysReapplied: Object.keys(savedOppNewplays).length });
+    mpLog('SYNC', 'log', 'State synced from DB', { version: g_dbVersion, overlaysReapplied: g_bui && g_bui.oppNewplays ? Object.keys(g_bui.oppNewplays).length : 0 });
 
     // Update g_lastDBGameState after successful sync to prevent redundant writes
     g_lastDBGameState = JSON.stringify(buildGameStateSnapshot());
@@ -3977,6 +4040,11 @@ document.addEventListener('appReady', function() {
         renderCommittedBoard();
         mpLog('JOKER', 'log', 'localStorage restore newplays: ' + JSON.stringify(mpData.newplays));
         g_bui.newplays = mpData.newplays || {};
+        // Restore last player state write timestamp so applyGameStateFromDB
+        // can detect that our localStorage data is more recent than stale DB data
+        if (typeof mpData.lastPlayerStateWriteAt === 'number') {
+          g_lastPlayerStateWriteAt = mpData.lastPlayerStateWriteAt;
+        }
         g_bui.makeTilesFixed();
         updateTurnIndicator();
         updateGameInfoLabels();

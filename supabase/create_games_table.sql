@@ -18,6 +18,8 @@ create table if not exists games (
   player_a_id text not null,
   player_b_id text not null,
   state jsonb not null default '{}'::jsonb,
+  preview_a jsonb not null default '{}'::jsonb,
+  preview_b jsonb not null default '{}'::jsonb,
   version bigint not null default 0,
   updated_at timestamptz default now()
 );
@@ -27,7 +29,9 @@ alter table games
   add column if not exists rack_a text,
   add column if not exists rack_b text,
   add column if not exists rack_a_count int,
-  add column if not exists rack_b_count int;
+  add column if not exists rack_b_count int,
+  add column if not exists preview_a jsonb default '{}'::jsonb,
+  add column if not exists preview_b jsonb default '{}'::jsonb;
 
 -- 3. Indexes (idempotent)
 create index if not exists idx_games_app_key on games(app_key);
@@ -97,7 +101,9 @@ create or replace function create_game_state(
   p_rack_a text,
   p_rack_b text,
   p_rack_a_count int,
-  p_rack_b_count int
+  p_rack_b_count int,
+  p_preview_a jsonb default '{}'::jsonb,
+  p_preview_b jsonb default '{}'::jsonb
 ) returns boolean as $$
 declare
   inserted_rows int;
@@ -105,12 +111,14 @@ begin
   insert into games (
     id, app_key, player_a_id, player_b_id,
     state, version,
-    rack_a, rack_b, rack_a_count, rack_b_count
+    rack_a, rack_b, rack_a_count, rack_b_count,
+    preview_a, preview_b
   )
   values (
     p_game_id, p_app_key, p_player_a_id, p_player_b_id,
     p_initial_state, 1,
-    p_rack_a, p_rack_b, p_rack_a_count, p_rack_b_count
+    p_rack_a, p_rack_b, p_rack_a_count, p_rack_b_count,
+    p_preview_a, p_preview_b
   )
   on conflict (id) do nothing;
 
@@ -128,7 +136,13 @@ begin
   select jsonb_build_object(
     'state', state,
     'version', version,
-    'updated_at', updated_at
+    'updated_at', updated_at,
+    'rack_a', rack_a,
+    'rack_b', rack_b,
+    'rack_a_count', rack_a_count,
+    'rack_b_count', rack_b_count,
+    'preview_a', preview_a,
+    'preview_b', preview_b
   ) into result
   from games
   where id = p_game_id;
@@ -166,19 +180,20 @@ begin
 end;
 $$ language plpgsql security definer;
 
--- 12. RPC: Update player rack (server decides column from player_id match)
-create or replace function update_player_rack(
+-- 12. RPC: Update player state (rack and preview) - server decides column from player_id match
+create or replace function update_player_state(
   p_app_key text,
   p_game_id text,
   p_player_id text,
   p_rack text,
-  p_rack_count int
+  p_rack_count int,
+  p_preview jsonb
 ) returns boolean as $$
 declare
   updated_rows int;
   game_row games%rowtype;
 begin
-  if p_rack_count < 0 or p_rack_count > 7 then
+  if p_rack_count < 0 or p_rack_count > 8 then
     return false;
   end if;
 
@@ -191,6 +206,7 @@ begin
     update games
     set rack_a = p_rack,
         rack_a_count = p_rack_count,
+        preview_a = p_preview,
         updated_at = now()
     where id = p_game_id
       and app_key = p_app_key;
@@ -198,6 +214,7 @@ begin
     update games
     set rack_b = p_rack,
         rack_b_count = p_rack_count,
+        preview_b = p_preview,
         updated_at = now()
     where id = p_game_id
       and app_key = p_app_key;

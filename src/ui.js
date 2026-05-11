@@ -488,6 +488,13 @@ function RedipsUI() {
 
   self.cancelPlayerPlacement = function(cellId) {
     if (DEBUG) console.log('[JOKER] cancelPlayerPlacement called, cellId:', cellId, 'newplays:', JSON.stringify(self.newplays));
+    // Cancel any pending debounced preview save BEFORE clearing.
+    // The drag handler's savePreviewToDB may still have a timer pending;
+    // if it fires after we clear, it would write stale preview state to DB.
+    if (typeof g_previewSaveTimer !== 'undefined' && g_previewSaveTimer) {
+      clearTimeout(g_previewSaveTimer);
+      g_previewSaveTimer = null;
+    }
     var placement = self.getPlayerPlacement();
     var tileInfos = [];
     var id;
@@ -513,7 +520,10 @@ function RedipsUI() {
     for (var i = 0; i < self.racksize; ++i) {
       id = self.plrRackId + i;
       var rcell = el(id);
-      if (rcell.holds === '' && count < tileInfos.length) {
+      // Find empty rack slots to return tiles to.
+      // Use !firstChild check because setLetters may remove the div but leave
+      // holds stale (non-empty) when the rack string has a dot at this position.
+      if (!rcell.firstChild && count < tileInfos.length) {
         var info = tileInfos[count++];
         var div = info.div;
         // Joker tile - remove previously selected letter from tile
@@ -540,6 +550,8 @@ function RedipsUI() {
     }
     if (cellId) delete self.newplays[cellId];
     else self.newplays = {};
+    // Mark preview clear timestamp so applyGameStateFromDB won't overwrite with stale DB data
+    if (typeof g_lastPreviewClearAt !== 'undefined') g_lastPreviewClearAt = Date.now();
     self.makeTilesFixed();
     // Save session immediately so cleared state survives reload
     if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof saveMultiplayerSession === 'function') {
