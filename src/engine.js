@@ -204,6 +204,7 @@ function finalizeGameScores() {
   if (isMP && typeof g_isGameOver !== 'undefined' && g_isGameOver && typeof g_finalScoresApplied !== 'undefined' && g_finalScoresApplied) {
     return;
   }
+  g_finalScoresApplied = true;
 
   var oleft = g_bui.getOpponentRack();
   var pleft = g_bui.getPlayerRack();
