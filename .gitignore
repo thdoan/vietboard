@@ -1,5 +1,6 @@
 .beads/
 .opencode/
+.temp/
 build/
 node_modules/
 play/
