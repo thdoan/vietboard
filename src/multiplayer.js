@@ -1471,10 +1471,13 @@ function scheduleInitRetry() {
   if (g_initRetryTimer) clearTimeout(g_initRetryTimer);
   if (g_initRetryCount >= MAX_INIT_RETRIES) {
     g_initRetryTimer = null;
-    g_bui.toast(t('Connection failed'), 4000);
     sendBroadcastNow('connection_failed', { gameId: g_gameId, fromId: g_lobbyUserId });
     deleteGameInvite(g_gameId);
     cleanupMultiplayerSession();
+    g_bui.prompt(
+      t('Connection to opponent lost.'),
+      '<button class="button" onclick="hideModal();init(\'board\')">' + t('Play Computer') + '</button>'
+    );
     return;
   }
   g_initRetryTimer = setTimeout(function() {
@@ -1482,10 +1485,13 @@ function scheduleInitRetry() {
     sendBroadcastNow('request_init', { gameId: g_gameId, fromId: g_lobbyUserId });
     g_initRetryCount++;
     if (g_initRetryCount >= MAX_INIT_RETRIES) {
-      g_bui.toast(t('Connection failed'), 4000);
       sendBroadcastNow('connection_failed', { gameId: g_gameId, fromId: g_lobbyUserId });
       deleteGameInvite(g_gameId);
       cleanupMultiplayerSession();
+      g_bui.prompt(
+        t('Connection to opponent lost.'),
+        '<button class="button" onclick="hideModal();init(\'board\')">' + t('Play Computer') + '</button>'
+      );
     } else {
       scheduleInitRetry();
     }
@@ -1635,10 +1641,13 @@ function joinGameChannel(gameId, isHost, onSubscribed, skipInitRetry) {
     })
     .on('broadcast', { event: 'connection_failed' }, ({ payload }) => {
       if (payload && payload.gameId === g_gameId && payload.fromId !== g_lobbyUserId) {
-        g_bui.toast(t('Connection failed'), 4000);
         g_connectingInvites.delete(g_gameId);
         deleteGameInvite(g_gameId);
         cleanupMultiplayerSession();
+        g_bui.prompt(
+          t('Connection to opponent lost.'),
+          '<button class="button" onclick="hideModal();init(\'board\')">' + t('Play Computer') + '</button>'
+        );
       }
     })
     .subscribe(async (status) => {
@@ -2994,6 +3003,7 @@ function onMultiplayerMove(passed) {
     rackAfter: rackAfter,
     letpool: g_letpool,
     boardEmpty: g_board_empty,
+    passes: g_passes,
     stateVersion: getNextMultiplayerStateVersion()
   };
   mpLog('MOVE', 'log', 'Broadcasting move', { words: moveData.words, score: moveData.score, rackAfter: moveData.rackAfter, version: moveData.stateVersion });
@@ -3129,9 +3139,6 @@ function handleMoveBroadcast(payload) {
           g_bui.addToHistory(payload.words, 2);
         }
 
-        var elStatus = el('status');
-        elStatus.innerHTML = t('Opponent') + ' ' + t('scored ') + payload.score;
-
         // Ensure board UI is perfectly in sync
         clearOpponentPreviewCache();
         syncBoardUI();
@@ -3139,6 +3146,17 @@ function handleMoveBroadcast(payload) {
         if (payload.rackAfter.replace(/\./g, '') === '' && g_letpool.length === 0) {
           g_rackEmptiedBy = 'opponent';
           g_isGameOver = true;
+          saveMultiplayerSession();
+          finalizeGameScores();
+          g_finalScoresApplied = true;
+          broadcastGameState({
+            type: 'game_ended',
+            reason: 'ended',
+            stateVersion: g_stateVersion,
+            fromId: g_lobbyUserId,
+            finalPScore: g_pscore,
+            finalOScore: g_oscore
+          });
           announceWinner();
           enterPostGameState();
           return;
@@ -3204,8 +3222,11 @@ function handleMoveBroadcast(payload) {
 
     if (payload.passed) {
       g_bui.toast(payload.swapped ? t('Opponent swapped') : t('Opponent passed'));
+      var elStatus = el('status');
+      if (elStatus) elStatus.innerHTML = payload.swapped ? t('Opponent swapped tiles') : t('Opponent passed');
       if (!payload.swapped) {
-        ++g_passes;
+        // Use mover's authoritative pass count to prevent divergence from lost broadcasts
+        g_passes = (typeof payload.passes === 'number') ? payload.passes : (g_passes + 1);
         if (g_passes >= g_maxpasses) {
           g_isGameOver = true;
           saveMultiplayerSession();
