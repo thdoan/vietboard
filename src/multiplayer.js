@@ -159,8 +159,8 @@ let g_seenInitIds = new Set();
 
 let g_initRetryCount = 0;
 let g_initRetryTimer = null;
-const MAX_INIT_RETRIES = 3;
-const INIT_RETRY_DELAY_MS = 5000;
+const MAX_INIT_RETRIES = 5;
+const INIT_RETRY_DELAY_MS = 10000;
 
 let g_connectingInvites = new Set();   // gameIds in "connecting" state after accept
 let g_lastCleanupAt = 0;               // throttle cleanupStaleInvites()
@@ -3278,8 +3278,9 @@ function handleMoveBroadcast(payload) {
     // Receiver skips DB write; mover already wrote authoritative state.
     // But we still need to update session_mp for reload resilience.
     if (typeof saveSessionMpOnly === 'function') saveSessionMpOnly();
-    // Update local DB tracking to prevent redundant syncs from realtime triggers
-    g_dbVersion = Math.max(g_dbVersion, payload.stateVersion || 0);
+    // Note: do NOT set g_dbVersion from payload.stateVersion — stateVersion is a
+    // turn counter, not a DB write version. Mixing them prevents realtime syncs
+    // from triggering (dbVersion > g_dbVersion check would fail).
     g_lastDBGameState = JSON.stringify(buildGameStateSnapshot());
 
     // Opponent activity resets idle timer
@@ -3367,7 +3368,16 @@ function saveMultiplayerSession() {
     if (stateChanged) {
       mpLog('DB', 'log', 'Writing to DB because state changed');
       g_dbWriteInProgress = true;
+      // Safety timeout: if the Supabase RPC hangs (network issue, tab suspension),
+      // reset the flag after 15s to prevent permanent sync blocking.
+      var dbWriteTimeout = setTimeout(function() {
+        if (g_dbWriteInProgress) {
+          g_dbWriteInProgress = false;
+          mpLog('DB', 'warn', 'DB write timed out after 15s, resetting guard');
+        }
+      }, 15000);
       updateGameStateInDB(g_dbVersion).then(function(success) {
+        clearTimeout(dbWriteTimeout);
         if (success) {
           g_dbVersion += 1;
           g_lastDBGameState = currentGameStateJson;
@@ -3395,8 +3405,10 @@ function saveMultiplayerSession() {
           });
         }
       }).then(function() {
+        clearTimeout(dbWriteTimeout);
         g_dbWriteInProgress = false;
       }, function() {
+        clearTimeout(dbWriteTimeout);
         g_dbWriteInProgress = false;
       });
     } else if (g_dbVersion > 0 && DEBUG) {
@@ -4285,13 +4297,33 @@ function handleVisibilityChange() {
     // from blocking DB syncs on resume.
     if (g_bui && g_bui.rd) g_bui.rd.obj = null;
     if (typeof stopMultiplayerDragSync === 'function') stopMultiplayerDragSync();
+    // Mark channel as potentially dead — Android may suspend the tab and sever
+    // the WebSocket. On visible, we'll force a reconnect.
+    if (g_isMultiplayer && !g_isGameOver) {
+      g_channelSubscribed = false;
+    }
   } else {
     if (g_isMultiplayer && !g_isGameOver) {
       resetIdleTimer();
       startIdleTimer();
       startMpAutoSaveTimer();
-      // Fetch authoritative state from DB when tab becomes visible
-      maybeSyncGameStateFromDB('visibility');
+      // Reset stuck DB write guard — if a Supabase RPC hung during tab suspension,
+      // g_dbWriteInProgress stays true and blocks all syncs.
+      if (g_dbWriteInProgress) {
+        g_dbWriteInProgress = false;
+        mpLog('DB', 'warn', 'Reset stuck g_dbWriteInProgress on visibility restore');
+      }
+      // Re-subscribe to game channel if it was marked dead (from hidden handler
+      // or from a detected disconnect). DB sync alone is not enough — we need
+      // the WebSocket for realtime move broadcasts.
+      if (!g_channelSubscribed && !g_channelSubscribing && g_gameId) {
+        joinGameChannel(g_gameId, g_isHost, function() {
+          maybeSyncGameStateFromDB('visibility');
+        }, true);
+      } else {
+        // Fetch authoritative state from DB when tab becomes visible
+        maybeSyncGameStateFromDB('visibility');
+      }
     }
     if (!g_isMultiplayer) {
       ensureLobbyConnection();
@@ -4332,6 +4364,14 @@ window.addEventListener('pageshow', function(e) {
       if (g_remoteDragTimeout) { clearTimeout(g_remoteDragTimeout); g_remoteDragTimeout = null; }
       if (g_remoteDragCooldown) { clearTimeout(g_remoteDragCooldown); g_remoteDragCooldown = null; }
       g_deferredDBSync = false;
+      // Force channel re-subscribe after bfcache — the WebSocket is severed but
+      // g_channelSubscribed may be frozen as true. Always treat as disconnected.
+      g_channelSubscribed = false;
+      g_channelSubscribing = false;
+      if (g_dbWriteInProgress) {
+        g_dbWriteInProgress = false;
+        mpLog('DB', 'warn', 'Reset stuck g_dbWriteInProgress on bfcache restore');
+      }
       setTimeout(function() {
         if (!g_channelSubscribed && !g_channelSubscribing) {
           joinGameChannel(g_gameId, g_isHost, function() {
