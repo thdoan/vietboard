@@ -3873,6 +3873,12 @@ function syncGameStateFromDB() {
     // Apply committed state from DB
     applyGameStateFromDB(dbData);
 
+    // Paint committed board tiles to DOM — applyGameStateFromDB only updates
+    // in-memory arrays (g_board, g_boardpoints, g_boardtypes). Without this,
+    // bfcache restores and deferred syncs show stale board state while racks
+    // appear correct (racks are rendered by setPlayerRack/setOpponentRack).
+    renderCommittedBoard();
+
     renderTransientOverlays();
 
     // Update lastDBSnapshot using LOCAL snapshot format
