@@ -4297,11 +4297,13 @@ function handleVisibilityChange() {
     // from blocking DB syncs on resume.
     if (g_bui && g_bui.rd) g_bui.rd.obj = null;
     if (typeof stopMultiplayerDragSync === 'function') stopMultiplayerDragSync();
-    // Mark channel as potentially dead — Android may suspend the tab and sever
-    // the WebSocket. On visible, we'll force a reconnect.
-    if (g_isMultiplayer && !g_isGameOver) {
-      g_channelSubscribed = false;
-    }
+    // Note: do NOT set g_channelSubscribed = false here. Android may keep the
+    // WebSocket alive during brief tab switches. Setting it false forces a full
+    // reconnection (hello → init handshake) which re-initializes the game with
+    // new racks. Let Supabase detect actual disconnections via CHANNEL_ERROR/CLOSED
+    // status callbacks, which set g_channelSubscribed = false and trigger reconnect.
+    // The pageshow (bfcache) handler DOES force g_channelSubscribed = false because
+    // bfcache always severs the WebSocket.
   } else {
     if (g_isMultiplayer && !g_isGameOver) {
       resetIdleTimer();
@@ -4313,15 +4315,15 @@ function handleVisibilityChange() {
         g_dbWriteInProgress = false;
         mpLog('DB', 'warn', 'Reset stuck g_dbWriteInProgress on visibility restore');
       }
-      // Re-subscribe to game channel if it was marked dead (from hidden handler
-      // or from a detected disconnect). DB sync alone is not enough — we need
-      // the WebSocket for realtime move broadcasts.
+      // Re-subscribe to game channel if Supabase detected a disconnect
+      // (CHANNEL_ERROR/CLOSED callback set g_channelSubscribed = false).
+      // DB sync alone is not enough — we need the WebSocket for realtime broadcasts.
       if (!g_channelSubscribed && !g_channelSubscribing && g_gameId) {
         joinGameChannel(g_gameId, g_isHost, function() {
           maybeSyncGameStateFromDB('visibility');
         }, true);
       } else {
-        // Fetch authoritative state from DB when tab becomes visible
+        // Channel appears alive — just sync from DB to catch any missed state
         maybeSyncGameStateFromDB('visibility');
       }
     }
