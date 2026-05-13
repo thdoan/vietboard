@@ -2058,7 +2058,7 @@ window.confirmRestartMultiplayer = function() {
   g_bui.prompt(
     t('Restarting will forfeit this game.'),
     '<button class="button secondary" onclick="hideModal()">' + t('Cancel') + '</button>' + SPACER +
-    '<button class="button" onclick="hideModal();finalizeMultiplayerGame(\'forfeit\', true);g_bui.restart()">' + t('Forfeit &amp; Restart') + '</button>'
+    '<button class="button" onclick="hideModal();finalizeMultiplayerGame(\'forfeit\', true);setTimeout(function(){g_bui.restart()},2000)">' + t('Forfeit &amp; Restart') + '</button>'
   );
 };
 
@@ -2093,10 +2093,9 @@ function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
     fromId: g_lobbyUserId
   });
 
-  // Purge invite row and game state immediately on game end so it can never cause stale-state issues
+  // Purge invite row immediately
   if (g_gameId) {
     deleteGameInvite(g_gameId);
-    deleteGameStateFromDB(g_gameId);
   }
 
   if (!skipLocalAnnounce) {
@@ -2104,9 +2103,17 @@ function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
   }
 
   if (reason === 'passes' || reason === 'ended') {
+    // Don't delete DB state — the receiver needs it to detect game end and
+    // compute final scores. The host handles cleanup after receiving game_ended.
     enterPostGameState();
   } else {
-    cleanupMultiplayerSession();
+    // Forfeit/disconnect: delay cleanup to give the broadcast time to propagate.
+    // Supabase send() is fire-and-forget; the WebSocket may not deliver before
+    // channel teardown. Also don't delete DB state — the host needs to detect
+    // the forfeit via sync if the broadcast is lost.
+    setTimeout(function() {
+      cleanupMultiplayerSession();
+    }, 1500);
   }
 
   // Fallback: if receiver's game_ended broadcast is lost, compute locally after 5s
