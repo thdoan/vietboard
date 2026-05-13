@@ -1108,16 +1108,28 @@ function handleGameEndFromInvite(invite) {
     g_mpGameEndReason = isForfeitStatus ? 'forfeit' : 'ended';
 
     if (isForfeitStatus) {
-      cleanupMultiplayerSession({ preserveRemote: true });
-
-      // Only the non-forfeiting peer should see "Opponent has left".
-      // The player who clicked Forfeit already knows they left.
-      if (!terminalFromMe) {
-        g_bui.toast(t('Opponent has left the game.'), 4000);
-        g_bui.prompt(
-          t('Opponent has left the game.'),
-          '<button class="button" onclick="hideModal();init(\'board\')">' + t('Play Computer') + '</button>'
-        );
+      if (terminalFromMe) {
+        // Local forfeiter: clean up silently. They already initiated the forfeit
+        // and may be restarting into SP.
+        cleanupMultiplayerSession({ preserveRemote: true });
+      } else {
+        // Remote forfeit is a real terminal game result, not a disconnect alert.
+        // Keep the post-game screen visible and never replace it with the
+        // "Opponent has left" modal. The retained invite row may be seen again
+        // after reload, so this path must remain idempotent and non-modal.
+        var finishForfeitFromDurableState = function() {
+          if (!g_finalScoresApplied && typeof finalizeGameScores === 'function') {
+            finalizeGameScores();
+            g_finalScoresApplied = true;
+          }
+          announceWinner();
+          enterPostGameState();
+        };
+        if (typeof syncGameStateFromDB === 'function') {
+          syncGameStateFromDB().then(finishForfeitFromDurableState, finishForfeitFromDurableState);
+        } else {
+          finishForfeitFromDurableState();
+        }
       }
     } else {
       // For normal terminal states, sync committed DB state first when possible;
@@ -1132,11 +1144,11 @@ function handleGameEndFromInvite(invite) {
         finishFromDurableState();
       }
     }
-  } else if (!g_isMultiplayer && isForfeitStatus && !terminalFromMe) {
-    g_bui.prompt(
-      t('Opponent has left the game.'),
-      '<button class="button" onclick="hideModal();init(\'board\')">' + t('Play Computer') + '</button>'
-    );
+  } else if (!g_isMultiplayer && isForfeitStatus) {
+    // The terminal invite row is intentionally retained for mobile recovery.
+    // If rediscovered after local cleanup/reload, do not show a stale
+    // "Opponent has left" modal forever.
+    return true;
   }
 
   return true;
@@ -3241,18 +3253,24 @@ function handleGameStateBroadcast(payload) {
       g_isGameOver = true;
     }
     g_mpGameEndReason = payload.reason || '';
-    if (payload.reason === 'forfeit' || payload.reason === 'disconnect_forfeit') {
-      g_bui.toast(t('Opponent has left the game.'), 4000);
-    }
+
     // Apply authoritative final scores when provided by the terminal sender.
     applyFinalScores(payload);
-    // Always call announceWinner; it's idempotent for UI and finalizeGameScores is guarded
-    announceWinner();
-    if (payload.reason === 'passes' || payload.reason === 'ended') {
-      enterPostGameState();
-    } else {
-      cleanupMultiplayerSession({ preserveRemote: true });
+
+    // Remote forfeit/disconnect-forfeit should land on the same post-game
+    // screen as other terminal states. Do not toast/prompt "Opponent has left"
+    // and do not cleanup the MP session here, because cleanup can immediately
+    // replace the game-over screen and makes retained terminal rows replay a
+    // stale alert after reload.
+    if ((payload.reason === 'forfeit' || payload.reason === 'disconnect_forfeit') &&
+        !g_finalScoresApplied && typeof finalizeGameScores === 'function') {
+      finalizeGameScores();
+      g_finalScoresApplied = true;
     }
+
+    // Always call announceWinner; it's idempotent for UI and finalizeGameScores is guarded.
+    announceWinner();
+    enterPostGameState();
   }
 
   // Any broadcast from opponent indicates activity — reset idle timer
