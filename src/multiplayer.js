@@ -1111,6 +1111,33 @@ function subscribeToInvites() {
         delete g_pendingInvites[payload.new.game_id];
         renderLobbyPlayers();
       }
+      // Detect game end via DB — the opponent marked the invite as forfeit
+      // or game_ended. This is the reliable real-time path (server-side
+      // postgres_changes, not WebSocket). Fires regardless of tab state.
+      if (payload.new.status === 'forfeit' || payload.new.status === 'game_ended') {
+        mpLog('INVITE', 'log', 'Game end detected via realtime UPDATE:', payload.new.status, payload.new.game_id);
+        // Clean up the invite row
+        if (window.supabaseClient) {
+          window.supabaseClient.from('invites')
+            .delete()
+            .eq('game_id', payload.new.game_id)
+            .eq('app_key', _dk(_hk));
+        }
+        // End the game if we're in one
+        if (g_isMultiplayer && !g_isGameOver) {
+          g_isGameOver = true;
+          g_mpGameEndReason = payload.new.status === 'forfeit' ? 'forfeit' : '';
+          announceWinner();
+        }
+        dismissConnectingToast();
+        cleanupMultiplayerSession();
+        if (payload.new.status === 'forfeit') {
+          g_bui.prompt(
+            t('Opponent has left the game.'),
+            '<button class="button" onclick="hideModal();init(\'board\')">' + t('Play Computer') + '</button>'
+          );
+        }
+      }
     })
     .on('postgres_changes', {
       event: 'DELETE',
@@ -1356,10 +1383,10 @@ window.leaveLobby = async function() {
   g_lastSyncKeys.clear();
   stopLobbyRefresh();
   stopLobbyHeartbeat();
-  if (g_inviteSub) {
-    g_inviteSub.unsubscribe();
-    g_inviteSub = null;
-  }
+  // Note: do NOT tear down g_inviteSub here. Keep it alive during the game
+  // so postgres_changes UPDATE events on the invites table are delivered.
+  // This is how we detect forfeit/game_ended from the opponent in real-time.
+  // g_inviteSub is torn down in cleanupMultiplayerSession() when the game ends.
   if (g_myInviteSub) {
     g_myInviteSub.unsubscribe();
     g_myInviteSub = null;
@@ -1954,6 +1981,12 @@ function cleanupMultiplayerSession() {
     g_channel = null;
   }
   unsubscribeFromGameStateChanges();
+  // Tear down the invite subscription (kept alive during the game for
+  // forfeit/game_ended detection via postgres_changes UPDATE events).
+  if (g_inviteSub) {
+    g_inviteSub.unsubscribe();
+    g_inviteSub = null;
+  }
 
   localStorage.removeItem('session_mp');
   localStorage['session_mode'] = 'sp';
