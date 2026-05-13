@@ -1543,6 +1543,7 @@ function handleInitRetryExhausted() {
 }
 
 function showConnectionFailedPrompt() {
+  dismissConnectingToast();
   cleanupMultiplayerSession();
   g_bui.prompt(
     t('Connection to opponent lost.'),
@@ -1695,6 +1696,7 @@ function joinGameChannel(gameId, isHost, onSubscribed, skipInitRetry) {
       if (payload && payload.gameId === g_gameId && payload.fromId !== g_lobbyUserId) {
         g_connectingInvites.delete(g_gameId);
         deleteGameInvite(g_gameId);
+        dismissConnectingToast();
         cleanupMultiplayerSession();
         g_bui.prompt(
           t('Connection to opponent lost.'),
@@ -4393,6 +4395,12 @@ function handleVisibilityChange() {
     }
     if (!g_isMultiplayer) {
       ensureLobbyConnection();
+      // If we have pending outgoing invites, check if any were accepted while
+      // this tab was backgrounded. The realtime subscription (subscribeToMyInvites)
+      // may have missed the acceptance event due to Android WebSocket suspension.
+      if (Object.keys(g_myInvites).length > 0) {
+        reconcileInvites();
+      }
     }
   }
 }
