@@ -1071,8 +1071,8 @@ function _doRenderLobbyPlayers(state) {
 // Shared handler for game end detection via invite status change.
 // Called from both the to_id and from_id postgres_changes UPDATE handlers.
 function handleGameEndFromInvite(invite) {
-  if (!invite || invite.status !== 'forfeit' && invite.status !== 'game_ended') return;
-  mpLog('INVITE', 'log', 'Game end detected via realtime UPDATE:', invite.status, invite.game_id);
+  if (!invite || (invite.status !== 'forfeit' && invite.status !== 'game_ended')) return;
+  mpLog('INVITE', 'log', 'Game end detected via realtime UPDATE:', invite.status, invite.game_id, 'isMultiplayer:', g_isMultiplayer, 'isGameOver:', g_isGameOver);
   // Clean up the invite row
   if (window.supabaseClient) {
     window.supabaseClient.from('invites')
@@ -1156,6 +1156,7 @@ function subscribeToInvites() {
       filter: 'from_id=eq.' + g_lobbyUserId
     }, (payload) => {
       if (!payload.new) return;
+      mpLog('INVITE', 'log', 'from_id UPDATE received:', payload.new.status, payload.new.game_id, 'myId:', g_lobbyUserId, 'fromId:', payload.new.from_id);
       if (payload.new.status !== 'pending') {
         delete g_myInvites[payload.new.game_id];
         renderLobbyPlayers();
