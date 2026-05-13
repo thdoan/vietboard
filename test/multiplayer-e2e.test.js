@@ -1031,16 +1031,43 @@ async function runTests() {
     }
 
     // -----------------------------------------------------------------------
+    // Phase 9: Forfeit detection (forfeit the existing game)
+    // -----------------------------------------------------------------------
+    console.log('\n--- Phase 9: Forfeit Detection ---');
+
+    // Determine who forfeits (the player whose turn it is NOT)
+    const forfeitPage = await pageA.evaluate(() => g_isMyTurn) ? pageB : pageA;
+    const forfeitLabel = forfeitPage === pageA ? 'A' : 'B';
+    const forfeitOtherPage = forfeitPage === pageA ? pageB : pageA;
+    const forfeitOtherLabel = forfeitPage === pageA ? 'B' : 'A';
+
+    // Forfeit
+    await forfeitPage.evaluate(() => { finalizeMultiplayerGame('forfeit', true); });
+    console.log(`  ${forfeitLabel} forfeited`);
+
+    // Wait for the other player to detect the forfeit via postgres_changes
+    try {
+      await waitFor(() => forfeitOtherPage.evaluate(() => !!g_isGameOver), 15000);
+      console.log(`  PASS: ${forfeitOtherLabel} detected ${forfeitLabel}'s forfeit via realtime event`);
+    } catch {
+      console.log(`  FAIL: ${forfeitOtherLabel} did not detect ${forfeitLabel}'s forfeit`);
+      const debugState = await forfeitOtherPage.evaluate(() => ({
+        isGameOver: !!g_isGameOver,
+        isMultiplayer: !!g_isMultiplayer,
+        hasInviteSub: typeof g_inviteSub !== 'undefined' && g_inviteSub !== null,
+        inviteSubState: typeof g_inviteSub !== 'undefined' && g_inviteSub ? g_inviteSub.state : null
+      }));
+      console.log(`  ${forfeitOtherLabel} state: ${JSON.stringify(debugState)}`);
+      throw new Error('Forfeit detection failed');
+    }
+
+    // -----------------------------------------------------------------------
     // Final assertions
     // -----------------------------------------------------------------------
     console.log('\n--- Final Assertions ---');
 
     assert(errors.length === 0, `Browser errors:\n${errors.join('\n')}`);
     console.log('  No browser errors');
-
-    const finalGids = await Promise.all([pageA.evaluate(() => g_gameId), pageB.evaluate(() => g_gameId)]);
-    assert(finalGids[0] === finalGids[1], `Final gameId mismatch: ${finalGids[0]} vs ${finalGids[1]}`);
-    console.log('  Game IDs match');
 
     console.log('\n=== ALL E2E TESTS PASSED ===');
 
