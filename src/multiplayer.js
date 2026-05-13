@@ -161,6 +161,9 @@ let g_initRetryCount = 0;
 let g_initRetryTimer = null;
 const MAX_INIT_RETRIES = 5;
 const INIT_RETRY_DELAY_MS = 15000;
+const INIT_DB_POLL_DELAY_MS = 3000;
+let g_connectionLostPromptShown = false;
+let g_initDBPollTimer = null;
 
 let g_connectingInvites = new Set();   // gameIds in "connecting" state after accept
 let g_lastCleanupAt = 0;               // throttle cleanupStaleInvites()
@@ -1538,6 +1541,11 @@ async function startMultiplayerGame(gameId, opponentId, opponentName, isHost) {
   g_myRematchGameId = null;
   clearRematchState();
   g_lastEmojiSentAt = 0;
+  g_connectionLostPromptShown = false;
+  if (g_initDBPollTimer) {
+    clearTimeout(g_initDBPollTimer);
+    g_initDBPollTimer = null;
+  }
   localStorage['session_mode'] = 'mp';
 
   // If we're starting a game (either as host or joining), cancel any pending invites we sent
@@ -1691,6 +1699,92 @@ async function cleanupStaleInvites(currentGameId) {
   }
 }
 
+
+function isActiveHandshakeStatus(status) {
+  return status === 'started' || status === 'accepted';
+}
+
+async function fetchCurrentGameInvite() {
+  if (!window.supabaseClient || !g_gameId) return null;
+  try {
+    var { data, error } = await window.supabaseClient
+      .from('invites')
+      .select('*')
+      .eq('app_key', _dk(_hk))
+      .eq('game_id', g_gameId)
+      .maybeSingle();
+    if (error) throw error;
+    return data || null;
+  } catch (err) {
+    if (DEBUG) console.warn('Failed to fetch current game invite:', err);
+    return null;
+  }
+}
+
+function applyInitialDBStateAndSubscribe(dbRow) {
+  if (!dbRow || !dbRow.state) return false;
+  mpLog('INIT', 'log', 'Initial game state found in DB, syncing');
+  g_isMultiplayer = true;
+  g_stateVersion = dbRow.state.turnNumber || 1;
+  g_dbVersion = dbRow.version || 1;
+  applyGameStateFromDB(dbRow);
+  renderCommittedBoard();
+  if (g_bui) {
+    g_bui.makeTilesFixed();
+    g_bui.setPlayerRack(g_bui.racks[1] || '');
+    g_bui.setOpponentRack(g_bui.racks[2] || '');
+    g_bui.setPlayerScore(g_playerLastScore || 0, g_pscore);
+    g_bui.setOpponentScore(g_opponentLastScore || 0, g_oscore);
+    g_bui.setTilesLeft((g_letpool || []).length);
+  }
+  updateTurnIndicator();
+  updateGameInfoLabels();
+  g_lastDBGameState = JSON.stringify(buildGameStateSnapshot());
+  subscribeToGameStateChanges();
+  dismissConnectingToast();
+  if (g_initRetryTimer) {
+    clearTimeout(g_initRetryTimer);
+    g_initRetryTimer = null;
+  }
+  if (g_initDBPollTimer) {
+    clearTimeout(g_initDBPollTimer);
+    g_initDBPollTimer = null;
+  }
+  return true;
+}
+
+async function trySyncInitialGameStateFromDB() {
+  if (!window.supabaseClient || !g_gameId) return false;
+  try {
+    var { data, error } = await window.supabaseClient
+      .from('games')
+      .select('state, version')
+      .eq('id', g_gameId)
+      .maybeSingle();
+    if (error) throw error;
+    return applyInitialDBStateAndSubscribe(data);
+  } catch (err) {
+    mpLog('INIT', 'warn', 'Failed to sync initial game state from DB:', err);
+    return false;
+  }
+}
+
+function keepWaitingForInitialGameState(reason) {
+  if (!g_isMultiplayer || g_isGameOver || !g_gameId) return;
+  mpLog('INIT', 'log', 'Keeping MP handshake alive:', reason || 'waiting');
+  g_initRetryCount = 0;
+  if (g_initRetryTimer) clearTimeout(g_initRetryTimer);
+  scheduleInitRetry();
+  if (g_initDBPollTimer) clearTimeout(g_initDBPollTimer);
+  g_initDBPollTimer = setTimeout(function() {
+    g_initDBPollTimer = null;
+    if (!g_isMultiplayer || g_isGameOver || !g_gameId) return;
+    trySyncInitialGameStateFromDB().then(function(synced) {
+      if (!synced) handleInitRetryExhausted();
+    });
+  }, INIT_DB_POLL_DELAY_MS);
+}
+
 function scheduleInitRetry() {
   if (g_initRetryTimer) clearTimeout(g_initRetryTimer);
   if (g_initRetryCount >= MAX_INIT_RETRIES) {
@@ -1714,55 +1808,43 @@ function scheduleInitRetry() {
 // already started the game (DB has state). This handles Android timer throttling
 // in background tabs — the host's init may have been sent while this tab was
 // suspended, and the retry timers fired late or not at all.
-function handleInitRetryExhausted() {
+async function handleInitRetryExhausted() {
   if (!window.supabaseClient || !g_gameId) {
     showConnectionFailedPrompt();
     return;
   }
-  window.supabaseClient
-    .from('games')
-    .select('state, version')
-    .eq('id', g_gameId)
-    .maybeSingle()
-    .then(function(result) {
-      if (result.data && result.data.state) {
-        // Game exists in DB — host already started. Sync from DB instead of failing.
-        mpLog('INIT', 'log', 'Retries exhausted but game found in DB, syncing instead of failing');
-        g_isMultiplayer = true;
-        g_isHost = false;
-        g_stateVersion = result.data.state.turnNumber || 1;
-        g_dbVersion = result.data.version || 1;
-        applyGameStateFromDB(result.data);
-        renderCommittedBoard();
-        if (g_bui) {
-          g_bui.makeTilesFixed();
-          g_bui.setPlayerRack(g_bui.racks[1] || '');
-          g_bui.setOpponentRack(g_bui.racks[2] || '');
-          g_bui.setPlayerScore(g_playerLastScore || 0, g_pscore);
-          g_bui.setOpponentScore(g_opponentLastScore || 0, g_oscore);
-          g_bui.setTilesLeft((g_letpool || []).length);
-        }
-        updateTurnIndicator();
-        updateGameInfoLabels();
-        g_lastDBGameState = JSON.stringify(buildGameStateSnapshot());
-        subscribeToGameStateChanges();
-      } else {
-        // No game in DB — connection truly failed
-        sendBroadcastNow('connection_failed', { gameId: g_gameId, fromId: g_lobbyUserId });
-        deleteGameInvite(g_gameId);
-        showConnectionFailedPrompt();
-      }
-    })
-    .catch(function() {
-      sendBroadcastNow('connection_failed', { gameId: g_gameId, fromId: g_lobbyUserId });
-      deleteGameInvite(g_gameId);
-      showConnectionFailedPrompt();
-    });
+
+  // First, try the authoritative DB game row. Mobile browsers on the same
+  // phone can miss all realtime init broadcasts while backgrounded.
+  var synced = await trySyncInitialGameStateFromDB();
+  if (synced) return;
+
+  // If the invite is still active, the handshake is not truly failed. One side
+  // is probably suspended/throttled. Keep polling/retrying instead of deleting
+  // the invite or broadcasting connection_failed, which causes alert loops.
+  var invite = await fetchCurrentGameInvite();
+  if (invite && isActiveHandshakeStatus(invite.status)) {
+    keepWaitingForInitialGameState('active invite without DB state yet');
+    return;
+  }
+
+  // Only fail when the durable DB invite is gone or no longer active.
+  showConnectionFailedPrompt();
 }
 
 function showConnectionFailedPrompt() {
+  if (g_connectionLostPromptShown) return;
+  g_connectionLostPromptShown = true;
+  if (g_initRetryTimer) {
+    clearTimeout(g_initRetryTimer);
+    g_initRetryTimer = null;
+  }
+  if (g_initDBPollTimer) {
+    clearTimeout(g_initDBPollTimer);
+    g_initDBPollTimer = null;
+  }
   dismissConnectingToast();
-  cleanupMultiplayerSession();
+  cleanupMultiplayerSession({ preserveRemote: true });
   g_bui.prompt(
     t('Connection to opponent lost.'),
     '<button class="button" onclick="hideModal();init(\'board\')">' + t('Play Computer') + '</button>'
@@ -1912,14 +1994,17 @@ function joinGameChannel(gameId, isHost, onSubscribed, skipInitRetry) {
     })
     .on('broadcast', { event: 'connection_failed' }, ({ payload }) => {
       if (payload && payload.gameId === g_gameId && payload.fromId !== g_lobbyUserId) {
-        g_connectingInvites.delete(g_gameId);
-        deleteGameInvite(g_gameId);
-        dismissConnectingToast();
-        cleanupMultiplayerSession();
-        g_bui.prompt(
-          t('Connection to opponent lost.'),
-          '<button class="button" onclick="hideModal();init(\'board\')">' + t('Play Computer') + '</button>'
-        );
+        fetchCurrentGameInvite().then(function(invite) {
+          if (invite && isActiveHandshakeStatus(invite.status)) {
+            // Treat peer failure broadcast as stale while DB still says the
+            // match is active. This prevents mobile background timer races from
+            // creating endless connection-lost alert loops.
+            keepWaitingForInitialGameState('ignored stale connection_failed broadcast');
+            return;
+          }
+          g_connectingInvites.delete(g_gameId);
+          showConnectionFailedPrompt();
+        });
       }
     })
     .subscribe(async (status) => {
@@ -1943,6 +2028,18 @@ function joinGameChannel(gameId, isHost, onSubscribed, skipInitRetry) {
 
         // Both host and guest announce presence
         sendBroadcastNow('hello', { gameId: g_gameId, fromId: g_lobbyUserId, role: isHost ? 'host' : 'guest', resuming: g_isResuming });
+
+        // Mobile same-phone handshakes cannot depend on the host receiving the
+        // guest's live hello/request_init while backgrounded. Once the host is
+        // subscribed for an accepted game, create the authoritative DB state
+        // proactively so the guest can recover via polling after tab switches.
+        if (isHost && !g_isResuming && !g_cachedInitPayload && g_stateVersion <= 1) {
+          setTimeout(function() {
+            if (g_isMultiplayer && g_gameId === gameId && isHost && !g_isResuming && !g_cachedInitPayload && g_stateVersion <= 1) {
+              initializeHostGame();
+            }
+          }, 500);
+        }
 
         if (typeof onSubscribed === 'function') {
           onSubscribed();
@@ -4515,6 +4612,31 @@ document.addEventListener('appReady', function() {
   }
 });
 
+
+
+function checkInitialHandshakeOnResume() {
+  if (!g_isMultiplayer || g_isGameOver || !g_gameId) return;
+  if (g_stateVersion > 1 || g_cachedInitPayload) return;
+  trySyncInitialGameStateFromDB().then(function(synced) {
+    if (synced) return;
+    fetchCurrentGameInvite().then(function(invite) {
+      if (invite && isActiveHandshakeStatus(invite.status)) {
+        if (g_isHost && !g_isResuming && !g_cachedInitPayload && g_stateVersion <= 1) {
+          initializeHostGame();
+        } else if (!g_isHost) {
+          keepWaitingForInitialGameState('resume/focus');
+        }
+      }
+    });
+  });
+}
+
+window.addEventListener('focus', checkInitialHandshakeOnResume);
+window.addEventListener('pageshow', checkInitialHandshakeOnResume);
+window.addEventListener('online', checkInitialHandshakeOnResume);
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'visible') checkInitialHandshakeOnResume();
+});
 
 
 // -----------------------------------------------------------------------------
