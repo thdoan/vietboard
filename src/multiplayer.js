@@ -4369,8 +4369,14 @@ function handleVisibilityChange() {
           maybeSyncGameStateFromDB('visibility');
         }, true);
       } else {
-        // Channel appears alive — just sync from DB to catch any missed state
-        maybeSyncGameStateFromDB('visibility');
+        // Delay DB sync briefly so realtime events (from opponent's recent writes)
+        // get processed first. Realtime events are faster than HTTP on local network,
+        // but the 300ms debounce on the postgres_changes handler can delay them.
+        // Without this delay, we might read stale DB state and then skip the
+        // realtime sync (version check: dbVersion > g_dbVersion fails).
+        setTimeout(function() {
+          maybeSyncGameStateFromDB('visibility');
+        }, 500);
       }
     }
     if (!g_isMultiplayer) {
