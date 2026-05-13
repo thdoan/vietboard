@@ -893,18 +893,24 @@ async function cleanupStalePendingInvites() {
       .eq('app_key', _dk(_hk));
     if (error) throw error;
     var foundPending = new Set();
+    var foundAny = new Set();
     if (data) data.forEach(function(row) {
       if (row.status === 'pending') foundPending.add(row.game_id);
+      foundAny.add(row.game_id); // Track invites that still exist in any status
     });
     var changed = false;
+    // Clean up incoming invites that are no longer pending
     for (var gid in g_pendingInvites) {
       if (!foundPending.has(gid)) {
         delete g_pendingInvites[gid];
         changed = true;
       }
     }
+    // Clean up outgoing invites only if they're GONE from DB (cancelled/deleted).
+    // Don't remove invites that changed to 'accepted' — the auto-start handler
+    // needs g_myInvites to trigger startMultiplayerGame.
     for (var gid in g_myInvites) {
-      if (!foundPending.has(gid)) {
+      if (!foundAny.has(gid)) {
         delete g_myInvites[gid];
         changed = true;
       }
