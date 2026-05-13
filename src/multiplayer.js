@@ -1228,7 +1228,7 @@ async function reconcileInvites() {
     // backgrounded). The forfeiting player marks the invite as 'forfeit' in DB
     // instead of deleting it, so the host can detect it via sync.
     if (typeof g_isMultiplayer !== 'undefined' && !g_isMultiplayer) {
-      await checkForForfeitInvite();
+      await checkForGameEndInvite();
     }
 
     renderLobbyPlayers();
@@ -1472,44 +1472,60 @@ async function markInviteForfeit(gameId) {
   }
 }
 
-// Check if the opponent forfeited while this player was backgrounded.
+async function markInviteGameEnded(gameId) {
+  if (!window.supabaseClient || !gameId) return;
+  try {
+    await window.supabaseClient.from('invites')
+      .update({ status: 'game_ended' })
+      .eq('game_id', gameId)
+      .eq('app_key', _dk(_hk));
+    mpLog('INVITE', 'log', 'Marked invite as game_ended:', gameId);
+  } catch (err) {
+    mpLog('INVITE', 'warn', 'Failed to mark invite as game_ended:', err);
+  }
+}
+
+// Check if the opponent ended the game while this player was backgrounded.
 // Works both in-lobby and in-game (reconcileInvites skips in-game via g_isMultiplayer guard).
-async function checkForForfeitInvite() {
+// Handles both 'forfeit' (opponent left) and 'game_ended' (passes/ended) statuses.
+async function checkForGameEndInvite() {
   if (!window.supabaseClient || !g_lobbyUserId) return;
   try {
-    var { data: forfeitInvite } = await window.supabaseClient
+    var { data: endInvite } = await window.supabaseClient
       .from('invites')
       .select('*')
       .eq('to_id', g_lobbyUserId)
-      .eq('status', 'forfeit')
+      .in('status', ['forfeit', 'game_ended'])
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    if (forfeitInvite) {
-      var forfeitAgeMs = Date.now() - new Date(forfeitInvite.created_at).getTime();
-      if (forfeitAgeMs < 5 * 60 * 1000) {
-        mpLog('INVITE', 'log', 'Detected opponent forfeit via DB:', forfeitInvite.game_id);
+    if (endInvite) {
+      var ageMs = Date.now() - new Date(endInvite.created_at).getTime();
+      if (ageMs < 5 * 60 * 1000) {
+        mpLog('INVITE', 'log', 'Detected opponent game end via DB:', endInvite.game_id, 'status:', endInvite.status);
         await window.supabaseClient.from('invites')
           .delete()
-          .eq('game_id', forfeitInvite.game_id)
+          .eq('game_id', endInvite.game_id)
           .eq('app_key', _dk(_hk));
         // If we're in a game, end it
         if (g_isMultiplayer && !g_isGameOver) {
           g_isGameOver = true;
-          g_mpGameEndReason = 'forfeit';
+          g_mpGameEndReason = endInvite.status === 'forfeit' ? 'forfeit' : '';
           announceWinner();
         }
         dismissConnectingToast();
         cleanupMultiplayerSession();
-        g_bui.prompt(
-          t('Opponent has left the game.'),
-          '<button class="button" onclick="hideModal();init(\'board\')">' + t('Play Computer') + '</button>'
-        );
+        if (endInvite.status === 'forfeit') {
+          g_bui.prompt(
+            t('Opponent has left the game.'),
+            '<button class="button" onclick="hideModal();init(\'board\')">' + t('Play Computer') + '</button>'
+          );
+        }
       }
     }
   } catch (err) {
-    mpLog('INVITE', 'warn', 'Failed to check for forfeit invite:', err);
+    mpLog('INVITE', 'warn', 'Failed to check for game end invite:', err);
   }
 }
 
@@ -1522,7 +1538,7 @@ async function cleanupStaleInvites(currentGameId) {
     var query = window.supabaseClient.from('invites')
       .delete()
       .eq('app_key', _dk(_hk))
-      .in('status', ['started', 'accepted', 'cancelled', 'forfeit'])
+      .in('status', ['started', 'accepted', 'cancelled', 'forfeit', 'game_ended'])
       .or('from_id.eq.' + g_lobbyUserId + ',to_id.eq.' + g_lobbyUserId);
     if (currentGameId) {
       query = query.neq('game_id', currentGameId);
@@ -2162,15 +2178,15 @@ function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
     fromId: g_lobbyUserId
   });
 
-  // Mark forfeit in DB so the other player can detect it via sync.
-  // For forfeit/disconnect, use markInviteForfeit (status='forfeit') instead of
-  // deleteGameInvite — the other player needs to detect the forfeit if the
-  // broadcast is lost. For other reasons (passes/ended), delete normally.
+  // Mark game end in DB so the other player can detect it via sync.
+  // Use markInviteForfeit for forfeit/disconnect, markInviteGameEnded for
+  // passes/ended. The other player needs to detect the game end if the
+  // broadcast is lost (Android tab suspension, WebSocket death).
   if (g_gameId) {
     if (reason === 'forfeit' || reason === 'disconnect_forfeit') {
       markInviteForfeit(g_gameId);
     } else {
-      deleteGameInvite(g_gameId);
+      markInviteGameEnded(g_gameId);
     }
   }
 
@@ -2297,6 +2313,7 @@ function initializeHostGame() {
     myRack: oppRack, // What is opponent rack to us is their rack
     oppRack: myRack,
     hostGoesFirst: hostGoesFirst,
+    layout: g_layout,
     stateVersion: g_stateVersion
   };
 
@@ -2907,6 +2924,11 @@ function handleGameStateBroadcast(payload) {
 
     // Apply init state from host synchronously (no setTimeout)
     g_letpool = payload.letpool;
+    if (typeof payload.layout === 'string' && payload.layout) {
+      g_layout = payload.layout;
+      localStorage['layout'] = payload.layout;
+      if (typeof applyLayout === 'function') applyLayout(payload.layout);
+    }
     g_bui.setPlayerRack(payload.myRack);
     g_bui.setOpponentRack(payload.oppRack);
     g_bui.setTilesLeft(g_letpool.length);
@@ -3139,14 +3161,19 @@ function onMultiplayerMove(passed) {
   g_isMyTurn = false;
   updateTurnIndicator();
   updateGameInfoLabels();
+
+  // Write to DB BEFORE broadcasting — DB is the authoritative source of truth.
+  // If the broadcast is lost (Android tab suspension, WebSocket death), the
+  // opponent can still detect the move via DB sync (postgres_changes or
+  // visibilitychange). The broadcast carries full moveData for fast local
+  // network delivery, but the DB is always the fallback.
+  g_lastMoveAt = Date.now();
+  clearOpponentPreviewCache();
+  saveMultiplayerSession();
   broadcastGameState(moveData);
 
   // Clear cached init so it can't be re-broadcast mid-game
   g_cachedInitPayload = null;
-
-  g_lastMoveAt = Date.now();
-  clearOpponentPreviewCache();
-  saveMultiplayerSession();
 
   if (!passed && rackAfter.replace(/\./g, '') === '' && g_letpool.length === 0) {
     g_rackEmptiedBy = 'player';
@@ -3442,6 +3469,7 @@ function saveSessionMpOnly() {
     history: g_history,
     newplays: (g_bui && g_bui.newplays) || {},
     oppNewplays: {},
+    layout: g_layout,
     savedAt: Date.now(),
     lastMoveAt: g_lastMoveAt || Date.now(),
     lastPlayerStateWriteAt: g_lastPlayerStateWriteAt || 0
@@ -3595,7 +3623,8 @@ function buildGameStateSnapshot() {
     player2LastScore: g_isHost ? g_opponentLastScore : g_playerLastScore,
     history: neutralHistory,
     passes: g_passes,
-    turnNumber: g_stateVersion
+    turnNumber: g_stateVersion,
+    layout: g_layout
   };
 }
 
@@ -3740,6 +3769,16 @@ function applyGameStateFromDB(dbState) {
   if (Array.isArray(s.letpool)) g_letpool = s.letpool;
   if (typeof s.passes === 'number') g_passes = s.passes;
   if (typeof s.turnNumber === 'number') g_stateVersion = s.turnNumber;
+
+  // Layout: persist and apply if board is empty (pre-first-move).
+  // After the first move, layout is locked — bonus tiles are committed to board state.
+  if (typeof s.layout === 'string' && s.layout) {
+    g_layout = s.layout;
+    localStorage['layout'] = s.layout;
+    if (g_board_empty && typeof applyLayout === 'function') {
+      applyLayout(s.layout);
+    }
+  }
 
   // boardTypes: perspective-neutral (1=host, 2=guest) → local (1=me, 2=opponent)
   if (s.boardTypes) {
@@ -4461,7 +4500,7 @@ function handleVisibilityChange() {
         }, 500);
       }
       // Check if opponent forfeited while we were backgrounded
-      checkForForfeitInvite();
+      checkForGameEndInvite();
     }
     if (!g_isMultiplayer) {
       ensureLobbyConnection();
