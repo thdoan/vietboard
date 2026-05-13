@@ -2083,16 +2083,15 @@ function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
   g_isGameOver = true;
   g_mpGameEndReason = reason || '';
 
-  // When skipLocalAnnounce is true (mover side), the receiver will detect
-  // the game end and broadcast game_ended with authoritative scores.
-  if (!skipLocalAnnounce) {
-    broadcastGameState({
-      type: 'game_ended',
-      reason: reason || 'ended',
-      stateVersion: g_stateVersion,
-      fromId: g_lobbyUserId
-    });
-  }
+  // Always broadcast game_ended so the other player is notified.
+  // skipLocalAnnounce only skips the local announceWinner() call (the
+  // game_ended handler on the receiving side will call it).
+  broadcastGameState({
+    type: 'game_ended',
+    reason: reason || 'ended',
+    stateVersion: g_stateVersion,
+    fromId: g_lobbyUserId
+  });
 
   // Purge invite row and game state immediately on game end so it can never cause stale-state issues
   if (g_gameId) {
@@ -2882,7 +2881,7 @@ function handleGameStateBroadcast(payload) {
     }
     g_mpGameEndReason = payload.reason || '';
     if (payload.reason === 'forfeit') {
-      g_bui.prompt(t('Opponent has left the game.'));
+      g_bui.toast(t('Opponent has left the game.'), 4000);
     }
     // Apply authoritative final scores from the receiver
     applyFinalScores(payload);
