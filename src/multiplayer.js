@@ -1224,6 +1224,13 @@ async function reconcileInvites() {
       }
     }
 
+    // Check for forfeited invites addressed to me (opponent forfeited while I was
+    // backgrounded). The forfeiting player marks the invite as 'forfeit' in DB
+    // instead of deleting it, so the host can detect it via sync.
+    if (typeof g_isMultiplayer !== 'undefined' && !g_isMultiplayer) {
+      await checkForForfeitInvite();
+    }
+
     renderLobbyPlayers();
   } catch (err) {
     if (DEBUG) console.warn('Failed to reconcile invites:', err);
@@ -1449,6 +1456,60 @@ async function deleteGameInvite(gameId) {
     if (DEBUG) console.log('Deleted invite for game:', gameId);
   } catch (err) {
     if (DEBUG) console.warn('Failed to delete invite:', err);
+  }
+}
+
+async function markInviteForfeit(gameId) {
+  if (!window.supabaseClient || !gameId) return;
+  try {
+    await window.supabaseClient.from('invites')
+      .update({ status: 'forfeit' })
+      .eq('game_id', gameId)
+      .eq('app_key', _dk(_hk));
+    mpLog('INVITE', 'log', 'Marked invite as forfeit:', gameId);
+  } catch (err) {
+    mpLog('INVITE', 'warn', 'Failed to mark invite as forfeit:', err);
+  }
+}
+
+// Check if the opponent forfeited while this player was backgrounded.
+// Works both in-lobby and in-game (reconcileInvites skips in-game via g_isMultiplayer guard).
+async function checkForForfeitInvite() {
+  if (!window.supabaseClient || !g_lobbyUserId) return;
+  try {
+    var { data: forfeitInvite } = await window.supabaseClient
+      .from('invites')
+      .select('*')
+      .eq('to_id', g_lobbyUserId)
+      .eq('status', 'forfeit')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (forfeitInvite) {
+      var forfeitAgeMs = Date.now() - new Date(forfeitInvite.created_at).getTime();
+      if (forfeitAgeMs < 5 * 60 * 1000) {
+        mpLog('INVITE', 'log', 'Detected opponent forfeit via DB:', forfeitInvite.game_id);
+        await window.supabaseClient.from('invites')
+          .delete()
+          .eq('game_id', forfeitInvite.game_id)
+          .eq('app_key', _dk(_hk));
+        // If we're in a game, end it
+        if (g_isMultiplayer && !g_isGameOver) {
+          g_isGameOver = true;
+          g_mpGameEndReason = 'forfeit';
+          announceWinner();
+        }
+        dismissConnectingToast();
+        cleanupMultiplayerSession();
+        g_bui.prompt(
+          t('Opponent has left the game.'),
+          '<button class="button" onclick="hideModal();init(\'board\')">' + t('Play Computer') + '</button>'
+        );
+      }
+    }
+  } catch (err) {
+    mpLog('INVITE', 'warn', 'Failed to check for forfeit invite:', err);
   }
 }
 
@@ -2101,9 +2162,16 @@ function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
     fromId: g_lobbyUserId
   });
 
-  // Purge invite row immediately
+  // Mark forfeit in DB so the other player can detect it via sync.
+  // For forfeit/disconnect, use markInviteForfeit (status='forfeit') instead of
+  // deleteGameInvite — the other player needs to detect the forfeit if the
+  // broadcast is lost. For other reasons (passes/ended), delete normally.
   if (g_gameId) {
-    deleteGameInvite(g_gameId);
+    if (reason === 'forfeit' || reason === 'disconnect_forfeit') {
+      markInviteForfeit(g_gameId);
+    } else {
+      deleteGameInvite(g_gameId);
+    }
   }
 
   if (!skipLocalAnnounce) {
@@ -4392,6 +4460,8 @@ function handleVisibilityChange() {
           maybeSyncGameStateFromDB('visibility');
         }, 500);
       }
+      // Check if opponent forfeited while we were backgrounded
+      checkForForfeitInvite();
     }
     if (!g_isMultiplayer) {
       ensureLobbyConnection();
