@@ -160,7 +160,7 @@ let g_seenInitIds = new Set();
 let g_initRetryCount = 0;
 let g_initRetryTimer = null;
 const MAX_INIT_RETRIES = 5;
-const INIT_RETRY_DELAY_MS = 10000;
+const INIT_RETRY_DELAY_MS = 15000;
 
 let g_connectingInvites = new Set();   // gameIds in "connecting" state after accept
 let g_lastCleanupAt = 0;               // throttle cleanupStaleInvites()
@@ -1471,31 +1471,77 @@ function scheduleInitRetry() {
   if (g_initRetryTimer) clearTimeout(g_initRetryTimer);
   if (g_initRetryCount >= MAX_INIT_RETRIES) {
     g_initRetryTimer = null;
-    sendBroadcastNow('connection_failed', { gameId: g_gameId, fromId: g_lobbyUserId });
-    deleteGameInvite(g_gameId);
-    cleanupMultiplayerSession();
-    g_bui.prompt(
-      t('Connection to opponent lost.'),
-      '<button class="button" onclick="hideModal();init(\'board\')">' + t('Play Computer') + '</button>'
-    );
+    handleInitRetryExhausted();
     return;
   }
   g_initRetryTimer = setTimeout(function() {
-    if (g_cachedInitPayload) return; // success
+    if (g_cachedInitPayload) return; // success — host already sent init
     sendBroadcastNow('request_init', { gameId: g_gameId, fromId: g_lobbyUserId });
     g_initRetryCount++;
     if (g_initRetryCount >= MAX_INIT_RETRIES) {
-      sendBroadcastNow('connection_failed', { gameId: g_gameId, fromId: g_lobbyUserId });
-      deleteGameInvite(g_gameId);
-      cleanupMultiplayerSession();
-      g_bui.prompt(
-        t('Connection to opponent lost.'),
-        '<button class="button" onclick="hideModal();init(\'board\')">' + t('Play Computer') + '</button>'
-      );
+      handleInitRetryExhausted();
     } else {
       scheduleInitRetry();
     }
   }, INIT_RETRY_DELAY_MS);
+}
+
+// Called when init retries are exhausted. Before giving up, check if the host
+// already started the game (DB has state). This handles Android timer throttling
+// in background tabs — the host's init may have been sent while this tab was
+// suspended, and the retry timers fired late or not at all.
+function handleInitRetryExhausted() {
+  if (!window.supabaseClient || !g_gameId) {
+    showConnectionFailedPrompt();
+    return;
+  }
+  window.supabaseClient
+    .from('games')
+    .select('state, version')
+    .eq('id', g_gameId)
+    .maybeSingle()
+    .then(function(result) {
+      if (result.data && result.data.state) {
+        // Game exists in DB — host already started. Sync from DB instead of failing.
+        mpLog('INIT', 'log', 'Retries exhausted but game found in DB, syncing instead of failing');
+        g_isMultiplayer = true;
+        g_isHost = false;
+        g_stateVersion = result.data.state.turnNumber || 1;
+        g_dbVersion = result.data.version || 1;
+        applyGameStateFromDB(result.data);
+        renderCommittedBoard();
+        if (g_bui) {
+          g_bui.makeTilesFixed();
+          g_bui.setPlayerRack(g_bui.racks[1] || '');
+          g_bui.setOpponentRack(g_bui.racks[2] || '');
+          g_bui.setPlayerScore(g_playerLastScore || 0, g_pscore);
+          g_bui.setOpponentScore(g_opponentLastScore || 0, g_oscore);
+          g_bui.setTilesLeft((g_letpool || []).length);
+        }
+        updateTurnIndicator();
+        updateGameInfoLabels();
+        g_lastDBGameState = JSON.stringify(buildGameStateSnapshot());
+        subscribeToGameStateChanges();
+      } else {
+        // No game in DB — connection truly failed
+        sendBroadcastNow('connection_failed', { gameId: g_gameId, fromId: g_lobbyUserId });
+        deleteGameInvite(g_gameId);
+        showConnectionFailedPrompt();
+      }
+    })
+    .catch(function() {
+      sendBroadcastNow('connection_failed', { gameId: g_gameId, fromId: g_lobbyUserId });
+      deleteGameInvite(g_gameId);
+      showConnectionFailedPrompt();
+    });
+}
+
+function showConnectionFailedPrompt() {
+  cleanupMultiplayerSession();
+  g_bui.prompt(
+    t('Connection to opponent lost.'),
+    '<button class="button" onclick="hideModal();init(\'board\')">' + t('Play Computer') + '</button>'
+  );
 }
 
 function joinGameChannel(gameId, isHost, onSubscribed, skipInitRetry) {
