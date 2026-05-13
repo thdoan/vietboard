@@ -177,6 +177,12 @@ let g_myInviteSub = null;    // Realtime subscription for my outgoing invites
 let g_pendingInvites = {};   // gameId -> {from_id, from_name, created_at}
 let g_myInvites = {};        // gameId -> {to_id, to_name, sent_at}
 
+// Durable terminal states must remain DB-observable long enough for mobile
+// peers that missed realtime events while suspended/reloading.
+const MP_TERMINAL_INVITE_STATUSES = ['forfeit', 'disconnect_forfeit', 'game_ended'];
+const MP_TERMINAL_RETAIN_MS = 10 * 60 * 1000;
+let g_terminalSyncTimer = null;
+
 // Hybrid heartbeat for reliable lobby lists on mobile
 var g_lobbyHeartbeats = {};  // opponentId -> {name, lastPing}
 let g_lobbyHeartbeatTimer = null;
@@ -1070,30 +1076,101 @@ function _doRenderLobbyPlayers(state) {
 
 // Shared handler for game end detection via invite status change.
 // Called from both the to_id and from_id postgres_changes UPDATE handlers.
+// IMPORTANT: do not delete the invite row here. Mobile browsers frequently
+// miss realtime while suspended; the terminal invite status is the durable
+// reconciliation signal on resume/reload.
 function handleGameEndFromInvite(invite) {
-  if (!invite || (invite.status !== 'forfeit' && invite.status !== 'game_ended')) return;
-  mpLog('INVITE', 'log', 'Game end detected via realtime UPDATE:', invite.status, invite.game_id, 'isMultiplayer:', g_isMultiplayer, 'isGameOver:', g_isGameOver);
-  // Clean up the invite row
-  if (window.supabaseClient) {
-    window.supabaseClient.from('invites')
-      .delete()
-      .eq('game_id', invite.game_id)
-      .eq('app_key', _dk(_hk));
+  if (!invite || !MP_TERMINAL_INVITE_STATUSES.includes(invite.status)) return false;
+
+  mpLog('INVITE', 'log', 'Game end detected via invite status:', {
+    status: invite.status,
+    gameId: invite.game_id
+  });
+
+  if (invite.game_id) {
+    rememberTerminalInvite(invite);
   }
-  // End the game if we're in one
+
+  dismissConnectingToast();
+
+  if (g_isMultiplayer && g_gameId && invite.game_id && invite.game_id !== g_gameId) {
+    return false;
+  }
+
+  var terminalFromMe = invite.from_id && invite.from_id === g_lobbyUserId;
+  var isForfeitStatus = invite.status === 'forfeit' || invite.status === 'disconnect_forfeit';
+
   if (g_isMultiplayer && !g_isGameOver) {
     g_isGameOver = true;
-    g_mpGameEndReason = invite.status === 'forfeit' ? 'forfeit' : '';
-    announceWinner();
-  }
-  dismissConnectingToast();
-  cleanupMultiplayerSession();
-  if (invite.status === 'forfeit') {
+    g_mpGameEndReason = isForfeitStatus ? 'forfeit' : 'ended';
+
+    if (isForfeitStatus) {
+      cleanupMultiplayerSession({ preserveRemote: true });
+
+      // Only the non-forfeiting peer should see "Opponent has left".
+      // The player who clicked Forfeit already knows they left.
+      if (!terminalFromMe) {
+        g_bui.toast(t('Opponent has left the game.'), 4000);
+        g_bui.prompt(
+          t('Opponent has left the game.'),
+          '<button class="button" onclick="hideModal();init(\'board\')">' + t('Play Computer') + '</button>'
+        );
+      }
+    } else {
+      // For normal terminal states, sync committed DB state first when possible;
+      // a mobile peer may have missed the final move broadcast.
+      var finishFromDurableState = function() {
+        announceWinner();
+        enterPostGameState();
+      };
+      if (typeof syncGameStateFromDB === 'function') {
+        syncGameStateFromDB().then(finishFromDurableState, finishFromDurableState);
+      } else {
+        finishFromDurableState();
+      }
+    }
+  } else if (!g_isMultiplayer && isForfeitStatus && !terminalFromMe) {
     g_bui.prompt(
       t('Opponent has left the game.'),
       '<button class="button" onclick="hideModal();init(\'board\')">' + t('Play Computer') + '</button>'
     );
   }
+
+  return true;
+}
+
+function rememberTerminalInvite(invite) {
+  if (!invite || !invite.game_id) return;
+  try {
+    localStorage.setItem('mp_terminal_' + invite.game_id, JSON.stringify({
+      gameId: invite.game_id,
+      status: invite.status,
+      fromId: invite.from_id || '',
+      toId: invite.to_id || '',
+      savedAt: Date.now()
+    }));
+  } catch (err) {
+    mpLog('INVITE', 'warn', 'Failed to store terminal invite marker:', err);
+  }
+}
+
+function readTerminalInviteMarker(gameId) {
+  if (!gameId) return null;
+  try {
+    var marker = JSON.parse(localStorage.getItem('mp_terminal_' + gameId) || 'null');
+    if (!marker || !marker.savedAt) return null;
+    if (Date.now() - marker.savedAt > MP_TERMINAL_RETAIN_MS) {
+      localStorage.removeItem('mp_terminal_' + gameId);
+      return null;
+    }
+    return marker;
+  } catch (err) {
+    return null;
+  }
+}
+
+function isTerminalInviteStatus(status) {
+  return MP_TERMINAL_INVITE_STATUSES.indexOf(status) !== -1;
 }
 
 function subscribeToInvites() {
@@ -1538,65 +1615,76 @@ async function markInviteGameEnded(gameId) {
   }
 }
 
-// Check if the opponent ended the game while this player was backgrounded.
-// Works both in-lobby and in-game (reconcileInvites skips in-game via g_isMultiplayer guard).
-// Handles both 'forfeit' (opponent left) and 'game_ended' (passes/ended) statuses.
+// Check if either side ended the game while this player was backgrounded.
+// Query both from_id and to_id. The previous to_id-only query missed the host
+// when the guest forfeited.
 async function checkForGameEndInvite() {
-  if (!window.supabaseClient || !g_lobbyUserId) return;
+  if (!window.supabaseClient || !g_lobbyUserId) return false;
+
   try {
-    var { data: endInvite } = await window.supabaseClient
+    var query = window.supabaseClient
       .from('invites')
       .select('*')
-      .eq('to_id', g_lobbyUserId)
-      .in('status', ['forfeit', 'game_ended'])
+      .eq('app_key', _dk(_hk))
+      .in('status', MP_TERMINAL_INVITE_STATUSES)
+      .or('from_id.eq.' + g_lobbyUserId + ',to_id.eq.' + g_lobbyUserId)
       .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(5);
 
-    if (endInvite) {
-      var ageMs = Date.now() - new Date(endInvite.created_at).getTime();
-      if (ageMs < 5 * 60 * 1000) {
-        mpLog('INVITE', 'log', 'Detected opponent game end via DB:', endInvite.game_id, 'status:', endInvite.status);
-        await window.supabaseClient.from('invites')
-          .delete()
-          .eq('game_id', endInvite.game_id)
-          .eq('app_key', _dk(_hk));
-        // If we're in a game, end it
-        if (g_isMultiplayer && !g_isGameOver) {
-          g_isGameOver = true;
-          g_mpGameEndReason = endInvite.status === 'forfeit' ? 'forfeit' : '';
-          announceWinner();
-        }
-        dismissConnectingToast();
-        cleanupMultiplayerSession();
-        if (endInvite.status === 'forfeit') {
-          g_bui.prompt(
-            t('Opponent has left the game.'),
-            '<button class="button" onclick="hideModal();init(\'board\')">' + t('Play Computer') + '</button>'
-          );
+    if (g_gameId) query = query.eq('game_id', g_gameId);
+
+    var { data, error } = await query;
+    if (error) throw error;
+
+    if (data && data.length) {
+      for (var i = 0; i < data.length; ++i) {
+        var invite = data[i];
+        if (!g_gameId || invite.game_id === g_gameId) {
+          return handleGameEndFromInvite(invite);
         }
       }
     }
+
+    if (g_gameId) {
+      var marker = readTerminalInviteMarker(g_gameId);
+      if (marker && marker.status) {
+        return handleGameEndFromInvite({
+          game_id: marker.gameId,
+          status: marker.status,
+          from_id: marker.fromId,
+          to_id: marker.toId
+        });
+      }
+    }
+
+    return false;
   } catch (err) {
     mpLog('INVITE', 'warn', 'Failed to check for game end invite:', err);
+    return false;
   }
 }
 
 async function cleanupStaleInvites(currentGameId) {
   if (!window.supabaseClient) return;
+
+  // During an active game, invite rows are part of the recovery protocol.
+  // Deleting them here strands a suspended mobile peer in MP mode.
+  if (g_isMultiplayer || currentGameId) {
+    return;
+  }
+
   var now = Date.now();
   if (now - g_lastCleanupAt < 30000) return; // Throttle to once per 30s
   g_lastCleanupAt = now;
+
   try {
-    var query = window.supabaseClient.from('invites')
+    // Only cleanup non-terminal stale rows. Terminal rows are retained briefly
+    // so mobile peers can observe forfeit/game_ended after resume/reload.
+    var { error } = await window.supabaseClient.from('invites')
       .delete()
       .eq('app_key', _dk(_hk))
-      .in('status', ['started', 'accepted', 'cancelled', 'forfeit', 'game_ended'])
+      .in('status', ['accepted', 'cancelled'])
       .or('from_id.eq.' + g_lobbyUserId + ',to_id.eq.' + g_lobbyUserId);
-    if (currentGameId) {
-      query = query.neq('game_id', currentGameId);
-    }
-    var { error } = await query;
     if (error) throw error;
   } catch (err) {
     if (DEBUG) console.warn('Failed to clean up stale invites:', err);
@@ -1979,7 +2067,8 @@ function clearRematchState() {
   }
 }
 
-function cleanupMultiplayerSession() {
+function cleanupMultiplayerSession(options) {
+  options = options || {};
   clearRematchState();
   if (g_idleTimer) {
     clearInterval(g_idleTimer);
@@ -2017,9 +2106,12 @@ function cleanupMultiplayerSession() {
   localStorage.removeItem('session_mp');
   localStorage['session_mode'] = 'sp';
 
-  // Purge the invite row and game state for this game so it can never cause stale-state issues
+  // Do not purge remote rows by default during terminal cleanup. The invite row
+  // is the durable signal that lets the other mobile browser recover if it missed
+  // realtime events while suspended. Explicit purge is reserved for truly abandoned
+  // setup failures/rematch transitions.
   var endedGameId = g_gameId;
-  if (endedGameId) {
+  if (endedGameId && options.purgeRemote === true) {
     deleteGameInvite(endedGameId);
     deleteGameStateFromDB(endedGameId);
   }
@@ -2227,26 +2319,30 @@ function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
   g_isGameOver = true;
   g_mpGameEndReason = reason || '';
 
-  // Always broadcast game_ended so the other player is notified.
-  // skipLocalAnnounce only skips the local announceWinner() call (the
-  // game_ended handler on the receiving side will call it).
-  broadcastGameState({
+  var payload = {
     type: 'game_ended',
     reason: reason || 'ended',
     stateVersion: g_stateVersion,
     fromId: g_lobbyUserId
-  });
+  };
 
-  // Mark game end in DB so the other player can detect it via sync.
-  // Use markInviteForfeit for forfeit/disconnect, markInviteGameEnded for
-  // passes/ended. The other player needs to detect the game end if the
-  // broadcast is lost (Android tab suspension, WebSocket death).
+  // Broadcast remains the fast path, but DB terminal status is the source of
+  // truth for mobile browsers that missed the broadcast.
+  broadcastGameState(payload);
+
+  var terminalWrite = Promise.resolve();
   if (g_gameId) {
     if (reason === 'forfeit' || reason === 'disconnect_forfeit') {
-      markInviteForfeit(g_gameId);
+      terminalWrite = Promise.resolve(markInviteForfeit(g_gameId));
     } else {
-      markInviteGameEnded(g_gameId);
+      terminalWrite = Promise.resolve(markInviteGameEnded(g_gameId));
     }
+    rememberTerminalInvite({
+      game_id: g_gameId,
+      status: (reason === 'forfeit' || reason === 'disconnect_forfeit') ? 'forfeit' : 'game_ended',
+      from_id: g_lobbyUserId,
+      to_id: g_opponentId || ''
+    });
   }
 
   if (!skipLocalAnnounce) {
@@ -2254,17 +2350,16 @@ function finalizeMultiplayerGame(reason, skipLocalAnnounce) {
   }
 
   if (reason === 'passes' || reason === 'ended') {
-    // Don't delete DB state — the receiver needs it to detect game end and
-    // compute final scores. The host handles cleanup after receiving game_ended.
     enterPostGameState();
   } else {
-    // Forfeit/disconnect: delay cleanup to give the broadcast time to propagate.
-    // Supabase send() is fire-and-forget; the WebSocket may not deliver before
-    // channel teardown. Also don't delete DB state — the host needs to detect
-    // the forfeit via sync if the broadcast is lost.
-    setTimeout(function() {
-      cleanupMultiplayerSession();
-    }, 1500);
+    // Give the DB terminal write a chance to land before tearing down local MP.
+    // cleanupMultiplayerSession preserves remote rows by default.
+    Promise.race([
+      terminalWrite.catch(function() {}),
+      new Promise(function(resolve) { setTimeout(resolve, 1500); })
+    ]).then(function() {
+      cleanupMultiplayerSession({ preserveRemote: true });
+    });
   }
 
   // Fallback: if receiver's game_ended broadcast is lost, compute locally after 5s
@@ -3039,22 +3134,27 @@ function handleGameStateBroadcast(payload) {
       }
     }
   } else if (payload.type === 'game_ended') {
+    // Broadcast is the fast path, but mobile reconnects can echo/replay local
+    // terminal messages. Ignore our own terminal broadcast so the forfeiting
+    // or game-ending player never receives peer-only terminal UX.
+    if (payload.fromId && payload.fromId === g_lobbyUserId) return;
+
     var alreadyEnded = g_isGameOver;
     if (!alreadyEnded) {
       g_isGameOver = true;
     }
     g_mpGameEndReason = payload.reason || '';
-    if (payload.reason === 'forfeit') {
+    if (payload.reason === 'forfeit' || payload.reason === 'disconnect_forfeit') {
       g_bui.toast(t('Opponent has left the game.'), 4000);
     }
-    // Apply authoritative final scores from the receiver
+    // Apply authoritative final scores when provided by the terminal sender.
     applyFinalScores(payload);
     // Always call announceWinner; it's idempotent for UI and finalizeGameScores is guarded
     announceWinner();
     if (payload.reason === 'passes' || payload.reason === 'ended') {
       enterPostGameState();
     } else {
-      cleanupMultiplayerSession();
+      cleanupMultiplayerSession({ preserveRemote: true });
     }
   }
 
@@ -3126,6 +3226,7 @@ function onMultiplayerMove(passed) {
   var scoreEarned = 0;
   var rackBefore = g_bui.getPlayerRack();
   var rackAfter = rackBefore;
+  var endedByPasses = false;
 
   if (!passed) {
     // Keep global board state in sync with current UI state before validation.
@@ -3179,8 +3280,10 @@ function onMultiplayerMove(passed) {
     g_bui.cancelPlayerPlacement();
     ++g_passes;
     if (g_passes >= g_maxpasses) {
-      finalizeMultiplayerGame('passes', true);
-      // No return here, we still want to broadcast the move that ended the game
+      // Defer terminal handling until after this pass move is saved to DB and
+      // broadcast. Calling finalizeMultiplayerGame() here sets g_isGameOver,
+      // which makes saveMultiplayerSession() skip the authoritative write.
+      endedByPasses = true;
     }
   }
 
@@ -3231,21 +3334,45 @@ function onMultiplayerMove(passed) {
   saveMultiplayerSession();
   broadcastGameState(moveData);
 
+  if (endedByPasses) {
+    g_isGameOver = true;
+    g_mpGameEndReason = 'passes';
+    finalizeGameScores();
+    g_finalScoresApplied = true;
+    if (g_gameId) markInviteGameEnded(g_gameId);
+    broadcastGameState({
+      type: 'game_ended',
+      reason: 'passes',
+      stateVersion: g_stateVersion,
+      fromId: g_lobbyUserId,
+      finalPScore: g_pscore,
+      finalOScore: g_oscore
+    });
+    announceWinner();
+    enterPostGameState();
+    return;
+  }
+
   // Clear cached init so it can't be re-broadcast mid-game
   g_cachedInitPayload = null;
 
   if (!passed && rackAfter.replace(/\./g, '') === '' && g_letpool.length === 0) {
     g_rackEmptiedBy = 'player';
     g_isGameOver = true;
-    saveMultiplayerSession();
+    g_mpGameEndReason = 'ended';
+    finalizeGameScores();
+    g_finalScoresApplied = true;
+    if (g_gameId) markInviteGameEnded(g_gameId);
+    broadcastGameState({
+      type: 'game_ended',
+      reason: 'ended',
+      stateVersion: g_stateVersion,
+      fromId: g_lobbyUserId,
+      finalPScore: g_pscore,
+      finalOScore: g_oscore
+    });
+    announceWinner();
     enterPostGameState();
-    // Fallback: if receiver's game_ended broadcast is lost, compute locally after 5s
-    setTimeout(function() {
-      if (g_isGameOver && !g_finalScoresApplied) {
-        finalizeGameScores();
-        announceWinner();
-      }
-    }, 5000);
     return;
   }
 }
@@ -3898,7 +4025,7 @@ function applyGameStateFromDB(dbState) {
         g_bui.setPlayerRack(myRack);
       }
     }
-    
+
     // Opponent rack (render placeholders based on count, or actual string if visible)
     if (typeof oppRack === 'string' && oppRack !== '') {
       g_bui.setOpponentRack(oppRack);
@@ -4367,10 +4494,16 @@ document.addEventListener('appReady', function() {
   if (typeof checkActiveInvite === 'function') {
     checkActiveInvite().then(function(invite) {
       if (!invite && hasLocalSession) {
-        // DB says no active game, but localStorage thinks there is
-        if (DEBUG) console.log('Stale session_mp, cleaning up');
-        cleanupMultiplayerSession();
-        init('board');
+        // DB says no active game, but localStorage thinks there is. Before
+        // cleaning up, check whether the peer ended the game while this tab
+        // was suspended and the active invite transitioned to a terminal state.
+        checkForGameEndInvite().then(function(ended) {
+          if (!ended) {
+            if (DEBUG) console.log('Stale session_mp, cleaning up');
+            cleanupMultiplayerSession({ preserveRemote: true });
+            init('board');
+          }
+        });
       } else if (invite && !hasLocalSession) {
         // DB found active game, but localStorage was cleared
         if (DEBUG) console.log('Recovered MP session from invite DB');
@@ -4509,6 +4642,24 @@ function resetIdleTimer() {
 // Reset idle timer on clicks
 window.addEventListener('click', resetIdleTimer);
 window.addEventListener('touchstart', resetIdleTimer);
+
+function startTerminalInviteSync() {
+  if (g_terminalSyncTimer) clearInterval(g_terminalSyncTimer);
+  g_terminalSyncTimer = setInterval(function() {
+    if (g_isMultiplayer && !g_isGameOver && g_gameId) {
+      checkForGameEndInvite();
+    }
+  }, 5000);
+}
+
+startTerminalInviteSync();
+
+window.addEventListener('focus', function() {
+  if (g_isMultiplayer && !g_isGameOver) checkForGameEndInvite();
+});
+window.addEventListener('online', function() {
+  if (g_isMultiplayer && !g_isGameOver) checkForGameEndInvite();
+});
 
 // Pause/resume idle timer and force-save session when app goes to background
 function handleVisibilityChange() {
