@@ -1522,7 +1522,7 @@ async function cleanupStaleInvites(currentGameId) {
     var query = window.supabaseClient.from('invites')
       .delete()
       .eq('app_key', _dk(_hk))
-      .in('status', ['started', 'accepted', 'cancelled'])
+      .in('status', ['started', 'accepted', 'cancelled', 'forfeit'])
       .or('from_id.eq.' + g_lobbyUserId + ',to_id.eq.' + g_lobbyUserId);
     if (currentGameId) {
       query = query.neq('game_id', currentGameId);
