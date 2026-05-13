@@ -91,6 +91,16 @@ async function waitForAppReady(page) {
   }), 20000);
 }
 
+// Simulate network latency by intercepting all requests and adding a delay.
+// Useful for testing race conditions in multiplayer sync.
+async function simulateNetworkLatency(page, minMs = 100, maxMs = 300) {
+  await page.route('**/*', async (route) => {
+    const delay = minMs + Math.floor(Math.random() * (maxMs - minMs));
+    await new Promise(r => setTimeout(r, delay));
+    await route.continue();
+  });
+}
+
 async function waitForHandshakeComplete(page, label) {
   try {
     return await waitFor(() => page.evaluate(() => {
@@ -558,6 +568,13 @@ async function runTests() {
       if (msg.includes('localStorage') && msg.includes('Access is denied')) return;
       console.error('[B] PAGEERROR:', msg); errors.push(`B: ${msg}`);
     });
+
+    // Simulate network latency if --latency flag is set
+    if (process.argv.includes('--latency')) {
+      console.log('  Simulating network latency (100-300ms per request)');
+      await simulateNetworkLatency(pageA, 100, 300);
+      await simulateNetworkLatency(pageB, 100, 300);
+    }
 
     const suffix = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const nameA = `E2EA_${suffix}`;

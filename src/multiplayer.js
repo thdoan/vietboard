@@ -1068,6 +1068,34 @@ function _doRenderLobbyPlayers(state) {
 // INVITE SYSTEM
 // -------------------------------------------------------------------------
 
+// Shared handler for game end detection via invite status change.
+// Called from both the to_id and from_id postgres_changes UPDATE handlers.
+function handleGameEndFromInvite(invite) {
+  if (!invite || invite.status !== 'forfeit' && invite.status !== 'game_ended') return;
+  mpLog('INVITE', 'log', 'Game end detected via realtime UPDATE:', invite.status, invite.game_id);
+  // Clean up the invite row
+  if (window.supabaseClient) {
+    window.supabaseClient.from('invites')
+      .delete()
+      .eq('game_id', invite.game_id)
+      .eq('app_key', _dk(_hk));
+  }
+  // End the game if we're in one
+  if (g_isMultiplayer && !g_isGameOver) {
+    g_isGameOver = true;
+    g_mpGameEndReason = invite.status === 'forfeit' ? 'forfeit' : '';
+    announceWinner();
+  }
+  dismissConnectingToast();
+  cleanupMultiplayerSession();
+  if (invite.status === 'forfeit') {
+    g_bui.prompt(
+      t('Opponent has left the game.'),
+      '<button class="button" onclick="hideModal();init(\'board\')">' + t('Play Computer') + '</button>'
+    );
+  }
+}
+
 function subscribeToInvites() {
   if (!window.supabaseClient) return;
   if (g_inviteSub) {
@@ -1115,28 +1143,25 @@ function subscribeToInvites() {
       // or game_ended. This is the reliable real-time path (server-side
       // postgres_changes, not WebSocket). Fires regardless of tab state.
       if (payload.new.status === 'forfeit' || payload.new.status === 'game_ended') {
-        mpLog('INVITE', 'log', 'Game end detected via realtime UPDATE:', payload.new.status, payload.new.game_id);
-        // Clean up the invite row
-        if (window.supabaseClient) {
-          window.supabaseClient.from('invites')
-            .delete()
-            .eq('game_id', payload.new.game_id)
-            .eq('app_key', _dk(_hk));
-        }
-        // End the game if we're in one
-        if (g_isMultiplayer && !g_isGameOver) {
-          g_isGameOver = true;
-          g_mpGameEndReason = payload.new.status === 'forfeit' ? 'forfeit' : '';
-          announceWinner();
-        }
-        dismissConnectingToast();
-        cleanupMultiplayerSession();
-        if (payload.new.status === 'forfeit') {
-          g_bui.prompt(
-            t('Opponent has left the game.'),
-            '<button class="button" onclick="hideModal();init(\'board\')">' + t('Play Computer') + '</button>'
-          );
-        }
+        handleGameEndFromInvite(payload.new);
+      }
+    })
+    // Also listen for updates on invites we SENT (from_id=me). The host is the
+    // invite sender (from_id). When the guest forfeits and marks the invite,
+    // the host's to_id filter doesn't match. This from_id filter catches it.
+    .on('postgres_changes', {
+      event: 'UPDATE',
+      schema: 'public',
+      table: 'invites',
+      filter: 'from_id=eq.' + g_lobbyUserId
+    }, (payload) => {
+      if (!payload.new) return;
+      if (payload.new.status !== 'pending') {
+        delete g_myInvites[payload.new.game_id];
+        renderLobbyPlayers();
+      }
+      if (payload.new.status === 'forfeit' || payload.new.status === 'game_ended') {
+        handleGameEndFromInvite(payload.new);
       }
     })
     .on('postgres_changes', {
