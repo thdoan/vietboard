@@ -4040,14 +4040,15 @@ function maybeSyncGameStateFromDB(reason) {
     mpLog('SYNC', 'log', 'Deferring sync (remote drag/cooldown)', { reason: reason });
     g_deferredDBSync = true;
     g_deferredDbSyncs++;
-    return;
+    return Promise.resolve(false);
   }
   if (!isDragInProgress()) {
-    syncGameStateFromDB();
+    return syncGameStateFromDB();
   } else {
     mpLog('SYNC', 'log', 'Deferring sync (local drag)', { reason: reason });
     g_deferredDBSync = true;
     g_deferredDbSyncs++;
+    return Promise.resolve(false);
   }
 }
 
@@ -4493,14 +4494,16 @@ function handleVisibilityChange() {
         // Delay DB sync briefly so realtime events (from opponent's recent writes)
         // get processed first. Realtime events are faster than HTTP on local network,
         // but the 300ms debounce on the postgres_changes handler can delay them.
-        // Without this delay, we might read stale DB state and then skip the
-        // realtime sync (version check: dbVersion > g_dbVersion fails).
+        // After sync, check for game end via DB — the opponent may have forfeited
+        // or the game may have ended while we were backgrounded.
         setTimeout(function() {
-          maybeSyncGameStateFromDB('visibility');
+          maybeSyncGameStateFromDB('visibility').then(function() {
+            if (!g_isGameOver) checkForGameEndInvite();
+          });
         }, 500);
       }
-      // Check if opponent forfeited while we were backgrounded
-      checkForGameEndInvite();
+      // Also check immediately (in case the 500ms delay is too slow for fast tab switches)
+      if (!g_isGameOver) checkForGameEndInvite();
     }
     if (!g_isMultiplayer) {
       ensureLobbyConnection();
@@ -4558,10 +4561,14 @@ window.addEventListener('pageshow', function(e) {
       setTimeout(function() {
         if (!g_channelSubscribed && !g_channelSubscribing) {
           joinGameChannel(g_gameId, g_isHost, function() {
-            syncGameStateFromDB();
+            syncGameStateFromDB().then(function() {
+              if (!g_isGameOver) checkForGameEndInvite();
+            });
           }, true);
         } else {
-          syncGameStateFromDB();
+          syncGameStateFromDB().then(function() {
+            if (!g_isGameOver) checkForGameEndInvite();
+          });
         }
       }, 100);
     } else {
