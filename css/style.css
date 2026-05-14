@@ -164,6 +164,7 @@ tr.highlight.player {
 
 .debug {
   line-height: 1.2;
+  user-select: text;
 }
 
 .table-container {

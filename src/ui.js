@@ -1296,6 +1296,8 @@ function RedipsUI() {
     return self.bdropCellId;
   };
 
+  // VB_SWAP_DRAW_FIRST_PATCH: swap modal logs selected tiles but does not
+  // mutate the bag. engine.js performs the authoritative draw-first swap.
   self.onSwap = function(cancel) {
     var keep = '';
     var swap = '';
@@ -1313,7 +1315,17 @@ function RedipsUI() {
       }
     }
 
-    //console.log('onSwap', keep, swap);
+    if (typeof DEBUG !== 'undefined' && DEBUG) {
+      try {
+        console.log('[SWAP]', 'ui:onSwap', {
+          cancel: !!cancel,
+          keep: keep,
+          swap: swap,
+          swapLength: swap.length,
+          bagLength: Array.isArray(g_letpool) ? g_letpool.length : -1
+        });
+      } catch (err) {}
+    }
 
     // Either I'm not using REDIPS correctly or having the two tile swapping
     // tables somehow messes up its internal table monitoring mechanism.
@@ -1329,11 +1341,35 @@ function RedipsUI() {
   };
 
   self.onSwapToggle = function(elTile) {
-    if (!elTile.classList.contains('to-swap') && document.querySelectorAll('#swaptable .to-swap').length === g_letpool.length) {
+    var selectedBefore = document.querySelectorAll('#swaptable .to-swap').length;
+    var bagLength = Array.isArray(g_letpool) ? g_letpool.length : 0;
+    var alreadySelected = elTile.classList.contains('to-swap');
+
+    if (!alreadySelected && selectedBefore >= bagLength) {
       el('swaptable').title = t('No tiles left to swap');
+      if (typeof DEBUG !== 'undefined' && DEBUG) {
+        try {
+          console.log('[SWAP]', 'ui:onSwapToggle:block', {
+            selectedBefore: selectedBefore,
+            bagLength: bagLength,
+            letter: elTile.firstChild && elTile.firstChild.holds ? elTile.firstChild.holds.letter : ''
+          });
+        } catch (err) {}
+      }
     } else {
       elTile.classList.toggle('to-swap');
       el('swaptable').title = t('Select the letters you want to swap');
+      if (typeof DEBUG !== 'undefined' && DEBUG) {
+        try {
+          console.log('[SWAP]', 'ui:onSwapToggle', {
+            selectedBefore: selectedBefore,
+            selectedAfter: document.querySelectorAll('#swaptable .to-swap').length,
+            bagLength: bagLength,
+            selected: elTile.classList.contains('to-swap'),
+            letter: elTile.firstChild && elTile.firstChild.holds ? elTile.firstChild.holds.letter : ''
+          });
+        } catch (err) {}
+      }
     }
   };
 
@@ -1929,7 +1965,7 @@ function RedipsUI() {
       accumulator[currentValue] = (accumulator[currentValue] || 0) + 1;
       return accumulator;
     }, {});
-    self.prompt('<div class="debug">' + JSON.stringify(oTilesLeft).replace(/[{}"]/g, '').replace(/([:,])/g, '$1 ') + '</div>', '', 'bag');
+    self.prompt('<div class="debug">' + JSON.stringify(oTilesLeft).replace(/[{}"]/g, '').replace(/([:,])/g, '$1 ').toUpperCase() + '</div>', '', 'bag');
   };
 
   self.toast = function(msg, duration) {

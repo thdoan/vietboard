@@ -1618,6 +1618,97 @@ function onPlayerShuffle() {
 }
 
 //------------------------------------------------------------------------------
+// VB_SWAP_DRAW_FIRST_PATCH: shared SP/MP swap helper.
+// Invariant: replacement tiles must be drawn from the pre-swap bag only.
+// The selected tiles are returned to the bag after replacements are drawn.
+function vbSwapDebug(stage, data) {
+  if (typeof DEBUG !== 'undefined' && DEBUG) {
+    try {
+      console.log('[SWAP]', stage, data || {});
+    } catch (err) {}
+  }
+}
+
+function vbSwapBagSummary(pool) {
+  var counts = {};
+  if (!Array.isArray(pool)) return counts;
+  for (var i = 0; i < pool.length; ++i) {
+    var tile = pool[i];
+    counts[tile] = (counts[tile] || 0) + 1;
+  }
+  return counts;
+}
+
+function vbApplyPlayerSwapDrawFirst(keep, swap) {
+  keep = String(keep || '');
+  swap = String(swap || '');
+  if (!Array.isArray(g_letpool)) g_letpool = [];
+
+  var bagBefore = g_letpool.slice();
+  vbSwapDebug('apply:start', {
+    mode: (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) ? 'MP' : 'SP',
+    keep: keep,
+    swap: swap,
+    swapLength: swap.length,
+    bagBeforeLength: bagBefore.length,
+    bagBefore: vbSwapBagSummary(bagBefore)
+  });
+
+  if (swap.length === 0) {
+    return { rackAfter: keep, bagAfter: g_letpool.slice(), replacementsDrawn: [] };
+  }
+
+  if (g_letpool.length < swap.length) {
+    vbSwapDebug('apply:abort:not-enough-bag', {
+      keep: keep,
+      swap: swap,
+      swapLength: swap.length,
+      bagBeforeLength: g_letpool.length,
+      bagBefore: vbSwapBagSummary(g_letpool)
+    });
+    return null;
+  }
+
+  // Randomize the existing bag BEFORE drawing replacements. At this moment the
+  // selected tiles are not in g_letpool, so takeLetters(keep) cannot draw them.
+  shufflePool();
+  var drawBag = g_letpool.slice();
+  var rackAfter = takeLetters(keep);
+  var bagAfterDraw = g_letpool.slice();
+  var replacementsDrawn = [];
+
+  // Compute which tiles were drawn by multiset subtraction: drawBag - bagAfterDraw.
+  var afterCounts = vbSwapBagSummary(bagAfterDraw);
+  for (var i = 0; i < drawBag.length; ++i) {
+    var tile = drawBag[i];
+    if (afterCounts[tile]) afterCounts[tile]--;
+    else replacementsDrawn.push(tile);
+  }
+
+  // Only now return the swapped tiles to the bag.
+  for (var j = 0; j < swap.length; ++j) {
+    g_letpool.push(swap.charAt(j));
+  }
+  shufflePool();
+
+  vbSwapDebug('apply:finish', {
+    keep: keep,
+    swap: swap,
+    rackAfter: rackAfter,
+    replacementsDrawn: replacementsDrawn,
+    returnedToBag: swap.split(''),
+    bagAfterLength: g_letpool.length,
+    bagAfter: vbSwapBagSummary(g_letpool)
+  });
+
+  return {
+    rackAfter: rackAfter,
+    bagAfter: g_letpool.slice(),
+    replacementsDrawn: replacementsDrawn
+  };
+}
+
+//------------------------------------------------------------------------------
 function onPlayerSwap() {
   if (g_letpool.length === 0) {
     g_bui.prompt(gErrPrefix() + t('no tiles left to swap.'));
@@ -1631,21 +1722,45 @@ function onPlayerSwap() {
 
 //------------------------------------------------------------------------------
 function onPlayerSwapped(keep, swap) {
+  keep = String(keep || '');
+  swap = String(swap || '');
+  vbSwapDebug('onPlayerSwapped:entry', {
+    mode: (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) ? 'MP' : 'SP',
+    keep: keep,
+    swap: swap,
+    rackBefore: (g_bui && typeof g_bui.getPlayerRack === 'function') ? g_bui.getPlayerRack() : '',
+    bagLength: Array.isArray(g_letpool) ? g_letpool.length : -1,
+    bag: vbSwapBagSummary(g_letpool)
+  });
+
   if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
     if (swap.length === 0) {
       g_bui.setPlayerRack(keep);
       g_bui.makeTilesFixed();
+      vbSwapDebug('onPlayerSwapped:mp-cancel', { keep: keep });
       return;
     }
-    for (var i = 0; i < swap.length; ++i) g_letpool.push(swap.charAt(i));
-    shufflePool();
-    g_bui.setPlayerRack(takeLetters(keep));
+
+    var mpRackBefore = (g_bui && typeof g_bui.getPlayerRack === 'function') ? g_bui.getPlayerRack() : keep + swap;
+    var mpSwapResult = vbApplyPlayerSwapDrawFirst(keep, swap);
+    if (!mpSwapResult) {
+      g_bui.prompt(gErrPrefix() + t('not enough tiles left to swap.'));
+      g_bui.setPlayerRack((keep + swap).substring(0, g_racksize).padEnd(g_racksize, '.'));
+      g_bui.makeTilesFixed();
+      return;
+    }
+
+    g_bui.setPlayerRack(mpSwapResult.rackAfter);
+    g_bui.setTilesLeft(g_letpool.length);
+    g_passes = 0;
+    g_playerLastScore = 0;
 
     var boardinfo = g_bui.getBoard();
     var moveData = {
       type: 'move',
       passed: true,
       swapped: true,
+      rackBefore: mpRackBefore,
       rackAfter: g_bui.getPlayerRack(),
       letpool: g_letpool,
       score: 0,
@@ -1653,9 +1768,11 @@ function onPlayerSwapped(keep, swap) {
       boardp: boardinfo.boardp,
       boardt: boardinfo.boardt,
       boardEmpty: g_board_empty,
+      passes: g_passes,
       stateVersion: (typeof getNextMultiplayerStateVersion === 'function') ? getNextMultiplayerStateVersion() : 0
     };
 
+    vbSwapDebug('onPlayerSwapped:mp-broadcast', moveData);
     g_isMyTurn = false;
     updateTurnIndicator();
     broadcastGameState(moveData);
@@ -1663,20 +1780,29 @@ function onPlayerSwapped(keep, swap) {
     return;
   }
 
-  //console.log('onPlayerSwapped', keep, swap);
   if (swap.length === 0) {
     g_bui.setPlayerRack(keep);
     // Initialize REDISP again
     g_bui.makeTilesFixed();
+    vbSwapDebug('onPlayerSwapped:sp-cancel', { keep: keep });
     return;
   }
-  // Put swapped letters back into the bag
-  for (var i = 0; i < swap.length; ++i) {
-    g_letpool.push(swap.charAt(i));
+
+  var spSwapResult = vbApplyPlayerSwapDrawFirst(keep, swap);
+  if (!spSwapResult) {
+    g_bui.prompt(gErrPrefix() + t('not enough tiles left to swap.'));
+    g_bui.setPlayerRack((keep + swap).substring(0, g_racksize).padEnd(g_racksize, '.'));
+    g_bui.makeTilesFixed();
+    return;
   }
-  // Shake the bag
-  shufflePool();
-  g_bui.setPlayerRack(takeLetters(keep));
+
+  g_bui.setPlayerRack(spSwapResult.rackAfter);
+  g_bui.setTilesLeft(g_letpool.length);
+  vbSwapDebug('onPlayerSwapped:sp-complete-before-computer-turn', {
+    rackAfter: spSwapResult.rackAfter,
+    bagLength: g_letpool.length,
+    bag: vbSwapBagSummary(g_letpool)
+  });
   onPlayerMoved(true, true);
 }
 
