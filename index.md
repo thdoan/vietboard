@@ -1,5 +1,5 @@
-This could very well be the world's first Vietnamese Scrabble-type game. Whether you're a Vietnamese language learner or a native speaker, Vietboard provides endless crosswording fun for everyone. You can play the game online by clicking the big button below.
+This might just be the world’s first Vietnamese Scrabble-style game. Whether you’re learning Vietnamese or already speak it fluently, Vietboard brings a fresh crossword challenge built around the richness of the Vietnamese language. Play online against the computer or challenge other players in multiplayer by clicking the big button below.
 
-We are actively looking for players to help us fine-tune the game balance. We'd love to hear from you, so drop by our [WordPress blog](https://vietboard.wordpress.com/) to get in touch.
+We’re actively looking for players to help us fine-tune the game balance and make Vietboard even better. Drop by our [WordPress blog](https://vietboard.wordpress.com/) to get in touch, share feedback, and learn more about the game.
 
 Enjoy! ^_^
