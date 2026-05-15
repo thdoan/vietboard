@@ -117,6 +117,7 @@ var translation_map = {
   'Vietnamese': 'Tiếng Việt',
   'View this match': 'Xem lại trận này',
   'Visit our Facebook Page to learn more': 'Ghé Facebook để xem thêm',
+  'Visit our WordPress Blog to learn more': 'Ghé WordPress để xem thêm',
   'Waiting for opponent...': 'Đang chờ đối thủ...',
   'WARNING: Game will end in 1 minute due to inactivity.': 'CẢNH BÁO: Trò chơi sẽ kết thúc sau 1 phút do không hoạt động.',
   'WARNING: Opponent disconnected. Game will forfeit in 1 minute.': 'CẢNH BÁO: Đối thủ ngắt kết nối. Trò chơi sẽ bị hủy sau 1 phút.',

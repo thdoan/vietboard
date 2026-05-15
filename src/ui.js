@@ -718,7 +718,8 @@ function RedipsUI() {
       hr;
     html +=
       '</table><footer>' +
-      '<a href="https://fb.me/vietboardplay" class="social" title="' + t('Visit our Facebook Page to learn more') + '"><img src="pics/fb.svg" width="32" height="32" alt="Facebook"></a>' +
+      '<a href="https://vietboard.wordpress.com/" class="social" title="' + t('Visit our WordPress Blog to learn more') + '" target="_wp"><img src="pics/wp.svg" width="32" height="32" alt="WordPress"></a>' +
+      '<a href="https://fb.me/vietboardplay" class="social" title="' + t('Visit our Facebook Page to learn more') + '" target="_fb"><img src="pics/fb.svg" width="32" height="32" alt="Facebook"></a>' +
       '<span onclick="showWhatsNew()">v' + VER + '</span>' +
       (localStorage['lang'] === 'vi' ?
         '<a href="javascript:setLang(\'en\')">' + t('English') + '</a> | ' + t('Vietnamese') :

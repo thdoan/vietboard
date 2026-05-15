@@ -878,6 +878,9 @@ footer span {
 footer .social {
   float: right;
 }
+footer .social:first-child {
+  margin-left: 0.5rem;
+}
 
 /*** Modal ***/
 
