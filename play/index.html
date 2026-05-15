@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <title>Vietboard Game : Ô Chữ Tiếng Việt</title>
+<link rel="preconnect" href="https://unpkg.com">
+<link rel="preconnect" href="https://www.googletagmanager.com">
+<link rel="preconnect" href="https://www.google-analytics.com">
 <!-- Global site tag (gtag.js) - Google Analytics -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=UA-2843793-11"></script>
 <script>
@@ -26,6 +29,7 @@ window.g_isSupported = Array.prototype.indexOf
   var sLang = localStorage['lang']==='vi' ? 'vi' : 'en';
   var script = document.createElement('script');
   script.src = 'lang/' + sLang + '_translate.js';
+  script.async = false;
   document.head.appendChild(script);
   document.documentElement.lang = sLang; // HTML5 compliance
   if (!g_isSupported) return;
@@ -60,10 +64,12 @@ window.g_isSupported = Array.prototype.indexOf
   window.g_tileset = localStorage['tileset'];
   var sFamily = g_tilesets.indexOf(g_tileset)>-1 ? g_tileset : 'Maven+Pro:wght@500';
   var link = document.createElement('link');
+  link.id = 'tileset-font-link';
   link.rel = 'stylesheet';
   link.href = 'https://fonts.googleapis.com/css2?family=' + sFamily + '&display=swap';
   document.head.appendChild(link);
   var style = document.createElement('style');
+  style.id = 'tileset-font-style';
   style.textContent = '.drag{font-family:\'' + (sFamily.indexOf('Maven')===0 ? 'Maven Pro' : sFamily) + '\', Arial, sans-serif}';
   // Load bonuses layout
   window.g_layouts = [
@@ -97,11 +103,14 @@ window.g_isSupported = Array.prototype.indexOf
       (i>0 ? sSvgText.replace('__TEXT__', aBonusTiles[i][0]) : '') +
       '</svg>\')}';
   }
-  style.textContent += sCss;
   document.head.appendChild(style);
+  var bonusStyle = document.createElement('style');
+  bonusStyle.id = 'bonus-tiles-style';
+  bonusStyle.textContent = sCss;
+  document.head.appendChild(bonusStyle);
 })();
 </script>
-<link rel="stylesheet" href="css/styles.min.css?v=215526">
+<link rel="stylesheet" href="css/styles.min.css?v=020434">
 <link rel="apple-touch-icon" sizes="180x180" href="../favicon/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="32x32" href="../favicon/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="../favicon/favicon-16x16.png">
@@ -131,7 +140,8 @@ window.g_isSupported = Array.prototype.indexOf
     <div id="modal-content"></div>
   </div>
 </div>
-<script src="js/lang.min.js?v=215526"></script>
-<script src="js/app.min.js?v=215526"></script>
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="js/lang.min.js?v=020434"></script>
+<script src="js/app.min.js?v=020434"></script>
 </body>
 </html>
