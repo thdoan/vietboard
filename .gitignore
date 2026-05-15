@@ -1,0 +1,6 @@
+.opencode/
+supabase/
+
+*.7z
+*.log
+.phase*.md
