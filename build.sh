@@ -50,7 +50,7 @@ sed -i 's/g_tiles_in_bag = 20/g_tiles_in_bag = 200/' "$TMP_ENGINE"
 
 TMP_MULTIPLAYER=$(mktemp)
 cp src/multiplayer.js "$TMP_MULTIPLAYER"
-sed -i '/^[[:space:]]*mpLog(/d' "$TMP_MULTIPLAYER"
+perl -0pi -e 's/^[ \t]*mpLog\s*\([\s\S]*?\);\s*(?:\r?\n|$)//mg' "$TMP_MULTIPLAYER"
 
 # ---------------------------------------------------------------------------
 # 6. Bundle + minify application source files

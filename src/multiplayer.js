@@ -2911,7 +2911,7 @@ function renderCommittedBoard() {
         // Only clear if no committed tile AND no preview tile exists
         clearTile(cell);
       } else if (DEBUG) {
-        // mpLog('JOKER', 'log', 'renderCommittedBoard preserving preview', { cell: cellId });
+        //mpLog('JOKER', 'log', 'renderCommittedBoard preserving preview', { cell: cellId });
       }
     }
   }
@@ -4302,8 +4302,11 @@ function cleanupStaleGamesFromClient(maxAgeHours) {
         mpLog('DB', 'warn', 'cleanup_stale_games error', result.error);
         return 0;
       }
-      if (result.data > 0) mpLog('DB', 'log', 'cleaned up stale games: ' + result.data);
-      return result.data || 0;
+      if (result.data) {
+        mpLog('DB', 'log', 'cleaned up stale games: ' + result.data);
+        return result.data;
+      }
+      return 0;
     })
     .catch(function(err) {
       mpLog('DB', 'warn', 'cleanup_stale_games failed', err);
