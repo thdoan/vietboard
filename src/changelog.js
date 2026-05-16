@@ -1,4 +1,4 @@
-const VER = '3.00';
+const VER = '3.02';
 
 function showWhatsNew() {
   g_bui.prompt(
@@ -8,9 +8,11 @@ function showWhatsNew() {
     '<li>Implemented global high scores</li>' +
     '<li>Implemented official end game rules</li>' +
     '<li>Implemented coin flip for SP and MP games</li>' +
+    '<li>Improved high score syncing (v3.02)</li>' +
     '<li>Removed unnecessary page reloads</li>' +
     '<li>Revamped button icons</li>' +
     '<li>Fixed broken word lookup</li>' +
+    '<li>Fixed broken high score links (v3.02)</li>' +
     '</ul>'
   );
 }
