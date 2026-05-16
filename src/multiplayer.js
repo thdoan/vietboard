@@ -616,7 +616,7 @@ async function saveGlobalHighScores() {
     if (DEBUG) {
       for (var key in strippedHighScores) {
         if (Array.isArray(strippedHighScores[key])) {
-          if (DEBUG) console.log('Sending ' + strippedHighScores[key].length + ' scores for key: ' + key);
+          console.log('Sending ' + strippedHighScores[key].length + ' scores for key: ' + key);
         }
       }
     }
@@ -631,10 +631,12 @@ async function saveGlobalHighScores() {
         p_app_key: _dk(_hk)
       });
 
+    if (DEBUG) {
     if (error) {
-      if (DEBUG) console.warn('Failed to save global high scores:', error.message || error, error);
+        console.warn('Failed to save global high scores:', error.message || error, error);
     } else {
-      if (DEBUG) console.log('Global high scores and sessions synced successfully.');
+        console.log('Global high scores and sessions synced successfully.');
+      }
     }
   } catch (err) {
     if (DEBUG) console.warn('Unexpected error saving global high scores:', err);
@@ -2000,9 +2002,7 @@ function joinGameChannel(gameId, isHost, onSubscribed, skipInitRetry) {
     })
     .on('broadcast', { event: 'init_ack' }, ({ payload }) => {
       // Host receives ACK (for logging/debugging)
-      if (isHost && payload && payload.gameId === g_gameId) {
-        if (DEBUG) console.log('Guest ACKed init:', payload.initId);
-      }
+      if (DEBUG && isHost && payload && payload.gameId === g_gameId) console.log('Guest ACKed init:', payload.initId);
     })
     .on('broadcast', { event: 'connection_failed' }, ({ payload }) => {
       if (payload && payload.gameId === g_gameId && payload.fromId !== g_lobbyUserId) {
@@ -2910,8 +2910,6 @@ function renderCommittedBoard() {
       } else if (!hasLocalPreview && !hasOpponentPreview) {
         // Only clear if no committed tile AND no preview tile exists
         clearTile(cell);
-      } else if (DEBUG) {
-        //mpLog('JOKER', 'log', 'renderCommittedBoard preserving preview', { cell: cellId });
       }
     }
   }
@@ -4276,7 +4274,7 @@ function subscribeToGameStateChanges() {
             mismatches: mismatches
           });
           maybeSyncGameStateFromDB('realtime');
-        } else if (DEBUG) {
+        } else {
           mpLog('DB', 'log', 'Realtime update skipped, state matches local');
         }
       }, REALTIME_SYNC_DEBOUNCE_MS);

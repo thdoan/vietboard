@@ -319,9 +319,7 @@ function announceWinner() {
   }
   html += '</tr></table><ul><li>';
   html += t('You') + ': <strong>' + g_pscore + '</strong></li><li>' + opponentNoun + ': <strong>' + g_oscore + '</strong></li></ul>';
-  if (DEBUG && g_endgameBonusAmount > 0) {
-    console.log(t('Bonus') + ': +' + g_endgameBonusAmount + ' ' + t('from remaining tiles'));
-  }
+  if (DEBUG && g_endgameBonusAmount > 0) console.log(t('Bonus') + ': +' + g_endgameBonusAmount + ' ' + t('from remaining tiles'));
   var msg = '<h3>' + t('It&rsquo;s a tie!');
   if (g_oscore > g_pscore) msg = '<h3 class="opponent">' + opponentWinsText;
   else if (g_oscore < g_pscore) msg = '<h3 class="player">' + t('You win!');

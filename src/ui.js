@@ -1392,7 +1392,6 @@ function RedipsUI() {
     // been determined.
     var newrack = orack;
     var dlet = {};
-    //if (DEBUG) console.log('Placements:', placements);
     var usedIndices = new Set();
 
     // Helper: map logical rack index to physical DOM cell id
@@ -1452,8 +1451,6 @@ function RedipsUI() {
         }
       }
     }
-
-    //if (DEBUG) console.log('Dictionary of letter arrays:', dlet);
 
     // Go over each letter in the current opponent rack each time a letter
     // exists in the move dictionary (dlet), animate it to its position on
@@ -1669,9 +1666,7 @@ function RedipsUI() {
 
   self.setLetters = function(player, letters) {
     //console.log('setLetters', letters);
-    if (DEBUG && typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
-      console.log('[setLetters] player:', player, 'letters:', JSON.stringify(letters));
-    }
+    if (DEBUG && typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) console.log('[setLetters] player:', player, 'letters:', JSON.stringify(letters));
 
     // Always pad/normalize rack string length to racksize
     if (typeof letters === 'string') {
