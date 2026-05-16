@@ -371,6 +371,8 @@ function tabulateCurrentScores() {
 
   var sHighScoresKey = g_layout + ' ' + g_bui.level;
   var sHighScoresSession = getSession();
+  var sessionObj = JSON.parse(sHighScoresSession);
+  var sessionId = sessionObj.id;
   var names = getHighScoreNames();
   var opponentId = g_isMultiplayer ? (g_opponentId || '') : COMPUTER_PLAYER_ID;
 
@@ -380,6 +382,7 @@ function tabulateCurrentScores() {
     'player': names.opponent,
     'score': g_oscore,
     'session': sHighScoresSession,
+    'sessionId': sessionId,
     'date': new Date().toISOString()
   });
   g_highscores[sHighScoresKey].push({
@@ -387,6 +390,7 @@ function tabulateCurrentScores() {
     'player': names.player,
     'score': g_pscore,
     'session': sHighScoresSession,
+    'sessionId': sessionId,
     'date': new Date().toISOString()
   });
   g_highscores[sHighScoresKey].sort(gCompareScores);

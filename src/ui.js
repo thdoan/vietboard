@@ -259,6 +259,8 @@ function setModalHeight() {
 }
 
 // Session functions
+var g_loadingHighScore = false;
+
 function getSession() {
   var oSession = {
     'id': 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
@@ -322,70 +324,96 @@ function load(sSession, isHighScore) {
   }
 }
 async function loadHighScore(sKey, nIndex) {
-  if (typeof g_loadingHighScore !== 'undefined' && g_loadingHighScore) return;
+  if (g_loadingHighScore) return;
   g_loadingHighScore = true;
 
-  if (!localStorage['session_return']) {
-    localStorage['session_return'] = getSession();
-    if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof saveMultiplayerSession === 'function') {
-      saveMultiplayerSession();
+  var toast = null;
+
+  try {
+    var entry = g_highscores[sKey] && g_highscores[sKey][nIndex];
+    if (!entry) {
+      g_bui.toast(t('Session not available'), 3000);
+      return;
     }
-  }
-  var entry = g_highscores[sKey] && g_highscores[sKey][nIndex];
-  if (!entry) {
-    g_loadingHighScore = false;
-    return;
-  }
 
-  // Local session available
-  if (entry.session) {
-    g_bui.created = false;
-    load(entry.session, true);
-    g_loadingHighScore = false;
-    return;
-  }
+    // Save return session, but never let a snapshot failure block high-score replay.
+    if (!localStorage['session_return']) {
+      try {
+        localStorage['session_return'] = getSession();
+        if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof saveMultiplayerSession === 'function') {
+          saveMultiplayerSession();
+        }
+      } catch (err) {
+        if (DEBUG) console.warn('Could not save return session before loading high score:', err);
+      }
+    }
 
-  var sessionId = entry.sessionId;
-  if (!sessionId) {
-    g_bui.toast(t('Session not available'), 3000);
-    g_loadingHighScore = false;
-    return;
-  }
+    // Repair legacy local entries that have inline session data but no sessionId.
+    if (!entry.sessionId && entry.session) {
+      try {
+        var sessionObj = JSON.parse(entry.session);
+        if (sessionObj && sessionObj.id) {
+          entry.sessionId = sessionObj.id;
+          localStorage['highscores'] = JSON.stringify(g_highscores);
+        }
+      } catch (err) {
+        if (DEBUG) console.warn('Failed to repair high-score sessionId:', err);
+      }
+    }
 
-  // Check local cloud cache
-  var cache = localStorage['cloud_sessions'] ? JSON.parse(localStorage['cloud_sessions']) : {};
-  if (cache[sessionId]) {
-    entry.session = cache[sessionId];
-    localStorage['highscores'] = JSON.stringify(g_highscores);
-    g_bui.created = false;
-    load(cache[sessionId], true);
-    g_loadingHighScore = false;
-    return;
-  }
+    if (entry.session) {
+      g_bui.created = false;
+      load(entry.session, true);
+      return;
+    }
 
-  // Fetch from Supabase
-  var toast = g_bui.toast(t('Loading...'), 0);
-  var sessionData = await loadSessionFromCloud(sessionId);
+    var sessionId = entry.sessionId;
+    if (!sessionId) {
+      g_bui.toast(t('Session not available'), 3000);
+      return;
+    }
 
-  if (sessionData) {
-    toast.classList.remove('show');
-    toast.classList.add('hide');
-    cache[sessionId] = sessionData;
-    localStorage['cloud_sessions'] = JSON.stringify(cache);
-    entry.session = sessionData;
-    localStorage['highscores'] = JSON.stringify(g_highscores);
-    g_bui.created = false;
-    load(sessionData, true);
-  } else {
-    // Reuse the same toast div to avoid stacking
-    toast.textContent = t('Unable to load session');
-    if (toast._toastTimeout) clearTimeout(toast._toastTimeout);
-    toast._toastTimeout = setTimeout(function() {
+    var cache = {};
+    try {
+      cache = localStorage['cloud_sessions'] ? JSON.parse(localStorage['cloud_sessions']) : {};
+    } catch (err) {
+      cache = {};
+    }
+
+    if (cache[sessionId]) {
+      entry.session = cache[sessionId];
+      localStorage['highscores'] = JSON.stringify(g_highscores);
+      g_bui.created = false;
+      load(cache[sessionId], true);
+      return;
+    }
+
+    toast = g_bui.toast(t('Loading...'), 0);
+    var sessionData = await loadSessionFromCloud(sessionId);
+
+    if (sessionData) {
       toast.classList.remove('show');
       toast.classList.add('hide');
-    }, 3000);
+      cache[sessionId] = sessionData;
+      localStorage['cloud_sessions'] = JSON.stringify(cache);
+      entry.session = sessionData;
+      localStorage['highscores'] = JSON.stringify(g_highscores);
+      g_bui.created = false;
+      load(sessionData, true);
+    } else {
+      toast.textContent = t('Unable to load session');
+      if (toast._toastTimeout) clearTimeout(toast._toastTimeout);
+      toast._toastTimeout = setTimeout(function() {
+        toast.classList.remove('show');
+        toast.classList.add('hide');
+      }, 3000);
+    }
+  } catch (err) {
+    if (DEBUG) console.warn('Failed to load high-score session:', err);
+    g_bui.toast(t('Unable to load session'), 3000);
+  } finally {
+    g_loadingHighScore = false;
   }
-  g_loadingHighScore = false;
 }
 
 window.returnToGame = function() {

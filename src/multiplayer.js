@@ -317,6 +317,187 @@ function normalizeHighScorePlayerName(name) {
   return name;
 }
 
+
+const HIGHSCORE_SESSION_SYNC_KEY = 'highscore_session_sync_v300';
+const HIGHSCORE_SESSION_LINK_SYNC_KEY = 'highscore_session_link_sync_v300';
+
+function readHighScoreSessionSyncManifest() {
+  try {
+    var manifest = JSON.parse(localStorage[HIGHSCORE_SESSION_SYNC_KEY] || '{}');
+    return manifest && typeof manifest === 'object' ? manifest : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+function writeHighScoreSessionSyncManifest(manifest) {
+  try {
+    localStorage[HIGHSCORE_SESSION_SYNC_KEY] = JSON.stringify(manifest || {});
+  } catch (err) {
+    if (DEBUG) console.warn('Failed to save high-score session sync manifest:', err);
+  }
+}
+
+function hashLegacyHighScoreSession(text) {
+  var hash = 5381;
+  for (var i = 0; i < text.length; ++i) {
+    hash = ((hash << 5) + hash) ^ text.charCodeAt(i);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function isHighScoreSessionObject(obj) {
+  return !!(
+    obj &&
+    Array.isArray(obj.board) &&
+    Array.isArray(obj.boardp) &&
+    Array.isArray(obj.boardt) &&
+    Array.isArray(obj.history) &&
+    Array.isArray(obj.letpool) &&
+    typeof obj.layout !== 'undefined' &&
+    typeof obj.level !== 'undefined' &&
+    typeof obj.orack === 'string' &&
+    typeof obj.prack === 'string' &&
+    typeof obj.oscore !== 'undefined' &&
+    typeof obj.pscore !== 'undefined'
+  );
+}
+
+function normalizeHighScoreSession(item, key, index) {
+  if (!item || !item.session || typeof item.session !== 'string') return null;
+
+  try {
+    var sessionObj = JSON.parse(item.session);
+    if (!isHighScoreSessionObject(sessionObj)) return null;
+
+    if (!sessionObj.id) {
+      sessionObj.id = 'legacy_' + hashLegacyHighScoreSession(key + '|' + index + '|' + (item.score || '') + '|' + item.session);
+      item.session = JSON.stringify(sessionObj);
+    }
+
+    if (!item.sessionId) item.sessionId = sessionObj.id;
+
+    return {
+      id: item.sessionId,
+      sessionData: item.session
+    };
+  } catch (err) {
+    if (DEBUG) console.warn('Failed to normalize local high-score session:', err);
+    return null;
+  }
+}
+
+function collectLocalHighScoreSessions() {
+  if (typeof g_highscores === 'undefined' || !g_highscores) {
+    try {
+      window.g_highscores = localStorage['highscores'] ? JSON.parse(localStorage['highscores']) : {};
+    } catch (err) {
+      window.g_highscores = {};
+    }
+  }
+
+  var sessionsById = {};
+  var changed = false;
+
+  for (var key in g_highscores) {
+    if (!Array.isArray(g_highscores[key])) continue;
+    for (var i = 0; i < g_highscores[key].length; ++i) {
+      var item = g_highscores[key][i];
+      var beforeSessionId = item && item.sessionId;
+      var beforeSession = item && item.session;
+      var normalized = normalizeHighScoreSession(item, key, i);
+      if (!normalized) continue;
+      sessionsById[normalized.id] = normalized.sessionData;
+      if (item.sessionId !== beforeSessionId || item.session !== beforeSession) changed = true;
+    }
+  }
+
+  if (changed) {
+    try {
+      localStorage['highscores'] = JSON.stringify(g_highscores);
+    } catch (err) {
+      if (DEBUG) console.warn('Failed to save normalized high-score sessions:', err);
+    }
+  }
+
+  return {
+    sessionsById: sessionsById,
+    changed: changed
+  };
+}
+
+function getHighScoreSessionLinkDigest(sessionIds) {
+  return sessionIds.slice().sort().join('|');
+}
+
+async function migrateLocalHighScoreSessionsToCloud() {
+  if (!window.supabaseClient) return { changed: false, uploaded: 0, linkDigest: '' };
+
+  var collected = collectLocalHighScoreSessions();
+  var sessionsById = collected.sessionsById;
+  var ids = Object.keys(sessionsById);
+  if (!ids.length) return { changed: collected.changed, uploaded: 0, linkDigest: '' };
+
+  var manifest = readHighScoreSessionSyncManifest();
+  var uncheckedIds = ids.filter(function(id) { return !manifest[id]; });
+  var uploaded = 0;
+
+  if (uncheckedIds.length) {
+    var existing = {};
+    for (var offset = 0; offset < uncheckedIds.length; offset += 100) {
+      var chunk = uncheckedIds.slice(offset, offset + 100);
+      try {
+        var result = await window.supabaseClient
+          .from('sessions')
+          .select('id')
+          .in('id', chunk);
+
+        if (result.error) throw result.error;
+        (result.data || []).forEach(function(row) {
+          if (row && row.id) existing[row.id] = true;
+        });
+      } catch (err) {
+        if (DEBUG) console.warn('Failed to check existing high-score sessions:', err);
+        return { changed: collected.changed, uploaded: uploaded, linkDigest: getHighScoreSessionLinkDigest(ids) };
+      }
+    }
+
+    var payload = [];
+    uncheckedIds.forEach(function(id) {
+      if (existing[id]) {
+        manifest[id] = true;
+        return;
+      }
+      payload.push({
+        id: id,
+        session_data: sessionsById[id],
+        app_key: _dk(_hk)
+      });
+    });
+
+    if (payload.length) {
+      try {
+        var uploadResult = await window.supabaseClient.from('sessions').upsert(payload);
+        if (uploadResult.error) throw uploadResult.error;
+        payload.forEach(function(row) { manifest[row.id] = true; });
+        uploaded = payload.length;
+      } catch (err) {
+        if (DEBUG) console.warn('Failed to upload local high-score sessions:', err);
+        writeHighScoreSessionSyncManifest(manifest);
+        return { changed: collected.changed, uploaded: uploaded, linkDigest: getHighScoreSessionLinkDigest(ids) };
+      }
+    }
+
+    writeHighScoreSessionSyncManifest(manifest);
+  }
+
+  return {
+    changed: collected.changed,
+    uploaded: uploaded,
+    linkDigest: getHighScoreSessionLinkDigest(ids)
+  };
+}
+
 async function mergeGlobalHighScores(remoteScores) {
   if (typeof remoteScores !== 'object') return false;
   var scoresToMerge = remoteScores || {};
@@ -452,32 +633,7 @@ async function mergeGlobalHighScores(remoteScores) {
 
 async function repairMissingSessions() {
   if (!window.supabaseClient) return;
-  var repaired = localStorage['repaired_sessions'] ? JSON.parse(localStorage['repaired_sessions']) : {};
-  var needsSave = false;
-  for (var key in g_highscores) {
-    if (Array.isArray(g_highscores[key])) {
-      for (var i = 0; i < g_highscores[key].length; ++i) {
-        var item = g_highscores[key][i];
-        if (item.session && item.sessionId && !repaired[item.sessionId]) {
-          try {
-            await window.supabaseClient.from('sessions').upsert({
-              id: item.sessionId,
-              session_data: item.session,
-              app_key: _dk(_hk)
-            });
-            repaired[item.sessionId] = true;
-            needsSave = true;
-            if (DEBUG) console.log('Repaired session to Supabase:', item.sessionId);
-          } catch (err) {
-            if (DEBUG) console.warn('Failed to repair session:', item.sessionId, err);
-          }
-        }
-      }
-    }
-  }
-  if (needsSave) {
-    localStorage['repaired_sessions'] = JSON.stringify(repaired);
-  }
+  await migrateLocalHighScoreSessionsToCloud();
 }
 
 async function loadGlobalHighScores() {
@@ -491,6 +647,7 @@ async function loadGlobalHighScores() {
   }
 
   try {
+    var localSessionMigration = await migrateLocalHighScoreSessionsToCloud();
     var { data, error } = await window.supabaseClient
       .from(SUPABASE_HIGHSCORES_TABLE)
       .select('scores')
@@ -501,7 +658,9 @@ async function loadGlobalHighScores() {
       // If record doesn't exist (PGRST116), trigger initial sync
       if (error.code === 'PGRST116') {
         if (DEBUG) console.log('No global high scores record found. Syncing local scores...');
-        await saveGlobalHighScores();
+        if (await saveGlobalHighScores() && localSessionMigration.linkDigest) {
+          localStorage[HIGHSCORE_SESSION_LINK_SYNC_KEY] = localSessionMigration.linkDigest;
+        }
       } else {
         if (DEBUG) console.warn('Failed to load global high scores:', error.message || error, error);
       }
@@ -519,15 +678,20 @@ async function loadGlobalHighScores() {
         }
       }
       var hasNewLocalData = await mergeGlobalHighScores(data.scores);
-      if (hasNewLocalData) {
-        if (DEBUG) console.log('New local high scores detected. Syncing to global...');
-        await saveGlobalHighScores();
+      var needsSessionLinkSync = !!(localSessionMigration.linkDigest && localStorage[HIGHSCORE_SESSION_LINK_SYNC_KEY] !== localSessionMigration.linkDigest);
+      if (hasNewLocalData || localSessionMigration.changed || localSessionMigration.uploaded || needsSessionLinkSync) {
+        if (DEBUG) console.log('New local high scores or sessions detected. Syncing to global...');
+        if (await saveGlobalHighScores() && localSessionMigration.linkDigest) {
+          localStorage[HIGHSCORE_SESSION_LINK_SYNC_KEY] = localSessionMigration.linkDigest;
+        }
       } else {
         if (DEBUG) console.log('No new local high scores to sync.');
       }
     } else {
       if (DEBUG) console.log('Global high scores record is empty or invalid. Syncing local scores...');
-      await saveGlobalHighScores();
+      if (await saveGlobalHighScores() && localSessionMigration.linkDigest) {
+        localStorage[HIGHSCORE_SESSION_LINK_SYNC_KEY] = localSessionMigration.linkDigest;
+      }
     }
 
   } catch (err) {
@@ -554,7 +718,7 @@ async function loadSessionFromCloud(sessionId) {
 async function saveGlobalHighScores() {
   if (!window.supabaseClient) {
     if (DEBUG) console.log('Supabase client not available for saving.');
-    return;
+    return false;
   }
   try {
     // Enforce max 100 scored entries per Layout-Level combo
@@ -581,7 +745,13 @@ async function saveGlobalHighScores() {
 
     for (var key in scoresToSave) {
       if (Array.isArray(scoresToSave[key])) {
-        scoresToSave[key].forEach(function(item) {
+        scoresToSave[key].forEach(function(item, index) {
+          // Legacy local entries may have inline session data but no sessionId.
+          // Normalize before stripping `session` from the global high-score payload.
+          if (item.session && !item.sessionId) {
+            normalizeHighScoreSession(item, key, index);
+          }
+
           if (item.sessionId && item.session && !seenSessionIds[item.sessionId]) {
             seenSessionIds[item.sessionId] = true;
             sessionsPayload.push({
@@ -610,7 +780,7 @@ async function saveGlobalHighScores() {
 
     if (!hasScores && (!scoresToSave || Object.keys(scoresToSave).length === 0)) {
        if (DEBUG) console.log('No high scores to save.');
-       return;
+       return false;
     }
 
     if (DEBUG) {
@@ -638,8 +808,10 @@ async function saveGlobalHighScores() {
         console.log('Global high scores and sessions synced successfully.');
       }
     }
+    return !error;
   } catch (err) {
     if (DEBUG) console.warn('Unexpected error saving global high scores:', err);
+    return false;
   }
 }
 
