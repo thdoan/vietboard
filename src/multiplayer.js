@@ -319,7 +319,6 @@ function normalizeHighScorePlayerName(name) {
 
 
 const HIGHSCORE_SESSION_SYNC_KEY = 'highscore_session_sync_v300';
-const HIGHSCORE_SESSION_LINK_SYNC_KEY = 'highscore_session_link_sync_v300';
 
 function readHighScoreSessionSyncManifest() {
   try {
@@ -426,10 +425,6 @@ function collectLocalHighScoreSessions() {
   };
 }
 
-function getHighScoreSessionLinkDigest(sessionIds) {
-  return sessionIds.slice().sort().join('|');
-}
-
 async function migrateLocalHighScoreSessionsToCloud() {
   if (!window.supabaseClient) return { changed: false, uploaded: 0, linkDigest: '' };
 
@@ -458,7 +453,7 @@ async function migrateLocalHighScoreSessionsToCloud() {
         });
       } catch (err) {
         if (DEBUG) console.warn('Failed to check existing high-score sessions:', err);
-        return { changed: collected.changed, uploaded: uploaded, linkDigest: getHighScoreSessionLinkDigest(ids) };
+        return { changed: collected.changed, uploaded: uploaded };
       }
     }
 
@@ -477,14 +472,14 @@ async function migrateLocalHighScoreSessionsToCloud() {
 
     if (payload.length) {
       try {
-        var uploadResult = await window.supabaseClient.from('sessions').upsert(payload);
+        var uploadResult = await window.supabaseClient.from('sessions').upsert(payload, { onConflict: 'id', ignoreDuplicates: true });
         if (uploadResult.error) throw uploadResult.error;
         payload.forEach(function(row) { manifest[row.id] = true; });
         uploaded = payload.length;
       } catch (err) {
         if (DEBUG) console.warn('Failed to upload local high-score sessions:', err);
         writeHighScoreSessionSyncManifest(manifest);
-        return { changed: collected.changed, uploaded: uploaded, linkDigest: getHighScoreSessionLinkDigest(ids) };
+        return { changed: collected.changed, uploaded: uploaded };
       }
     }
 
@@ -494,141 +489,50 @@ async function migrateLocalHighScoreSessionsToCloud() {
   return {
     changed: collected.changed,
     uploaded: uploaded,
-    linkDigest: getHighScoreSessionLinkDigest(ids)
   };
 }
 
 async function mergeGlobalHighScores(remoteScores) {
-  if (typeof remoteScores !== 'object') return false;
-  var scoresToMerge = remoteScores || {};
+  if (typeof remoteScores !== 'object' || !remoteScores) return false;
 
-  // Ensure we have a local highscores object to work with
-  if (typeof g_highscores === 'undefined') {
-    window.g_highscores = localStorage['highscores'] ? JSON.parse(localStorage['highscores']) : {};
-  }
-  var localHighScores = g_highscores || {};
-  var merged = {};
-  var keys = {};
-  var hasLocalOnlyScores = false;
-
-  for (var key in localHighScores) keys[key] = true;
-  for (var key in scoresToMerge) keys[key] = true;
-
-  for (var key in keys) {
-    var localList = Array.isArray(localHighScores[key]) ? localHighScores[key] : [];
-    var remoteList = Array.isArray(scoresToMerge[key]) ? scoresToMerge[key] : [];
-
-    // Track remote scores to detect if we have something new locally
-    var remoteScoresSet = {};
-    for (var j = 0; j < remoteList.length; ++j) {
-      var r = remoteList[j];
-      var rId = r.playerId || '';
-      var rName = normalizeHighScorePlayerName(r.player || '');
-      // Migration: assign 'computer' ID if name matches
-      if (!rId && (rName === 'Computer' || (typeof t === 'function' && rName === t('Computer')))) {
-        rId = 'computer';
-      }
-      remoteScoresSet[(rId || rName) + '|' + Number(r.score)] = true;
-    }
-
-    var combined = localList.concat(remoteList);
-    var seen = {};
-    var unique = [];
-
-    for (var i = 0; i < combined.length; ++i) {
-      var item = combined[i];
+  // Supabase is the canonical source when loading/broadcasting global high scores.
+  // Do not merge stale localStorage rows back into the visible table; old clients
+  // with corrupted local scores would otherwise keep resurrecting bad rows.
+  var canonical = {};
+  for (var key in remoteScores) {
+    if (!Array.isArray(remoteScores[key])) continue;
+    var rows = [];
+    for (var i = 0; i < remoteScores[key].length; ++i) {
+      var item = remoteScores[key][i];
       if (!item || typeof item.score === 'undefined') continue;
       var score = Number(item.score);
       if (!(score > 0)) continue;
       var playerId = item.playerId || '';
       var rawName = normalizeHighScorePlayerName(item.player || '');
-
-      // Migration: assign 'computer' ID if name matches
       if (!playerId && (rawName === 'Computer' || (typeof t === 'function' && rawName === t('Computer')))) {
         playerId = 'computer';
       }
-
-      var dedupeKey = (playerId || rawName) + '|' + score;
-      var sessionDedupeKey = item.sessionId ? (item.sessionId + '|' + score) : null;
-      var currentUserId = (typeof g_lobbyUserId !== 'undefined' && g_lobbyUserId) ? String(g_lobbyUserId).trim() : '';
-
-      // Check if this local score is missing from remote
-      if (i < localList.length && !remoteScoresSet[dedupeKey]) {
-        hasLocalOnlyScores = true;
-        if (DEBUG) console.log('Detected local-only high score:', dedupeKey, 'in', key);
-      }
-
-      var duplicateIndex = -1;
-      if (seen[dedupeKey]) {
-        for (var j = 0; j < unique.length; j++) {
-          if (((unique[j].playerId || unique[j].player) + '|' + unique[j].score) === dedupeKey) {
-            duplicateIndex = j;
-            break;
-          }
-        }
-      } else if (sessionDedupeKey && seen[sessionDedupeKey]) {
-        for (var j = 0; j < unique.length; j++) {
-          if ((unique[j].sessionId || 'nosess') + '|' + unique[j].score === sessionDedupeKey) {
-            // Only merge if it's the same player (same playerId or same name)
-            var samePlayer = (playerId && unique[j].playerId && playerId === unique[j].playerId) ||
-                              (!playerId && !unique[j].playerId && rawName && unique[j].player === rawName);
-            if (samePlayer) {
-              duplicateIndex = j;
-              break;
-            }
-          }
-        }
-      }
-
-      if (duplicateIndex !== -1) {
-        var existing = unique[duplicateIndex];
-        // Merge session data preferring whichever has it
-        if (!existing.session && item.session) existing.session = item.session;
-        if (!existing.sessionId && item.sessionId) existing.sessionId = item.sessionId;
-        if (!existing.date && item.date) existing.date = item.date;
-
-        // Propagate playerId and name updates
-        if (playerId && !existing.playerId) {
-          existing.playerId = playerId;
-          if (rawName) existing.player = rawName;
-        } else if (playerId && existing.playerId && playerId === existing.playerId && rawName && existing.player !== rawName) {
-          // Same known player, different name. Prefer remote (i >= localList.length) unless it's the current user.
-          if (playerId !== currentUserId && i >= localList.length) {
-            existing.player = rawName;
-          }
-        } else if (!playerId && !existing.playerId && item.sessionId && existing.sessionId === item.sessionId && rawName && existing.player !== rawName) {
-          // Same session, no IDs. Prefer remote name.
-          if (i >= localList.length) {
-            existing.player = rawName;
-          }
-        }
-        continue;
-      }
-
-      seen[dedupeKey] = true;
-      if (sessionDedupeKey) seen[sessionDedupeKey] = true;
-      unique.push({
+      rows.push({
         player: rawName,
         playerId: playerId,
         score: score,
-        session: item.session || undefined,
         sessionId: item.sessionId || '',
+        gameId: item.gameId || '',
         date: item.date || ''
       });
     }
-
-    unique.sort(typeof gCompareScores === 'function' ? gCompareScores : function(a, b) {
+    rows.sort(typeof gCompareScores === 'function' ? gCompareScores : function(a, b) {
       var nA = a ? a.score : -99;
       var nB = b ? b.score : -99;
       return (nA > nB) ? -1 : ((nA < nB) ? 1 : 0);
     });
-    if (unique.length > 100) unique = unique.slice(0, 100);
-    if (unique.length > 0) merged[key] = unique;
+    if (rows.length > 100) rows = rows.slice(0, 100);
+    if (rows.length > 0) canonical[key] = rows;
   }
 
-  window.g_highscores = merged;
+  window.g_highscores = canonical;
   localStorage['highscores'] = JSON.stringify(g_highscores);
-  return hasLocalOnlyScores;
+  return false;
 }
 
 async function repairMissingSessions() {
@@ -647,7 +551,7 @@ async function loadGlobalHighScores() {
   }
 
   try {
-    var localSessionMigration = await migrateLocalHighScoreSessionsToCloud();
+    await migrateLocalHighScoreSessionsToCloud();
     var { data, error } = await window.supabaseClient
       .from(SUPABASE_HIGHSCORES_TABLE)
       .select('scores')
@@ -658,9 +562,7 @@ async function loadGlobalHighScores() {
       // If record doesn't exist (PGRST116), trigger initial sync
       if (error.code === 'PGRST116') {
         if (DEBUG) console.log('No global high scores record found. Syncing local scores...');
-        if (await saveGlobalHighScores() && localSessionMigration.linkDigest) {
-          localStorage[HIGHSCORE_SESSION_LINK_SYNC_KEY] = localSessionMigration.linkDigest;
-        }
+        await saveGlobalHighScores();
       } else {
         if (DEBUG) console.warn('Failed to load global high scores:', error.message || error, error);
       }
@@ -677,21 +579,11 @@ async function loadGlobalHighScores() {
           try { JSON.stringify(data.scores[k]); } catch (e2) { delete data.scores[k]; }
         }
       }
-      var hasNewLocalData = await mergeGlobalHighScores(data.scores);
-      var needsSessionLinkSync = !!(localSessionMigration.linkDigest && localStorage[HIGHSCORE_SESSION_LINK_SYNC_KEY] !== localSessionMigration.linkDigest);
-      if (hasNewLocalData || localSessionMigration.changed || localSessionMigration.uploaded || needsSessionLinkSync) {
-        if (DEBUG) console.log('New local high scores or sessions detected. Syncing to global...');
-        if (await saveGlobalHighScores() && localSessionMigration.linkDigest) {
-          localStorage[HIGHSCORE_SESSION_LINK_SYNC_KEY] = localSessionMigration.linkDigest;
-        }
-      } else {
-        if (DEBUG) console.log('No new local high scores to sync.');
-      }
+      await mergeGlobalHighScores(data.scores);
+      if (DEBUG) console.log('Loaded canonical global high scores.');
     } else {
       if (DEBUG) console.log('Global high scores record is empty or invalid. Syncing local scores...');
-      if (await saveGlobalHighScores() && localSessionMigration.linkDigest) {
-        localStorage[HIGHSCORE_SESSION_LINK_SYNC_KEY] = localSessionMigration.linkDigest;
-      }
+      await saveGlobalHighScores();
     }
 
   } catch (err) {
@@ -3387,8 +3279,11 @@ function handleGameStateBroadcast(payload) {
       g_bui.setOpponentRack(payload.rack || '');
     });
   } else if (payload.type === 'highscores_sync') {
-    if (payload.highscores) {
-      mergeGlobalHighScores(payload.highscores).then(function() {
+    // Legacy clients may still broadcast local high-score tables. Ignore the
+    // payload and reload from Supabase so remote DB remains the only canonical
+    // source for displayed global high scores.
+    if (typeof loadGlobalHighScores === 'function') {
+      loadGlobalHighScores().then(function() {
         var highscoresModal = document.getElementById('modal-container');
         if (highscoresModal && highscoresModal.classList.contains('highscores') && highscoresModal.style.display !== 'none') {
           var layoutSelect = document.getElementById('highscores-layout');
@@ -5157,20 +5052,6 @@ function updateGameInfoLabels() {
 }
 
 function syncHighScoresMultiplayer() {
-  if (!g_isMultiplayer) return;
-
-  // Clone and strip huge session data before broadcasting
-  var strippedHighScores = JSON.parse(JSON.stringify(g_highscores));
-  for (var key in strippedHighScores) {
-    if (Array.isArray(strippedHighScores[key])) {
-      strippedHighScores[key].forEach(function(item) {
-        delete item.session;
-      });
-    }
-  }
-
-  broadcastGameState({
-    type: 'highscores_sync',
-    highscores: strippedHighScores
-  });
+  // Global high scores are synced through Supabase, not peer broadcasts.
+  // Broadcasting local tables can resurrect stale/corrupt localStorage rows.
 }

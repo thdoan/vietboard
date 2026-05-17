@@ -1,4 +1,4 @@
-const VER = '3.02';
+const VER = '3.04';
 
 function showWhatsNew() {
   g_bui.prompt(
@@ -13,6 +13,7 @@ function showWhatsNew() {
     '<li>Revamped button icons</li>' +
     '<li>Fixed broken word lookup</li>' +
     '<li>Fixed broken high score links (v3.02)</li>' +
+    '<li>Fixed high score sync regressions (v3.04)</li>' +
     '</ul>'
   );
 }

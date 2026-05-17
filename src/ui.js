@@ -282,6 +282,20 @@ function getSession() {
     'pscore': g_pscore,
     'passes': g_passes
   };
+
+  // Persist multiplayer identity with high-score replays. Older sessions did
+  // not have this metadata, which made later cleanup/debugging ambiguous.
+  if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer) {
+    oSession['isMultiplayer'] = true;
+    oSession['gameId'] = (typeof g_gameId !== 'undefined' && g_gameId) ? g_gameId : '';
+    oSession['isHost'] = (typeof g_isHost !== 'undefined') ? !!g_isHost : false;
+    oSession['playerId'] = (typeof g_lobbyUserId !== 'undefined' && g_lobbyUserId) ? g_lobbyUserId : '';
+    oSession['opponentId'] = (typeof g_opponentId !== 'undefined' && g_opponentId) ? g_opponentId : '';
+    oSession['playerName'] = (typeof g_myName !== 'undefined' && g_myName) ? g_myName : '';
+    oSession['opponentName'] = (typeof g_opponentName !== 'undefined' && g_opponentName) ? g_opponentName : '';
+    if (oSession['gameId']) oSession['id'] = 'mp_' + oSession['gameId'];
+  }
+
   return JSON.stringify(oSession);
 }
 function load(sSession, isHighScore) {

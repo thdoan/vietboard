@@ -239,55 +239,62 @@ function finalizeGameScores() {
   if (el('score-opponent')) el('score-opponent').textContent = g_oscore;
   if (el('score-player')) el('score-player').textContent = g_pscore;
 
-  // Update high scores table if applicable
-  var sHighScoresKey = g_layout + ' ' + g_bui.level;
-  var sHighScoresSession = getSession();
-  var sessionObj = JSON.parse(sHighScoresSession);
-  var sessionId = sessionObj.id;
-  var names = getHighScoreNames();
-  var opponentId = g_isMultiplayer ? (g_opponentId || '') : COMPUTER_PLAYER_ID;
-  if (!g_highscores[sHighScoresKey]) g_highscores[sHighScoresKey] = [];
-  var scoreEntries = [];
-  if (typeof g_oscore === 'number' && g_oscore > 0) {
-    scoreEntries.push({
-      'playerId': opponentId,
-      'player': names.opponent,
-      'score': g_oscore,
-      'session': sHighScoresSession,
-      'sessionId': sessionId,
-      'date': new Date().toISOString()
-    });
-  }
-  if (typeof g_pscore === 'number' && g_pscore > 0) {
-    scoreEntries.push({
-      'playerId': g_lobbyUserId || '',
-      'player': names.player,
-      'score': g_pscore,
-      'session': sHighScoresSession,
-      'sessionId': sessionId,
-      'date': new Date().toISOString()
-    });
-  }
-  if (scoreEntries.length) {
-    // Pre-insert deduplication: skip if same playerId and score
-    var existing = g_highscores[sHighScoresKey];
-    for (var i = 0; i < scoreEntries.length; ++i) {
-      var entry = scoreEntries[i];
-      var isDup = false;
-      for (var j = 0; j < existing.length; ++j) {
-        if (existing[j].playerId === entry.playerId &&
-            existing[j].score === entry.score) {
-          isDup = true;
-          break;
-        }
-      }
-      if (!isDup) existing.push(entry);
+  // Update high scores table if applicable. In multiplayer, only the host
+  // records the canonical result; otherwise both clients can save the same
+  // finished game from opposite local perspectives.
+  var shouldRecordHighScores = !isMP || (typeof g_isHost !== 'undefined' && g_isHost);
+  if (shouldRecordHighScores) {
+    var sHighScoresKey = g_layout + ' ' + g_bui.level;
+    var sHighScoresSession = getSession();
+    var sessionObj = JSON.parse(sHighScoresSession);
+    var sessionId = sessionObj.id;
+    var names = getHighScoreNames();
+    var opponentId = g_isMultiplayer ? (g_opponentId || '') : COMPUTER_PLAYER_ID;
+    if (!g_highscores[sHighScoresKey]) g_highscores[sHighScoresKey] = [];
+    var scoreEntries = [];
+    if (typeof g_oscore === 'number' && g_oscore > 0) {
+      scoreEntries.push({
+        'playerId': opponentId,
+        'player': names.opponent,
+        'score': g_oscore,
+        'session': sHighScoresSession,
+        'sessionId': sessionId,
+        'gameId': isMP && typeof g_gameId !== 'undefined' ? (g_gameId || '') : '',
+        'date': new Date().toISOString()
+      });
     }
+    if (typeof g_pscore === 'number' && g_pscore > 0) {
+      scoreEntries.push({
+        'playerId': g_lobbyUserId || '',
+        'player': names.player,
+        'score': g_pscore,
+        'session': sHighScoresSession,
+        'sessionId': sessionId,
+        'gameId': isMP && typeof g_gameId !== 'undefined' ? (g_gameId || '') : '',
+        'date': new Date().toISOString()
+      });
+    }
+    if (scoreEntries.length) {
+      // Pre-insert deduplication: skip if same playerId and score
+      var existing = g_highscores[sHighScoresKey];
+      for (var i = 0; i < scoreEntries.length; ++i) {
+        var entry = scoreEntries[i];
+        var isDup = false;
+        for (var j = 0; j < existing.length; ++j) {
+          if (existing[j].playerId === entry.playerId &&
+              existing[j].score === entry.score) {
+            isDup = true;
+            break;
+          }
+        }
+        if (!isDup) existing.push(entry);
+      }
+    }
+    g_highscores[sHighScoresKey].sort(gCompareScores);
+    g_highscores[sHighScoresKey] = g_highscores[sHighScoresKey].slice(0, 100);
+    localStorage['highscores'] = JSON.stringify(g_highscores);
+    if (typeof saveGlobalHighScores === 'function') saveGlobalHighScores();
   }
-  g_highscores[sHighScoresKey].sort(gCompareScores);
-  g_highscores[sHighScoresKey] = g_highscores[sHighScoresKey].slice(0, 100);
-  localStorage['highscores'] = JSON.stringify(g_highscores);
-  if (typeof saveGlobalHighScores === 'function') saveGlobalHighScores();
 
   // Clear session
   localStorage.removeItem('session');
@@ -368,6 +375,7 @@ function getHighScoreNames() {
 //------------------------------------------------------------------------------
 function tabulateCurrentScores() {
   if (g_board_empty) return;
+  if (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer && typeof g_isHost !== 'undefined' && !g_isHost) return;
 
   var sHighScoresKey = g_layout + ' ' + g_bui.level;
   var sHighScoresSession = getSession();
