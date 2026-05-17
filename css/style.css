@@ -959,6 +959,9 @@ html:not(.mobile) #modal-container.wide {
 #modal-content h3 {
   margin: 0;
 }
+#modal-content h3 + :is(ol, ul) {
+  margin: 0;
+}
 
 #letters .button {
   width: 32px;
