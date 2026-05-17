@@ -355,15 +355,24 @@ function getHighScoreNames() {
   var computerLabel = 'Computer';
   var opponentLabel = 'Opponent';
   var isMP = (typeof g_isMultiplayer !== 'undefined' && g_isMultiplayer);
+  var myName = (typeof g_myName !== 'undefined' && g_myName) ? String(g_myName).trim() : '';
+
+  if (!myName) {
+    myName = (localStorage.getItem('player_name') || '').trim();
+  }
+  if (!myName) {
+    myName = 'Player_' + Math.round((+new Date() + '').slice(-5) * Math.random());
+    localStorage.setItem('player_name', myName);
+    if (typeof g_myName !== 'undefined') g_myName = myName;
+  }
+
   if (!isMP) {
-    var myName = (typeof g_myName !== 'undefined' && g_myName) ? String(g_myName).trim() : '';
     return {
       'player': myName || youLabel,
       'opponent': computerLabel
     };
   }
 
-  var myName = (typeof g_myName !== 'undefined' && g_myName) ? String(g_myName).trim() : '';
   var oppName = (typeof g_opponentName !== 'undefined' && g_opponentName) ? String(g_opponentName).trim() : opponentLabel;
 
   return {

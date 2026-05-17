@@ -1649,10 +1649,7 @@ function RedipsUI() {
 
   self.renderHighScoreRows = function(sKey) {
     var html = '';
-    // In high scores view, always show player name even if not currently in a game
-    var myName = (typeof g_myName !== 'undefined' && g_myName) ? String(g_myName).trim() : '';
     var youLabel = t('You');
-    var playerDisplayName = (myName && myName !== youLabel && myName !== 'You') ? myName + ' (' + youLabel + ')' : youLabel;
     var opponentLabel = t('Opponent');
     var computerLabel = t('Computer');
 
@@ -1667,10 +1664,10 @@ function RedipsUI() {
         var playerId = g_highscores[sKey][i]['playerId'] || '';
         if (currentUserId && playerId === currentUserId) {
           playerName = currentUserName ? currentUserName + ' (' + youLabel + ')' : youLabel;
-        } else if (currentUserName && playerName === currentUserName) {
-          playerName = currentUserName + ' (' + youLabel + ')';
-        } else if (playerName === youLabel || playerName === 'You' || playerName.startsWith(youLabel + ' (') || playerName.startsWith('You (')) {
-          playerName = currentUserName ? currentUserName + ' (' + youLabel + ')' : youLabel;
+        } else if (playerName === youLabel || playerName === 'You') {
+          playerName = youLabel;
+        } else if (playerName.startsWith(youLabel + ' (') || playerName.startsWith('You (')) {
+          playerName = typeof normalizeHighScorePlayerName === 'function' ? normalizeHighScorePlayerName(playerName) : playerName;
         } else if (playerName === 'Opponent' || playerName === opponentLabel) {
           playerName = opponentLabel;
         } else if (playerName === 'Computer' || playerName === computerLabel || playerId === 'computer') {

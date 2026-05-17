@@ -37,6 +37,26 @@ if (!g_lobbyUserId) {
   localStorage.setItem('lobby_user_id', g_lobbyUserId);
 }
 let g_myName = localStorage.getItem('player_name');
+
+async function requestGeneratedPlayerName() {
+  let response = Object.create(null);
+  let generatedName = '';
+
+  try {
+    response = await fetch('https://script.google.com/macros/s/AKfycbzc_I5SM9gf6CRONek7lxF7-B4XFD8o1Y7P_50TdIKMSZMIq0gToAt0L_dQ44ufbshk1A/exec');
+  } catch (err) {
+    // Suppress error and fall back below.
+  }
+
+  if (response.ok) {
+    generatedName = await response.text() + (+new Date() + '').slice(-randInt(2, 4));
+  } else if (DEBUG) {
+    console.warn(t('Failed to generate nickname.'), response.status || '', '\n' + t('Using fallback method...'));
+  }
+
+  return generatedName || generateUniquePlayerName();
+}
+
 if (!g_myName) {
   // Real fallback stored immediately — never expose "Generating..." to high scores
   g_myName = generateUniquePlayerName();
@@ -45,33 +65,19 @@ if (!g_myName) {
 
   // Custom Google Apps Script Random Username Generator
   async function generateNickname() {
-    let response = Object.create(null);
-    let sNickname;
-
-    try {
-      response = await fetch('https://script.google.com/macros/s/AKfycbzc_I5SM9gf6CRONek7lxF7-B4XFD8o1Y7P_50TdIKMSZMIq0gToAt0L_dQ44ufbshk1A/exec');
-    } catch (err) {
-      // Suppress error
-    }
-
-    if (response.ok) {
-      sNickname = await response.text() + (+new Date() + '').slice(-randInt(2, 4));
-    } else { // Fallback
-      if (DEBUG) console.warn(t('Failed to generate nickname.'), response.status || '', '\n' + t('Using fallback method...'));
-      sNickname = g_myName;
-    }
+    let sNickname = await requestGeneratedPlayerName();
 
     var oldName = g_myName;
     g_myName = sNickname;
     localStorage.setItem('player_name', g_myName);
     if (DEBUG) console.log('Generated player_name:', g_myName);
 
-    // Rename any local high scores that used the old fallback name and re-sync
+    // Rename only rows owned by this device identity.
     if (oldName !== g_myName) {
       for (var key in g_highscores) {
         if (Array.isArray(g_highscores[key])) {
           g_highscores[key].forEach(function(item) {
-            if (item.player === oldName) item.player = g_myName;
+            if (g_lobbyUserId && item.playerId === g_lobbyUserId) item.player = g_myName;
           });
         }
       }
@@ -317,6 +323,165 @@ function normalizeHighScorePlayerName(name) {
   return name;
 }
 
+function sanitizeHighScoreEntryForSave(item) {
+  if (!item || typeof item.score === 'undefined') return null;
+
+  var playerId = item.playerId || '';
+  var normalizedName = normalizeHighScorePlayerName(item.player || '').trim();
+  var score = Number(item.score);
+  var youLabel = typeof t === 'function' ? String(t('You')).trim() : 'You';
+  var opponentLabel = typeof t === 'function' ? String(t('Opponent')).trim() : 'Opponent';
+  var computerLabel = typeof t === 'function' ? String(t('Computer')).trim() : 'Computer';
+
+  if (!(score > 0)) return null;
+
+  if (playerId === 'computer') {
+    normalizedName = computerLabel;
+  } else if (playerId && g_lobbyUserId && playerId === g_lobbyUserId && (!normalizedName || normalizedName === 'You' || normalizedName === youLabel)) {
+    normalizedName = (g_myName || '').trim();
+  } else if (normalizedName === 'You' || normalizedName === youLabel) {
+    return null;
+  } else if (normalizedName === 'Opponent' || normalizedName === opponentLabel) {
+    return null;
+  }
+
+  if (!playerId && normalizedName === computerLabel) {
+    playerId = 'computer';
+  }
+
+  if (!normalizedName) return null;
+
+  return {
+    player: normalizedName,
+    playerId: playerId,
+    score: score,
+    sessionId: item.sessionId || '',
+    gameId: item.gameId || '',
+    date: item.date || ''
+  };
+}
+
+function sanitizeHighScoreBuckets(scores) {
+  var source = (scores && typeof scores === 'object') ? scores : {};
+  var sanitizedScores = {};
+  var changed = false;
+
+  for (var key in source) {
+    if (!Array.isArray(source[key])) {
+      changed = true;
+      continue;
+    }
+
+    var sanitizedRows = [];
+    for (var i = 0; i < source[key].length; ++i) {
+      var original = source[key][i];
+      var sanitized = sanitizeHighScoreEntryForSave(original);
+
+      if (!sanitized) {
+        changed = true;
+        continue;
+      }
+
+      sanitizedRows.push(sanitized);
+      if (!original ||
+          original.player !== sanitized.player ||
+          (original.playerId || '') !== sanitized.playerId ||
+          Number(original.score) !== sanitized.score ||
+          (original.sessionId || '') !== sanitized.sessionId ||
+          (original.gameId || '') !== sanitized.gameId ||
+          (original.date || '') !== sanitized.date ||
+          typeof original.session !== 'undefined') {
+        changed = true;
+      }
+    }
+
+    sanitizedRows.sort(typeof gCompareScores === 'function' ? gCompareScores : function(a, b) {
+      var nA = a ? a.score : -99;
+      var nB = b ? b.score : -99;
+      return (nA > nB) ? -1 : ((nA < nB) ? 1 : 0);
+    });
+    if (sanitizedRows.length > 100) {
+      sanitizedRows = sanitizedRows.slice(0, 100);
+      changed = true;
+    }
+    if (sanitizedRows.length > 0) sanitizedScores[key] = sanitizedRows;
+    else if (source[key] && source[key].length > 0) changed = true;
+  }
+
+  return {
+    scores: sanitizedScores,
+    changed: changed
+  };
+}
+
+function sanitizeLocalHighScoresCache() {
+  var result = sanitizeHighScoreBuckets(g_highscores || {});
+  g_highscores = result.scores;
+  window.g_highscores = g_highscores;
+  if (result.changed) {
+    localStorage['highscores'] = JSON.stringify(g_highscores);
+  }
+  return result.changed;
+}
+
+function getCurrentHighScoreNameOwner(name) {
+  var normalized = normalizeHighScorePlayerName(name || '').trim().toLowerCase();
+  if (!normalized) return '';
+  if (normalized === 'computer' || (typeof t === 'function' && normalized === String(t('Computer')).trim().toLowerCase())) return 'computer';
+  if (typeof g_highscores !== 'object' || !g_highscores) return '';
+
+  for (var key in g_highscores) {
+    if (!Array.isArray(g_highscores[key])) continue;
+    for (var i = 0; i < g_highscores[key].length; ++i) {
+      var item = g_highscores[key][i];
+      if (!item) continue;
+      var playerId = item.playerId || '';
+      if (!playerId || playerId === 'computer') continue;
+      if (normalizeHighScorePlayerName(item.player || '').trim().toLowerCase() === normalized) {
+        return playerId;
+      }
+    }
+  }
+
+  return '';
+}
+
+sanitizeLocalHighScoresCache();
+
+async function ensureCurrentPlayerNameOwnership() {
+  if (!g_myName || !g_lobbyUserId) return false;
+
+  var ownerId = getCurrentHighScoreNameOwner(g_myName);
+  if (!ownerId || ownerId === g_lobbyUserId) return false;
+
+  var nextName = await requestGeneratedPlayerName();
+  if (!nextName || nextName === g_myName) return false;
+
+  g_myName = nextName;
+  localStorage.setItem('player_name', g_myName);
+  if (DEBUG) console.log('Renamed conflicting local player_name to', g_myName, 'after canonical high-score load');
+
+  var nameInput = document.getElementById('lobby-name');
+  if (nameInput) nameInput.value = g_myName;
+
+  if (g_channel && g_lobbyUserId) {
+    try {
+      await g_channel.track({
+        name: g_myName,
+        lookingForGame: true,
+        id: g_lobbyUserId
+      });
+    } catch (err) {
+      if (DEBUG) console.warn('Failed to retrack auto-renamed player_name:', err);
+    }
+  }
+
+  if (typeof g_bui !== 'undefined' && g_bui && typeof g_bui.toast === 'function') {
+    g_bui.toast(t('Name already in use; assigned new name') + ': ' + g_myName, 4000);
+  }
+  return true;
+}
+
 
 const HIGHSCORE_SESSION_SYNC_KEY = 'highscore_session_sync_v300';
 
@@ -498,40 +663,12 @@ async function mergeGlobalHighScores(remoteScores) {
   // Supabase is the canonical source when loading/broadcasting global high scores.
   // Do not merge stale localStorage rows back into the visible table; old clients
   // with corrupted local scores would otherwise keep resurrecting bad rows.
-  var canonical = {};
-  for (var key in remoteScores) {
-    if (!Array.isArray(remoteScores[key])) continue;
-    var rows = [];
-    for (var i = 0; i < remoteScores[key].length; ++i) {
-      var item = remoteScores[key][i];
-      if (!item || typeof item.score === 'undefined') continue;
-      var score = Number(item.score);
-      if (!(score > 0)) continue;
-      var playerId = item.playerId || '';
-      var rawName = normalizeHighScorePlayerName(item.player || '');
-      if (!playerId && (rawName === 'Computer' || (typeof t === 'function' && rawName === t('Computer')))) {
-        playerId = 'computer';
-      }
-      rows.push({
-        player: rawName,
-        playerId: playerId,
-        score: score,
-        sessionId: item.sessionId || '',
-        gameId: item.gameId || '',
-        date: item.date || ''
-      });
-    }
-    rows.sort(typeof gCompareScores === 'function' ? gCompareScores : function(a, b) {
-      var nA = a ? a.score : -99;
-      var nB = b ? b.score : -99;
-      return (nA > nB) ? -1 : ((nA < nB) ? 1 : 0);
-    });
-    if (rows.length > 100) rows = rows.slice(0, 100);
-    if (rows.length > 0) canonical[key] = rows;
-  }
+  var canonical = sanitizeHighScoreBuckets(remoteScores).scores;
 
-  window.g_highscores = canonical;
+  g_highscores = canonical;
+  window.g_highscores = g_highscores;
   localStorage['highscores'] = JSON.stringify(g_highscores);
+  await ensureCurrentPlayerNameOwnership();
   return false;
 }
 
@@ -634,9 +771,11 @@ async function saveGlobalHighScores() {
     var sessionsPayload = [];
     var activeSessionIds = [];
     var seenSessionIds = {};
+    var sanitizedScores = {};
 
     for (var key in scoresToSave) {
       if (Array.isArray(scoresToSave[key])) {
+        var sanitizedRows = [];
         scoresToSave[key].forEach(function(item, index) {
           // Legacy local entries may have inline session data but no sessionId.
           // Normalize before stripping `session` from the global high-score payload.
@@ -654,12 +793,20 @@ async function saveGlobalHighScores() {
           if (item.sessionId) {
             activeSessionIds.push(item.sessionId);
           }
+          var sanitized = sanitizeHighScoreEntryForSave(item);
+          if (sanitized) sanitizedRows.push(sanitized);
         });
+        if (sanitizedRows.length > 0) sanitizedScores[key] = sanitizedRows;
       }
     }
 
+    sanitizedScores = sanitizeHighScoreBuckets(sanitizedScores).scores;
+    g_highscores = sanitizedScores;
+    window.g_highscores = g_highscores;
+    localStorage['highscores'] = JSON.stringify(g_highscores);
+
     // Clone and strip huge session data before saving to DB
-    var strippedHighScores = JSON.parse(JSON.stringify(scoresToSave));
+    var strippedHighScores = JSON.parse(JSON.stringify(sanitizedScores));
     var hasScores = false;
     for (var key in strippedHighScores) {
       if (Array.isArray(strippedHighScores[key])) {
@@ -737,17 +884,16 @@ window.updatePlayerName = async function(newName) {
     return;
   }
 
-  var oldName = g_myName;
   g_myName = sanitized;
   localStorage.setItem('player_name', g_myName);
   if (DEBUG) console.log('updatePlayerName: setting to', g_myName);
 
-  // Sync name changes to all high score entries with my ID or old fallback name
+  // Sync name changes only to rows owned by this device identity.
   var changed = false;
   for (var key in g_highscores) {
     if (Array.isArray(g_highscores[key])) {
       g_highscores[key].forEach(function(item) {
-        if ((g_lobbyUserId && item.playerId === g_lobbyUserId) || item.player === oldName) {
+        if (g_lobbyUserId && item.playerId === g_lobbyUserId) {
           item.player = g_myName;
           changed = true;
         }
