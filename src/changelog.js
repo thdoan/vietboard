@@ -1,10 +1,11 @@
-const VER = '3.05';
+const VER = '3.10';
 
 function showWhatsNew() {
   g_bui.prompt(
     '<h3>What\'s New</h3>' +
     '<ul>' +
     '<li>Added multiplayer!</li>' +
+    '<li>Changed tiles in bag from 200 to 150</li>' +
     '<li>Implemented global high scores</li>' +
     '<li>Implemented official end game rules</li>' +
     '<li>Implemented coin flip for SP and MP games</li>' +

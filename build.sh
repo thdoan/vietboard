@@ -46,7 +46,7 @@ cp src/engine.js "$TMP_ENGINE"
 # Disable debug mode
 sed -i 's/const DEBUG = true/const DEBUG = false/' "$TMP_ENGINE"
 # Reset bag size
-sed -i 's/g_tiles_in_bag = 20/g_tiles_in_bag = 200/' "$TMP_ENGINE"
+sed -i 's/g_tiles_in_bag = 20/g_tiles_in_bag = 150/' "$TMP_ENGINE"
 
 TMP_MULTIPLAYER=$(mktemp)
 cp src/multiplayer.js "$TMP_MULTIPLAYER"
