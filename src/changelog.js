@@ -1,24 +1,49 @@
-const VER = '3.30';
+const VER = '3.40';
 
 function showWhatsNew() {
-  g_bui.prompt(
-    '<h3>What\'s New</h3>' +
-    '<ul>' +
-    '<li>Added multiplayer!</li>' +
-    '<li>Added words: ly, ởn, nhò, báp, nhữ, nhự, dũ, nhũi, ngừ, khần, tọe, ầu, hin (v3.30)</li>' +
-    '<li>Implemented global high scores</li>' +
-    '<li>Implemented official end game rules</li>' +
-    '<li>Implemented coin flip for SP and MP games</li>' +
-    '<li>Improved high score syncing (v3.02)</li>' +
-    '<li>Improved game balance (v3.20)</li>' +
-    '<li>Removed unnecessary page reloads</li>' +
-    '<li>Removed words: hộn, đin, den, ghệch (v3.30)</li>' +
-    '<li>Revamped button icons</li>' +
-    '<li>Fixed broken word lookup</li>' +
-    '<li>Fixed broken high score links (v3.02)</li>' +
-    '<li>Fixed high score sync regressions (v3.04)</li>' +
-    '<li>Fixed modal height issue (v3.05)</li>' +
-    '</ul>'
+  g_bui.prompt(`
+<h3>What&rsquo;s new in v${VER}</h3>
+<ul>
+  <li>Improved changelog modal</li>
+  <li>Fixed player names in old sessions</li>
+</ul>
+<hr>
+<h4>Changelog</h4>
+<h5>v3.30</h5>
+<ul>
+  <li>Added words: ly, ởn, nhò, báp, nhữ, nhự, dũ, nhũi, ngừ, khần, tọe, ầu, hin</li>
+  <li>Removed words: hộn, đin, den, ghệch</li>
+</ul>
+<h5>v3.20</h5>
+<ul>
+  <li>Improved game balance</li>
+</ul>
+<h5>v3.05</h5>
+<ul>
+  <li>Fixed modal height issue</li>
+</ul>
+<h5>v3.04</h5>
+<ul>
+  <li>Fixed high score sync regressions</li>
+</ul>
+<h5>v3.02</h5>
+<ul>
+  <li>Improved high score syncing</li>
+  <li>Fixed broken high score links</li>
+</ul>
+<h5>v3.00</h5>
+<ul>
+  <li>Added multiplayer!</li>
+  <li>Implemented global high scores</li>
+  <li>Implemented official end game rules</li>
+  <li>Implemented coin flip for SP and MP games</li>
+  <li>Removed unnecessary page reloads</li>
+  <li>Revamped button icons</li>
+  <li>Fixed broken word lookup</li>
+</ul>
+`,
+    '',
+    'changelog wide'
   );
 }
 
