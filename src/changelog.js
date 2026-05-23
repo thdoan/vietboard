@@ -1,15 +1,15 @@
-const VER = '3.10';
+const VER = '3.20';
 
 function showWhatsNew() {
   g_bui.prompt(
     '<h3>What\'s New</h3>' +
     '<ul>' +
     '<li>Added multiplayer!</li>' +
-    '<li>Changed tiles in bag from 200 to 150</li>' +
     '<li>Implemented global high scores</li>' +
     '<li>Implemented official end game rules</li>' +
     '<li>Implemented coin flip for SP and MP games</li>' +
     '<li>Improved high score syncing (v3.02)</li>' +
+    '<li>Improved game balance (v3.20)</li>' +
     '<li>Removed unnecessary page reloads</li>' +
     '<li>Revamped button icons</li>' +
     '<li>Fixed broken word lookup</li>' +
