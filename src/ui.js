@@ -262,6 +262,7 @@ function setModalHeight() {
 var g_loadingHighScore = false;
 
 function getSession() {
+  var myName = (typeof g_myName !== 'undefined' && g_myName) ? g_myName : (localStorage.getItem('player_name') || '');
   var oSession = {
     'id': 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
     'board': g_board,
@@ -280,7 +281,8 @@ function getSession() {
     'oscore': g_oscore,
     'prack': g_bui.getPlayerRack(),
     'pscore': g_pscore,
-    'passes': g_passes
+    'passes': g_passes,
+    'playerName': myName
   };
 
   // Persist multiplayer identity with high-score replays. Older sessions did
@@ -291,14 +293,14 @@ function getSession() {
     oSession['isHost'] = (typeof g_isHost !== 'undefined') ? !!g_isHost : false;
     oSession['playerId'] = (typeof g_lobbyUserId !== 'undefined' && g_lobbyUserId) ? g_lobbyUserId : '';
     oSession['opponentId'] = (typeof g_opponentId !== 'undefined' && g_opponentId) ? g_opponentId : '';
-    oSession['playerName'] = (typeof g_myName !== 'undefined' && g_myName) ? g_myName : '';
     oSession['opponentName'] = (typeof g_opponentName !== 'undefined' && g_opponentName) ? g_opponentName : '';
     if (oSession['gameId']) oSession['id'] = 'mp_' + oSession['gameId'];
   }
 
   return JSON.stringify(oSession);
 }
-function load(sSession, isHighScore) {
+
+function load(sSession, isHighScore, hsPlayerName) {
   var oSession = JSON.parse(sSession);
   g_board = oSession['board'];
   g_boardpoints = oSession['boardp'];
@@ -335,8 +337,23 @@ function load(sSession, isHighScore) {
     g_bui.fixPlayerTiles();
     hideModal();
     if (g_isMobile) hideGameInfo();
+
+    var isMP = !!oSession['isMultiplayer'];
+    var pName = oSession['playerName'] || hsPlayerName || t('You');
+    var oName = isMP ? (oSession['opponentName'] || t('Opponent')) : t('Computer');
+    var lblP = el('label-lpscore');
+    if (lblP) lblP.innerHTML = t('Your last score:').replace('Your', pName + "'s").replace('bạn', pName);
+    var lblPT = el('label-pscore');
+    if (lblPT) lblPT.innerHTML = t('Your total score:').replace('Your', pName + "'s").replace('bạn', pName);
+    var lblO = el('label-loscore');
+    if (lblO) lblO.innerHTML = t('Opponent&rsquo;s last score:').replace('Opponent', oName).replace('đối thủ', oName);
+    var lblOT = el('label-oscore');
+    if (lblOT) lblOT.innerHTML = t('Opponent&rsquo;s total score:').replace('Opponent', oName).replace('đối thủ', oName);
+    var boardEl = el('board');
+    if (boardEl) boardEl.className = isMP ? 'mp' : 'sp';
   }
 }
+
 async function loadHighScore(sKey, nIndex) {
   if (g_loadingHighScore) return;
   g_loadingHighScore = true;
@@ -375,9 +392,24 @@ async function loadHighScore(sKey, nIndex) {
       }
     }
 
+    // If this is the opponent's (computer) entry, look up the companion
+    // player entry by sessionId to get the real player name.
+    var hsPlayerName = '';
+    var isComputerEntry = entry.playerId === 'computer' ||
+      entry.player === 'Computer' || entry.player === t('Computer');
+    if (isComputerEntry && entry.sessionId) {
+      var entries = g_highscores[sKey] || [];
+      for (var j = 0; j < entries.length; ++j) {
+        if (entries[j] && entries[j].sessionId === entry.sessionId && entries[j].playerId !== 'computer') {
+          hsPlayerName = entries[j].player || '';
+          break;
+        }
+      }
+    }
+
     if (entry.session) {
       g_bui.created = false;
-      load(entry.session, true);
+      load(entry.session, true, hsPlayerName);
       return;
     }
 
@@ -398,7 +430,7 @@ async function loadHighScore(sKey, nIndex) {
       entry.session = cache[sessionId];
       localStorage['highscores'] = JSON.stringify(g_highscores);
       g_bui.created = false;
-      load(cache[sessionId], true);
+      load(cache[sessionId], true, hsPlayerName);
       return;
     }
 
@@ -413,7 +445,7 @@ async function loadHighScore(sKey, nIndex) {
       entry.session = sessionData;
       localStorage['highscores'] = JSON.stringify(g_highscores);
       g_bui.created = false;
-      load(sessionData, true);
+      load(sessionData, true, hsPlayerName);
     } else {
       toast.textContent = t('Unable to load session');
       if (toast._toastTimeout) clearTimeout(toast._toastTimeout);
@@ -750,8 +782,8 @@ function RedipsUI() {
       '<tr><td>' + t('Tileset:') + '</td><td>' + sSelTileset + '</td></tr>' +
       '<tr><td>' + t('Bonuses layout:') + '</td><td>' + sSelLayout + '</td></tr>' +
       hr +
-      '<tr><td>' + t('Your last score:') + '</td><td id="lpscore">0</td></tr>' +
-      '<tr class="highlight player"><td>' + t('Your total score:') + '</td><td id="pscore">0</td></tr>' +
+      '<tr><td><span id="label-lpscore">' + t('Your last score:') + '</span></td><td id="lpscore">0</td></tr>' +
+      '<tr class="highlight player"><td><span id="label-pscore">' + t('Your total score:') + '</span></td><td id="pscore">0</td></tr>' +
       hr +
       '<tr><td><span id="label-loscore">' + t('Computer&rsquo;s last score:') + '</span></td><td id="loscore">0</td></tr>' +
       '<tr class="highlight opponent"><td><span id="label-oscore">' + t('Computer&rsquo;s total score:') + '</span></td><td id="oscore">0</td></tr>' +

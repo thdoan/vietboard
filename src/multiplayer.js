@@ -5166,6 +5166,17 @@ function updateGameInfoLabels() {
     if (lblTotal) lblTotal.innerHTML = t('Computer&rsquo;s total score:');
   }
 
+  const lblPLast = document.getElementById('label-lpscore');
+  const lblPTotal = document.getElementById('label-pscore');
+  if (g_isMultiplayer && g_myName) {
+    var myName = g_myName;
+    if (lblPLast) lblPLast.innerHTML = t('Your last score:').replace('Your', myName + "'s").replace('bạn', myName);
+    if (lblPTotal) lblPTotal.innerHTML = t('Your total score:').replace('Your', myName + "'s").replace('bạn', myName);
+  } else {
+    if (lblPLast) lblPLast.innerHTML = t('Your last score:');
+    if (lblPTotal) lblPTotal.innerHTML = t('Your total score:');
+  }
+
   // Level is only relevant in single-player; disable controls in multiplayer
   var levelRow = document.querySelector('tr.level');
   if (levelRow) {
