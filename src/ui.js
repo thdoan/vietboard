@@ -398,6 +398,7 @@ async function loadHighScore(sKey, nIndex) {
     var isComputerEntry = entry.playerId === 'computer' ||
       entry.player === 'Computer' || entry.player === t('Computer');
     if (isComputerEntry && entry.sessionId) {
+      // Computer entry: find companion player entry by sessionId
       var entries = g_highscores[sKey] || [];
       for (var j = 0; j < entries.length; ++j) {
         if (entries[j] && entries[j].sessionId === entry.sessionId && entries[j].playerId !== 'computer') {
@@ -405,6 +406,9 @@ async function loadHighScore(sKey, nIndex) {
           break;
         }
       }
+    } else if (!isComputerEntry) {
+      // Player entry: use it directly
+      hsPlayerName = entry.player || '';
     }
 
     if (entry.session) {
