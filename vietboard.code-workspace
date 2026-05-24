@@ -7,9 +7,10 @@
   "settings": {
     "search.exclude": {
       "**/*.bat": true,
+      "**/archive": true,
       "**/pics": true,
       "**/redipsdrag.js": true,
-      "**/sounds": true
+      "**/sounds": true,
     }
   }
 }

@@ -51,7 +51,7 @@ async function requestGeneratedPlayerName() {
   if (response.ok) {
     generatedName = await response.text() + (+new Date() + '').slice(-randInt(2, 4));
   } else if (DEBUG) {
-    console.warn(t('Failed to generate nickname.'), response.status || '', '\n' + t('Using fallback method...'));
+    console.warn('Failed to generate nickname.', response.status || '', '\nUsing fallback method...');
   }
 
   return generatedName || generateUniquePlayerName();
@@ -302,7 +302,7 @@ function initSupabase() {
   if (window.supabase) {
     window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   } else {
-    if (DEBUG) console.error(t('Supabase library not loaded.'));
+    if (DEBUG) console.error('Supabase library not loaded.');
   }
 }
 initSupabase();
@@ -711,7 +711,7 @@ async function loadGlobalHighScores() {
       try {
         data.scores = JSON.parse(JSON.stringify(data.scores));
       } catch (e) {
-        console.warn('Corrupted highscores from Supabase, stripping bad keys');
+        if (DEBUG) console.warn('Corrupted highscores from Supabase, stripping bad keys');
         for (var k in data.scores) {
           try { JSON.stringify(data.scores[k]); } catch (e2) { delete data.scores[k]; }
         }
