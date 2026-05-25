@@ -73,6 +73,7 @@ rm -f "$TMP_ENGINE" "$TMP_MULTIPLAYER"
 # ---------------------------------------------------------------------------
 echo "[7/8] Copying static assets..."
 cp index.html play/
+cp changelog.txt play/
 cp -a pics/* play/pics/
 cp -a sounds/* play/sounds/
 

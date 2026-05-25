@@ -429,6 +429,7 @@ html.mobile #lobby::after {
   width: 24%;
   border-radius: var(--border-radius-sm);
   color: rgb(var(--rgb-white));
+  cursor: pointer;
   font: normal 180%/1.1 'Maven Pro', Arial, sans-serif;
 }
 #score-opponent {
@@ -755,6 +756,7 @@ table.board td .drag,
   background: none;
   border: none;
   color: rgb(var(--rgb-white));
+  cursor: pointer;
   padding: 0;
 }
 #back svg {
@@ -1029,9 +1031,6 @@ html:not(.mobile) #modal-container.wide {
   background: url(../pics/bag_bg.jpg);
 }
 
-.changelog #modal-content h3 {
-  text-align: center;
-}
 .changelog #modal-content :is(h4, h5, ul) {
   margin: 0;
 }
