@@ -1,0 +1,131 @@
+CHANGELOG
+=========
+
+v3.18
+- Cleaned up debugging messages
+- Optimized changelog modal
+- Fixed incomplete changelog
+- Fixed incorrect version numbers
+- Fixed missing pointer cursors
+
+v3.14
+- Improved changelog modal
+- Fixed player names in old sessions
+
+v3.12
+- Added words: ly, ởn, nhò, báp, nhữ, nhự, dũ, nhũi, ngừ, khần, tọe, ầu, hin
+- Removed words: hộn, đin, den, ghệch
+
+v3.10
+- Improved game balance
+
+v3.05
+- Fixed modal height issue
+
+v3.04
+- Fixed high score sync regressions
+
+v3.02
+- Improved high score syncing
+- Fixed broken high score links
+
+v3.00
+- Added multiplayer!
+- Implemented global high scores
+- Implemented official end game rules
+- Implemented coin flip for SP and MP games
+- Removed unnecessary page reloads
+- Revamped button icons
+- Fixed broken word lookup
+
+v2.00
+- Added high scores table
+- Fixed ability to drag opponent's tile
+- Fixed "move" cursor on non-draggable tiles
+
+v1.33
+- Improved computer swapping logic
+- Improved randomness across all levels
+- Fixed computer match pattern algorithm
+
+v1.30
+- Enhanced computer player so it swaps instead of passes
+
+v1.29
+- Fixed game info left column width changes after first move
+
+v1.28
+- Fixed not being able to change bonuses layout
+
+v1.27
+- Added restart button
+- Replaced top button labels with icons
+
+v1.25
+- Fixed session not saved if computer passes
+
+v1.24
+- Updated game info to show player score first
+
+v1.23
+- Fixed mobile scoreboard not updated on game over
+
+v1.22
+- Added auto-save for game sessions
+- Added support for compound stem definitions
+- Increased randomness to be more human-like
+- Fixed player Pass/Swap event overcounting
+- Fixed ability to change level while playing
+- Fixed letter picker not shown after moving Blank tile
+
+v1.16
+- Fixed Vietnamese button text overflow
+
+v1.15
+- Increased space tile value from 1 to 10 points
+
+v1.14
+- Added ability to play part of a compound word
+
+v1.13
+- Added Snowflake bonuses layout
+
+v1.12
+- Fixed incorrect final scores in game info column
+
+v1.11
+- Added version number
+
+v1.10
+- Added Flower Garden bonuses layout
+- Added High Scores button (placeholder)
+- Moved desktop logo to the left side
+- Updated desktop logo to be consistent with mobile
+- Fixed Vietnamese text wrapping on iPad
+
+v1.08
+- Updated desktop logo to be consistent with mobile
+
+v1.07
+- Added Flower Garden bonuses layout
+
+v1.06
+- Fixed Vietnamese text wrapping on iPad
+
+v1.05
+- Added Shuffle button to rearrange tiles in the rack
+
+v1.04
+- Moved Pass button farther away from Play button
+- Fixed possibility to swap more tiles than what's in the bag
+
+v1.02
+- Replaced email with Facebook Page
+
+v1.01
+- Added new "Game Over" experience
+
+v1.00
+- Initial release!
+- Added option to change bonuses layout
+- Added update notfication
